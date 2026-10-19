@@ -19,9 +19,14 @@ Status: research and toolchain; the PC builds and passes the gate (§4). No feat
 
 ## Decisions so far (2026-10-19)
 
-- **Split world** (option B in §2) for neighbour towns.
-- **No islands needed for it.** Neighbour towns start on a normal map split in two by a border
-  line. `island_maps` is a separate, optional feature for later.
+- **Split world** (option B in §2) for neighbour towns: each PC still simulates only its own town.
+- **Full mixing, no border** (the user, 2026-10-19, superseding the border line): both towns build
+  anywhere on one shared map. Land is claimed through the server (first come, first served),
+  resources are shared (a tree felled in one town is gone in the other), the neighbour's roads
+  are real roads in your copy, the neighbour's buildings block your citizens' paths, and the
+  neighbour's buildings and roads draw with a colour tint. Design: "Mixed world design" in §2.
+  The border line is no longer an intermediate step.
+- **No islands needed for it.** `island_maps` is a separate, optional feature for later.
 - **Machines**: the user's Windows PC (their normal Banished PC) is where the game is built,
   tested and played; development moves there (clone of this fork, Claude Code on the PC). The
   user's Apple Silicon Mac can cross-build the Windows exe (`tools/build.sh build --cross`) and
@@ -119,35 +124,60 @@ Class B, not C: the save already stores the finished terrain and water mesh
 - **B. Split world (chosen)**: each PC runs an ordinary single-player game containing **only
   its own town**; the server is the postman.
 
-### Split world design
+### Mixed world design (chosen 2026-10-19: full mixing)
+Each PC still runs only its own town; what is shared is the LAND. Your copy holds your real
+town plus a mirror of the neighbour's buildings, roads and resource changes.
 - **Map**: same seed and settings from the server; the joining client checks the world hash.
-- **Border**: a line splitting the map in two, placed so the river runs through both halves
-  (both players get a trading post and fishing). Rules: no buildings, roads, bridges or fences
-  past it (`Map::TestPlacement`, `Player/tool_base_path.cpp:101`, plus the road tool
-  `roadtool.cpp:~150`, bridge and fence tools; the on-map check is `tool_base_ray.cpp:357`).
-  Citizens may still wander over in your own copy; harmless, each copy is separate.
-- **Start towns**: the start spiral (`StartTown_FindSpawnTile`, `starttown.cpp:368`) starts from
-  the centre of the player's own half. Note the tree/stone scatter draws from the gameplay RNG
-  after the founding spawns (`starttown.cpp:4619, 4640-4652`), so trees in the other half can
-  differ between the two screens. Harmless scenery.
+- **Land claims (the server is the referee)**: placing a building, road, bridge or fence first
+  marks its tiles "pending" locally and sends a claim; the room's Durable Object (one request at
+  a time, so it can never grant the same tile twice) answers granted / refused and tells the
+  other town. Refused: the plan is cancelled and its materials refunded. Your game rejects
+  placement on tiles the neighbour holds, in the same checks a border would have used
+  (`Map::TestPlacement`, `Player/tool_base_path.cpp:101`, the road tool `roadtool.cpp:~150`,
+  bridge and fence tools; the on-map check is `tool_base_ray.cpp:357`). Claims persist in the
+  Durable Object, so they hold while a player is offline. **Open**: building while offline
+  (proposal: only on tiles you already hold).
+- **Shared resources**: trees, stone, iron, and later fish and game. **Prerequisite**: both copies
+  must start with the SAME scatter, but the tree/stone scatter draws from the gameplay RNG after
+  the founding spawns (`starttown.cpp:4619, 4640-4652`), so today it differs between screens.
+  Fix: one town generates the scatter and the other receives it (or the scatter gets its own
+  seeded RNG, behind the extension). After that, every change is an event (tree felled / planted /
+  grown, deposit mined out); a resource removed by the neighbour must leave your copy through the
+  game's own removal path so a citizen mid-job cancels cleanly. Two towns taking the same tree at
+  once: a resource claim through the server, or accept a rare double harvest (open).
+- **Neighbour roads are real**: in your copy they are actual road tiles (speed bonus, pathing),
+  owned by the neighbour (you cannot remove them). **Unknown**: how roads are stored (tile flags
+  or entities) and whether a road can exist without your town manager owning it.
+- **Neighbour buildings block paths**: their footprints are written into your map's occupancy /
+  pathing so your citizens walk around them and zones (`FillZones`,
+  `Action/action_pf_roots_road.cpp:56-93`) stay correct. They are still NOT your entities: your
+  town manager must not count their houses, storage or jobs. This is the main unknown (it was
+  already, for look-only ghosts, and now the ghosts must also be solid). Fields, orchards and
+  pastures the same way.
+- **Tint**: the neighbour's buildings and roads draw with a colour tint (one colour per player),
+  a per-instance colour multiplier in our own DX11 renderer (`src/render/dx11/`, our code, so no
+  retail shader content). Models come from the user's own install at run time.
+- **Start towns**: two start spots, far enough apart, found by the start spiral
+  (`StartTown_FindSpawnTile`, `starttown.cpp:368`) from two different points; the second town's
+  founding land is claimed like any other.
+- **Not shared** (each copy is separate): citizens, livestock, fire, disease, weather events.
 - **Trade**: you pack goods into an export at your Trading Post (removed from storage at once,
   so nothing is duplicated). The neighbour's post gets a merchant boat carrying exactly those
   goods (write its `manifest` / `tradeId` directly, `Component/tradecomponent_dock.cpp:245`) and
   barters with it in the normal Trade window (`Dialog/tradeui*.cpp`). Payment sails back;
   unsold goods come home.
-- **Migrants**: "send a family" from the Town Hall: they walk to the border and leave. They
-  arrive next door as an ordinary nomad group spawned at the border on that side, accepted or
+- **Migrants**: "send a family" from the Town Hall: they walk to the map edge and leave. They
+  arrive next door as an ordinary nomad group spawned at the map edge, accepted or
   refused in the usual window (`ImmigrationComponent`, Accept :459, `NomadComponent::ConvertToCitizen`
   :406). Adding citizens directly: `Game_SpawnCitizens_Impl` (`Dialog/debugui.cpp:409`).
 - **Messages**: a chat line and neighbour news in the event log.
-- **Ghosts**: every ~10 s each side sends {template name, position, rotation, built %} for its
-  buildings; your game draws them in the other half as look-only ghosts, and clears trees under
-  them in your copy. **Main unknown**: ghosts must not be real entities, or your town manager
-  would count their houses and barns as yours. Fallback: minimap markers + a Neighbour panel.
-  The instant-build path for real buildings is the `placeStructure` lambda (`starttown.cpp:1425-1790`).
+- **Mirror updates**: claims, placements, build progress, demolitions and resource changes are
+  sent as events when they happen, plus a full snapshot {template name, position, rotation,
+  built %} every ~10 s to repair anything missed. The instant-build path for real buildings is
+  the `placeStructure` lambda (`starttown.cpp:1425-1790`).
 - **Time**: each town keeps its own clock and speed; optional "speed lock" (both at the slower
   player's speed, pause pauses both).
-- **Saves**: still single-player saves, plus a class C tail record (room, half, undelivered
+- **Saves**: still single-player saves, plus a class C tail record (room, cached claims, the neighbour mirror, undelivered
   parcels, last neighbour snapshot). `ExtSave_WriteTail` / `ExtSave_ReadTail`
   (`Game/gameupdateloop_serialize.cpp:777, 794`) write and read the tail, but **no extension fills
   a payload yet** (`src/ext/savetail.*` leaves it empty): that plumbing comes first.
@@ -160,9 +190,11 @@ Class B, not C: the save already stores the finished terrain and water mesh
 - **M0 Plumbing**: game built and running on the PC (done 2026-10-19); relay server up; the game connects, joins
   a room, shows a chat line in the event log; class C payload plumbing.
 - **M1 Letters** (works even on two separate maps): trade parcels and migrants.
-- **M2 Shared map**: seed from the server, hash check, half-aware start, border rule, ghosts
-  (or the minimap fallback).
-- **M3 Extras**: speed lock, visible boats/walkers carrying parcels and migrants.
+- **M2 Shared map**: seed from the server, hash check, two start towns, land claims, the
+  neighbour's buildings mirrored, tinted and solid.
+- **M3 Shared roads and resources**: real neighbour roads; the same resource scatter on both
+  screens; resource change events.
+- **M4 Extras**: speed lock, visible boats/walkers carrying parcels and migrants.
 
 ---------------------------------------------------------------------------------------------
 
@@ -224,7 +256,7 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
    in `settings.cfg` or a Join dialog. Env flags stay banned (`Opt()`).
 3. Class B/C are off by default and locked per game: fine, the user switches them on.
 4. CLAUDE.md's goal is a faithful port: kept; CLAUDE.md now points here.
-5. No game content in the tree: no conflict (ghosts use the user's own install; the server
+5. No game content in the tree: no conflict (the mirrored, tinted neighbour buildings use the user's own install; the server
    sees only names and numbers).
 6. GPLv3: sharing the exe with the friend = distribution; the public fork covers source access.
 
