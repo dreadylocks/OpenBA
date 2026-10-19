@@ -13,7 +13,7 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status: research and toolchain only. No feature code exists yet. Next steps are in §6.
+Status: research and toolchain; the PC builds and passes the gate (§4). No feature code exists yet. Next steps are in §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -26,6 +26,8 @@ Status: research and toolchain only. No feature code exists yet. Next steps are 
   tested and played; development moves there (clone of this fork, Claude Code on the PC). The
   user's Apple Silicon Mac can cross-build the Windows exe (`tools/build.sh build --cross`) and
   will host / test the relay server work if convenient.
+- **Server: Cloudflare Workers + Durable Objects** (the user, 2026-10-19), not a Python relay
+  behind Tailscale: always on, free tier, TLS included, no port on anyone's PC. See §3.
 - **Fork**: `dreadylocks/OpenBA`, public (also covers the GPL when the exe is shared with the
   friend). Work branch: `neighbour-towns`.
 
@@ -155,7 +157,7 @@ Class B, not C: the save already stores the finished terrain and water mesh
   game only drains a queue, so a slow network never stalls the sim.
 
 ### Milestones
-- **M0 Plumbing**: game built and running on the PC; relay server up; the game connects, joins
+- **M0 Plumbing**: game built and running on the PC (done 2026-10-19); relay server up; the game connects, joins
   a room, shows a chat line in the event log; class C payload plumbing.
 - **M1 Letters** (works even on two separate maps): trade parcels and migrants.
 - **M2 Shared map**: seed from the server, hash check, half-aware start, border rule, ghosts
@@ -166,15 +168,19 @@ Class B, not C: the save already stores the finished terrain and water mesh
 
 ## 3. The relay server
 
-- **Transport**: plain TCP, length-prefixed messages; one network thread in
-  `src/ext/neighbour/`, plain sockets behind a small `src/platform` seam (Winsock / BSD). No
-  third-party library.
-- **Server**: ~200 lines of Python 3 standard library (asyncio). A room = two seats + a shared
-  password; forwards messages; **keeps parcels for an offline player**; remembers each town's
-  last snapshot. Runs as a systemd service (or a one-line container) on one TCP port, e.g. 7777.
-- **Safety**: preferably Tailscale for the server and both players (no public port); otherwise
-  TLS (`ssl`) + the room password. The game validates every incoming message (sizes, counts,
-  names, positions): bad data must never crash a town.
+Chosen 2026-10-19: **Cloudflare Workers + Durable Objects** (free plan; check its current
+limits before relying on them). The earlier plan (plain TCP to a Python asyncio relay behind
+Tailscale) is the fallback.
+- **Transport**: WebSocket over TLS (`wss://`), because Workers accept HTTP/WebSocket only, not
+  raw TCP. One network thread in `src/ext/neighbour/`, behind a small `src/platform` seam: on
+  Windows the OS's own WinHTTP WebSocket client (`WinHttpWebSocketCompleteUpgrade`, Windows 8+),
+  so still no third-party library; the Linux build gets a stub (or a later client).
+  Keep the message format separate from the transport, so the Tailscale/TCP fallback is a swap.
+- **Server**: a small Worker (TypeScript) plus one Durable Object per room. A room = two seats
+  + a shared password; forwards messages; **keeps parcels for an offline player** in the
+  object's storage; remembers each town's last snapshot. Lives in `tools/neighbour_server/`.
+- **Safety**: TLS from Cloudflare + the room password. The game validates every incoming
+  message (sizes, counts, names, positions): bad data must never crash a town.
 - **Later, if walkers are streamed**: ENet (MIT, ~6 C files in `third_party/`).
   GameNetworkingSockets (BSD) is licence-clean but overkill (protobuf + OpenSSL under MinGW).
 - A "fake neighbour" script that plays the other town lets one person test trade and migrants.
@@ -194,6 +200,13 @@ set `BANISHED_DIR` if elsewhere). One-time:
    `git submodule update --init`, then `tools/build.sh run` (builds, deploys, starts a new game).
 5. The exe needs `FrancophilSans.ttf` and `FrancophilSans-Bold.ttf` beside it or installed: they
    ship in the upstream `OpenBA-v1.0.0.zip` release, never in the tree.
+
+State on the PC (2026-10-19): Banished from Steam at
+`C:/Program Files (x86)/Steam/steamapps/common/Banished` (`BANISHED_DIR`); Python 3.13 (python.org,
+`python` only, no `python3`), pip cmake 4.4.4 + ninja 1.13.2, MSYS2 UCRT64 GCC 16.2.0 first on the
+user PATH. Debug build: 0 errors, 156 warnings; `tools/build.sh unit` 1174 tests, 0 failures,
+5 skipped (ToolKit, fonts); the gate passes after `4c9b37a99` (boot load ~25 s before frame 1
+there, which the old 20 s watchdog budget killed). The upstream v1.0.0 exe also starts a new game.
 
 **Mac (secondary).** `brew install mingw-w64 cmake ninja`, then
 `tools/build.sh build [flavour] --cross` -> `build/cross-<flavour>/OpenBA.exe`
@@ -222,7 +235,7 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 1. Set up the PC (§4) and get `tools/build.sh run` to a loaded new game. Also confirm the
    upstream release exe runs there, to have a known-good baseline.
 2. M0: class C payload plumbing in `src/ext/savetail.*`; `src/ext/neighbour/` skeleton (registry
-   row, class C, off by default); the socket seam; the Python relay server (`tools/neighbour_server/`
-   or similar) and the fake-neighbour script; a chat line in the event log.
+   row, class C, off by default); the WebSocket seam; the Cloudflare Worker + Durable Object
+   (`tools/neighbour_server/`) and the fake-neighbour script; a chat line in the event log.
 3. Ask the user before: adding string settings keys / a Join dialog, opening any network port,
    and pushing.
