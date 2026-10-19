@@ -86,21 +86,24 @@ PUBLISH_SECS=$(( (PUBLISH_MS + 999) / 1000 ))
 # ---------------------------------------------------------------------------
 # DERIVE the hang budgets from the same publisher, for the same reason. The
 # watchdog declares them as
-#     const unsigned kHungRunningSec  = <n>;
-#     const unsigned kHungQuittingSec = <n>;
+#     const unsigned kHungFirstFrameSec = <n>;   (before frame 1: the boot load)
+#     const unsigned kHungRunningSec    = <n>;
+#     const unsigned kHungQuittingSec   = <n>;
 # and they are printed beside every verdict so a HUNG (or a green) is quotable
 # with the number that produced it.
 # ---------------------------------------------------------------------------
+HUNG_FIRST_SECS=""
 HUNG_RUN_SECS=""
 HUNG_QUIT_SECS=""
 if [ -f "$WATCHDOG_SRC" ]; then
+    HUNG_FIRST_SECS="$(sed -n 's/^ *const unsigned kHungFirstFrameSec *= *\([0-9][0-9]*\);.*/\1/p' "$WATCHDOG_SRC" | head -1)"
     HUNG_RUN_SECS="$(sed -n 's/^ *const unsigned kHungRunningSec *= *\([0-9][0-9]*\);.*/\1/p' "$WATCHDOG_SRC" | head -1)"
     HUNG_QUIT_SECS="$(sed -n 's/^ *const unsigned kHungQuittingSec *= *\([0-9][0-9]*\);.*/\1/p' "$WATCHDOG_SRC" | head -1)"
 fi
-if [ -n "$HUNG_RUN_SECS" ] && [ -n "$HUNG_QUIT_SECS" ]; then
-    HUNG_SRC="derived: running ${HUNG_RUN_SECS}s / quitting ${HUNG_QUIT_SECS}s"
+if [ -n "$HUNG_FIRST_SECS" ] && [ -n "$HUNG_RUN_SECS" ] && [ -n "$HUNG_QUIT_SECS" ]; then
+    HUNG_SRC="derived: first frame ${HUNG_FIRST_SECS}s / running ${HUNG_RUN_SECS}s / quitting ${HUNG_QUIT_SECS}s"
 else
-    HUNG_RUN_SECS="?"; HUNG_QUIT_SECS="?"
+    HUNG_FIRST_SECS="?"; HUNG_RUN_SECS="?"; HUNG_QUIT_SECS="?"
     HUNG_SRC="UNKNOWN -- could NOT read kHung*Sec from $WATCHDOG_SRC"
 fi
 
@@ -197,7 +200,9 @@ probe_once() {
     # The heartbeat, printed on EVERY status line: `age` says the watchdog is
     # alive, `frame`/`stale` say the GAME is. A green with a climbing stale is
     # the interesting case and must not need a second command to see.
-    beat="frame=${frame:-?} stale=${stale:-?}s/${HUNG_RUN_SECS}s"
+    # Before frame 1 the watchdog allows the longer boot-load budget.
+    runb="$HUNG_RUN_SECS"; [ "${frame:-}" = 0 ] && runb="$HUNG_FIRST_SECS"
+    beat="frame=${frame:-?} stale=${stale:-?}s/${runb}s"
 
     case "$state" in
         RUNNING)        echo "RUNNING  [$fresh $beat] ($line)"; return 0 ;;
@@ -206,7 +211,7 @@ probe_once() {
                         return 0 ;;
         HUNG)           # detail= carries the phase it froze in, which is what picks
                         # the budget: QUITTING gets the teardown one.
-                        hb="$HUNG_RUN_SECS"
+                        hb="$runb"
                         [ "$detail" = "QUITTING" ] && hb="$HUNG_QUIT_SECS"
                         echo "HUNG  the main loop has not completed a frame for ${stale:-?}s."
                         echo "      phase: $detail   [frame=${frame:-?} stale=${stale:-?}s/${hb}s; hang budgets $HUNG_SRC]"

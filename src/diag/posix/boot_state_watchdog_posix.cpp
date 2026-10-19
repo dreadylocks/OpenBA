@@ -8,7 +8,7 @@
 //   STATE=<state> pid=<n> uptimeSec=<n> frame=<n> stale=<n> detail=<text>
 //
 // with the same states (BOOTING / RUNNING / QUITTING / HUNG; EXITED from Stop()), the
-// same frame heartbeat (BootState_MarkFrame from Engine::MainLoop::Run), the same two
+// same frame heartbeat (BootState_MarkFrame from Engine::MainLoop::Run), the same three
 // hang budgets and the same one-second publish interval. tools/boot_state.sh DERIVES the
 // interval and the budgets from the Windows file's `Sleep(1000);` and `kHung*Sec` lines;
 // the constants below must stay equal to those (they are).
@@ -66,10 +66,11 @@ bool                  g_threadStarted = false;
 uint64_t              g_startMs       = 0;
 pid_t                 g_mainTid       = 0;
 
-// The same two budgets as src/diag/win/boot_state_watchdog.cpp (tools/boot_state.sh
+// The same three budgets as src/diag/win/boot_state_watchdog.cpp (tools/boot_state.sh
 // reads them from that file).
-const unsigned kHungRunningSec  = 20;   // BOOTING/RUNNING: 20s with no new frame
-const unsigned kHungQuittingSec = 45;   // QUITTING: teardown renders no frames at all
+const unsigned kHungFirstFrameSec = 90; // BOOTING/RUNNING before frame 1: the boot resource load
+const unsigned kHungRunningSec    = 20; // BOOTING/RUNNING: 20s with no new frame
+const unsigned kHungQuittingSec   = 45; // QUITTING: teardown renders no frames at all
 
 uint64_t NowMs() {
     timespec ts;
@@ -237,7 +238,8 @@ void* WatchdogThread(void*) {
 
         const char* phase = quitting ? "QUITTING"
                                      : (g_startupComplete.load() ? "RUNNING" : "BOOTING");
-        const unsigned budget = quitting ? kHungQuittingSec : kHungRunningSec;
+        const unsigned budget = quitting ? kHungQuittingSec
+                              : (frame == 0 ? kHungFirstFrameSec : kHungRunningSec);
         const bool hung = staleSec >= budget;
         const char* state = hung ? "HUNG" : phase;
 

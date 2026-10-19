@@ -56,7 +56,10 @@
 //  * Loading screens do NOT trip it. The loader loops, the splash and the menu
 //    DialogLoopT all tick through MainLoop::Run's frame loop, so the counter advances
 //    across a large-map load exactly as it does in game. (Verified on a
-//    BANISHED_MAP_SIZE=large autostart run.)
+//    BANISHED_MAP_SIZE=large autostart run.) The ONE exception is the boot load
+//    before frame 1: the first GameLoaderLoop frame waits (System::Thread::WaitForFinish)
+//    for the loader thread's resource pass, which on a slower PC with the debug build
+//    takes ~25s. That phase gets its own, longer budget (kHungFirstFrameSec).
 //  * `UI::ShowDialog` pumps its OWN message loop, which never reaches MainLoop::Run and
 //    therefore renders no heartbeat. An in-game modal on an UNATTENDED run WILL read as
 //    HUNG after kHungRunningSec, AND THAT IS INTENDED: nobody is there to click it, so
@@ -111,8 +114,9 @@ DWORD         g_mainThreadId    = 0;
 // publisher changes it, with nothing to notice. Keep the shape of these two
 // declarations (`const unsigned kHung<Phase>Sec = <n>;`) if you edit them.
 // ---------------------------------------------------------------------------
-const unsigned kHungRunningSec  = 20;   // BOOTING/RUNNING: 20s with no new frame
-const unsigned kHungQuittingSec = 45;   // QUITTING: teardown renders no frames at all
+const unsigned kHungFirstFrameSec = 90; // BOOTING/RUNNING before frame 1: the boot resource load
+const unsigned kHungRunningSec    = 20; // BOOTING/RUNNING: 20s with no new frame
+const unsigned kHungQuittingSec   = 45; // QUITTING: teardown renders no frames at all
 
 struct DialogScan {
     DWORD  pid;
@@ -326,7 +330,8 @@ DWORD WINAPI WatchdogThread(LPVOID) {
         const char* phase = quitting
             ? "QUITTING"
             : (InterlockedCompareExchange(&g_startupComplete, 0, 0) ? "RUNNING" : "BOOTING");
-        const unsigned budget = quitting ? kHungQuittingSec : kHungRunningSec;
+        const unsigned budget = quitting ? kHungQuittingSec
+                              : (frame == 0 ? kHungFirstFrameSec : kHungRunningSec);
         const bool hung = !blocked && (staleSec >= budget);
 
         const char* state = blocked ? "BLOCKED_DIALOG" : (hung ? "HUNG" : phase);
