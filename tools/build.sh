@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tools/build.sh -- the one build / deploy / run entry point over the CMake build (2026-10-11).
 #
-# usage: tools/build.sh <command> [flavour] [--jobs N]
+# usage: tools/build.sh <command> [flavour] [--jobs N] [--cross]
 #   build   [flavour]   configure build/cmake-<flavour> if absent, build OpenBA
 #   unit    [flavour]   build the unit tests and run them (exit = the suite's exit)
 #   deploy  [flavour]   build + copy the exe to the game directory (BANISHED_DIR), then
@@ -12,6 +12,10 @@
 #   clean   [flavour]   remove build/cmake-<flavour> (all four when no flavour is given)
 #   exe     [flavour]   print the exe path (for scripts)
 #   flavours: debug (default) | og | perf | release   -- CMakeLists.txt's BANISHED_FLAVOUR
+#   --cross             (macOS / Linux host) build the WINDOWS exe with mingw-w64 GCC through
+#                       tools/toolchains/mingw-w64-x86_64.cmake, into build/cross-<flavour>.
+#                       build / deploy / exe / clean only: the exe cannot be launched here, so
+#                       deploy just copies it to BANISHED_DIR (e.g. the PC's game folder on a share).
 #
 # Jobs: --jobs N or BUILD_JOBS (default 8 since 2026-10-17, the user: no wide multi-agent builds any more; agents still use 2 -- memory
 # feedback_build_parallelism_low_memory). Extra cmake args: CMAKE_EXTRA (e.g. "-DBANISHED_USE_CCACHE=OFF").
@@ -24,9 +28,11 @@ FLAV="debug"; [ "$CMD" = stress ] && FLAV=perf
 FLAV_GIVEN=0
 case "${1:-}" in debug|og|perf|release) FLAV="$1"; FLAV_GIVEN=1; shift;; esac
 JOBS="${BUILD_JOBS:-8}"
+CROSS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --jobs) JOBS="$2"; shift 2;;
+    --cross) CROSS=1; shift;;
     *) echo "unknown argument $1"; exit 2;;
   esac
 done
@@ -35,6 +41,13 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXT=.exe;; *) EXT="";; esac
 # the CMake cache var BANISHED_GAME_DIR is set from it at configure time.
 BANISHED_DIR="${BANISHED_DIR:-C:/GOG Games/Banished}"
 B="build/cmake-$FLAV"
+CROSS_ARGS=""
+if [ "$CROSS" = 1 ]; then
+  case "$CMD" in build|deploy|exe|clean) ;; *) echo "build.sh $CMD: not with --cross (the exe only runs on Windows)"; exit 2;; esac
+  EXT=.exe
+  B="build/cross-$FLAV"
+  CROSS_ARGS="-DCMAKE_TOOLCHAIN_FILE=tools/toolchains/mingw-w64-x86_64.cmake"
+fi
 EXE="$B/OpenBA$EXT"
 # THE GATE RUNS FAITHFUL (docs/extensions/DESIGN.md §3 "Gates"): every fix and extension off for
 # this one run, through the exe's own command line (retail's `/key:value` parser, System::Configuration),
@@ -45,7 +58,7 @@ FAITHFUL="/profile:faithful"
 configure() {
   [ -f "$B/build.ninja" ] && return 0
   echo "== configure $B (BANISHED_FLAVOUR=$FLAV)"
-  cmake -S . -B "$B" -G Ninja -DBANISHED_FLAVOUR="$FLAV" -DBANISHED_GAME_DIR="$BANISHED_DIR" ${CMAKE_EXTRA:-} || exit 1
+  cmake -S . -B "$B" -G Ninja -DBANISHED_FLAVOUR="$FLAV" -DBANISHED_GAME_DIR="$BANISHED_DIR" $CROSS_ARGS ${CMAKE_EXTRA:-} || exit 1
 }
 build() { # targets...
   configure
@@ -76,6 +89,7 @@ case "$CMD" in
   run-menu) deploy; ( cd "$BANISHED_DIR" && start OpenBA.exe ); echo "Launched (menu only)";;
   stress)  deploy; tools/stress_run.sh --no-build ${STRESS_ARGS:-};;
   clean)   if [ "$FLAV_GIVEN" = 1 ]; then rm -rf "$B"; echo "removed $B"
+           elif [ "$CROSS" = 1 ]; then rm -rf build/cross-debug build/cross-og build/cross-perf build/cross-release; echo "removed build/cross-{debug,og,perf,release}"
            else rm -rf build/cmake-debug build/cmake-og build/cmake-perf build/cmake-release; echo "removed build/cmake-{debug,og,perf,release}"; fi;;
   *) echo "unknown command $CMD"; sed -n 2,15p "$0"; exit 2;;
 esac

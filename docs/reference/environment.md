@@ -30,6 +30,11 @@ Then `tools/build.sh unit` (no game needed beyond item 3's skips) and `tools/bui
 - `uv` v0.9.24; Node.js + npx (for the vscode MCP server)
 - JAVA_HOME `C:\Program Files\Java\jdk-24` (for Ghidra)
 - CMake 4.4 + ninja from pip (`C:\Users\USPC\AppData\Roaming\Python\Python312\Scripts`, on PATH)
+- Cross-build from macOS (the neighbour-towns fork, 2026-10-19): `brew install mingw-w64 cmake ninja`
+  (mingw-w64 14.0.0, GCC 16.2, UCRT by default; CMake 4.4.4, ninja 1.13.2), then
+  `tools/build.sh build [flavour] --cross` -> `build/cross-<flavour>/OpenBA.exe` through
+  `tools/toolchains/mingw-w64-x86_64.cmake`. Build, deploy (a plain copy to `BANISHED_DIR`) and
+  clean only: the exe runs on the Windows PC, not on the Mac. Not the reference compiler (GCC 13.1).
 
 ## Third-party (pinned submodules; run `git submodule update --init` after a clone)
 - **SDL3** at `third_party/SDL`: tag **`release-3.4.18`** (the current stable, 2026-10-02),
