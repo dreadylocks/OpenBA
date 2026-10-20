@@ -13,7 +13,8 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status: research and toolchain; the PC builds and passes the gate (§4). No feature code exists yet. Next steps are in §6.
+Status: M0 done (2026-10-19): the game joins a room on the relay and the neighbour's chat lines
+appear in the event log. What was built, and how to try it: §7. Next steps: §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -187,8 +188,8 @@ town plus a mirror of the neighbour's buildings, roads and resource changes.
   game only drains a queue, so a slow network never stalls the sim.
 
 ### Milestones
-- **M0 Plumbing**: game built and running on the PC (done 2026-10-19); relay server up; the game connects, joins
-  a room, shows a chat line in the event log; class C payload plumbing.
+- **M0 Plumbing** (DONE 2026-10-19, §7): game built and running on the PC; relay server up; the
+  game connects, joins a room, shows a chat line in the event log; class C payload plumbing.
 - **M1 Letters** (works even on two separate maps): trade parcels and migrants.
 - **M2 Shared map**: seed from the server, hash check, two start towns, land claims, the
   neighbour's buildings mirrored, tinted and solid.
@@ -208,7 +209,7 @@ Tailscale) is the fallback.
   Windows the OS's own WinHTTP WebSocket client (`WinHttpWebSocketCompleteUpgrade`, Windows 8+),
   so still no third-party library; the Linux build gets a stub (or a later client).
   Keep the message format separate from the transport, so the Tailscale/TCP fallback is a swap.
-- **Server**: a small Worker (TypeScript) plus one Durable Object per room. A room = two seats
+- **Server**: a small Worker (plain JavaScript, `tools/neighbour_server/src/index.js`) plus one Durable Object per room. A room = two seats
   + a shared password; forwards messages; **keeps parcels for an offline player** in the
   object's storage; remembers each town's last snapshot. Lives in `tools/neighbour_server/`.
 - **Safety**: TLS from Cloudflare + the room password. The game validates every incoming
@@ -252,8 +253,11 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 ## 5. Repo rules that bump into the fork (open, the user decides)
 
 1. `tools/build.sh run` (the gate) needs Windows: fine on the PC.
-2. Extension settings are `ext.<id>=0|1` only; server address / room / password need string keys
-   in `settings.cfg` or a Join dialog. Env flags stay banned (`Opt()`).
+2. Extension settings are `ext.<id>=0|1` only; server address / room / password need string keys.
+   DECIDED (2026-10-19, the user said not to wait on them): `neighbour.server`, `neighbour.room`,
+   `neighbour.password`, `neighbour.name` in `settings.cfg`, read-only, when a game starts
+   (`src/ext/neighbour/neighbour.cpp` ReadConfig). A Join dialog can come later. Env flags stay
+   banned (`Opt()`).
 3. Class B/C are off by default and locked per game: fine, the user switches them on.
 4. CLAUDE.md's goal is a faithful port: kept; CLAUDE.md now points here.
 5. No game content in the tree: no conflict (the mirrored, tinted neighbour buildings use the user's own install; the server
@@ -262,12 +266,51 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 
 ---------------------------------------------------------------------------------------------
 
-## 6. Next steps (for the session on the PC)
+## 6. Next steps
 
-1. Set up the PC (§4) and get `tools/build.sh run` to a loaded new game. Also confirm the
-   upstream release exe runs there, to have a known-good baseline.
-2. M0: class C payload plumbing in `src/ext/savetail.*`; `src/ext/neighbour/` skeleton (registry
-   row, class C, off by default); the WebSocket seam; the Cloudflare Worker + Durable Object
-   (`tools/neighbour_server/`) and the fake-neighbour script; a chat line in the event log.
-3. Ask the user before: adding string settings keys / a Join dialog, opening any network port,
-   and pushing.
+1. DONE: the PC set up (§4); M0 (§7).
+2. The user deploys the relay to their Cloudflare account (`tools/neighbour_server/README.md`:
+   `npx wrangler login`, `npm run deploy`); both players point `neighbour.server` at it.
+3. A way to SEND chat from the game (today only `Neighbour::SendChat` exists, no UI calls it):
+   a small chat box, or a key that opens one.
+4. M1 Letters: trade parcels and migrants (§2), then M2 (shared map, claims, mirrored buildings).
+5. Still ask the user before: pushing, opening a network port beyond 127.0.0.1, deploying.
+
+---------------------------------------------------------------------------------------------
+
+## 7. M0 as built (2026-10-19)
+
+- **Save plumbing** (`src/ext/savetail.*`): `RegisterPayload(id, writer, reader)`. An active class C
+  extension's writer fills its manifest record's payload; `ExtSave_ReadTail` hands each payload to
+  its reader (`DeliverPayloads`). The writer may run on the background-save worker. Still zero
+  bytes with no B / C extension on. Test: `ext_savetail_payload_hooks`.
+- **The extension** (`src/ext/neighbour/`, registry row `neighbour`, class C, off by default,
+  formatVersion 1):
+  - `protocol.*`: the JSON messages (a bounded parser that fails closed), `Sanitize` (printable
+    ASCII for the game's fonts), `RoomUrl`, the save payload (room + last chat number seen).
+  - `link.*`: the connection. One worker thread connects, sends the hello, writes the queue,
+    pings every 25 s and reconnects (2 s doubling to 30 s); a reader thread fills the incoming
+    queue. The main thread only queues and polls.
+  - `link_platform.cpp` + `src/platform/{common/platform_websocket.h, win/websocket_win.cpp,
+    posix/websocket_posix.cpp}`: WinHTTP's WebSocket client (`winhttp` linked); POSIX is a stub
+    that reports "not available".
+  - `neighbour.*`: settings, the four seams (`ResetForGame(this)` / `SelectForGame()` in Load,
+    `BeginFrame()` in Update, `EndGame(this)` in ~GameUpdateLoop, owner-checked like the class
+    lock), and the event log rows.
+- **Event log rows**: appended straight to `EventLog::entries` with our own text, colour (blue =
+  chat, green = joins / leaves, amber = problems), icon `EventIcon0` and eventType 0x7E (no retail
+  writer uses it; the pop-up files it under "other", on by default; retail's log window reads only
+  colour / text / tile, so such a save still loads in retail). Not through `AddEvent`: that needs
+  a string-table id.
+- **The relay** (`tools/neighbour_server/`): see its README. Rooms of two seats, a password set by
+  the first town, the last 200 lines kept, at most 20 replayed to a returning town, a flood guard,
+  pings answered without waking the object. `selftest.mjs`: 10 checks. `fake_neighbour.mjs`: a
+  pretend town.
+- **Verified on the PC**: unit 1184 tests, 0 failures, 5 skipped (10 new); the gate
+  (`/profile:faithful`) loads a new game with the extension off and no `[Neighbour]` line; with
+  `ext.neighbour=1` against the local relay + the fake town, a new game joins the room, gets the
+  lines, and a clean quit tells the fake town "has left" (exit in ~4 s, no hang log); an autosave
+  holds the 19-byte payload and a load replays only lines newer than the save. Not checked by
+  eye: the rows in the event log window (the logs show each one posted).
+- **Not done**: sending chat from the game (no UI yet); the Cloudflare deploy (needs the user's
+  account); a resave-gate golden under the extension (no `Gate.sav` on this PC).
