@@ -232,6 +232,8 @@ target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -static -static-libgcc -stat
 # SDL3's own system libraries still bring it.
 # gdi32: the run-time font rasteriser (src/platform/win/font_raster_win.cpp, KITFREE RSCFONT).
 target_link_libraries(OpenBA PRIVATE user32 dbghelp shell32 gdi32)
+# winhttp: the WebSocket seam (src/platform/win/websocket_win.cpp) for ext.neighbour.
+target_link_libraries(OpenBA PRIVATE winhttp)
 # SDL3 static: the target carries its include directory and its system libraries
 target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static)
 # xWMA -> PCM (third_party/wmadec): the target carries its include directory

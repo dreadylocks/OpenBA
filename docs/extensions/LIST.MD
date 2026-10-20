@@ -25,3 +25,4 @@
 | Ext B | Batched walking, faster | Precache walking to save animation cycles. |
 | Ext B | Spread warmth searches | At high speed, cold citizens pick a warm house a few frames later instead of all in one frame. |
 | Ext B | Split the job reassignment | At high speed, the five-minute job assignment runs one frame after the housing pass. |
+| Ext C | Neighbour towns | (this fork) Connects your town to a friend's through a relay server; their messages appear in the event log. `docs/fork/NEIGHBOUR_TOWNS.md`. |

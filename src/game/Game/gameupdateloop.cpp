@@ -65,6 +65,7 @@
 #include "ext/walk_batch/walk_batch.h" // EXT SEAM: ext.walk_batch (NOT RETAIL)
 #include "ext/spread_warmth/spread_warmth.h"   // EXT SEAM ext.spread_warmth (class B): SpreadWarmth::BeginFrame
 #include "ext/drain_split/drain_split.h"       // EXT SEAM ext.drain_split (class B): DrainSplit::BeginFrame
+#include "ext/neighbour/neighbour.h"           // EXT SEAM ext.neighbour (class C): Neighbour::BeginFrame / EndGame
 #include "Game/terrain_sidecar.h" // the terrain-type mirror's teardown (faithful perf work)
 #include <cstdio>
 #include <cstring>
@@ -577,6 +578,7 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     WalkBatch::BeginFrame();            // EXT SEAM: ext.walk_batch (A) / ext.walk_batch_grid (B) read once per frame
     SpreadWarmth::BeginFrame();         // EXT SEAM: ext.spread_warmth (B) read once per frame, its budget reset
     DrainSplit::BeginFrame();           // EXT SEAM: ext.drain_split (B) read once per frame, the owed half's frame count
+    Neighbour::BeginFrame();            // EXT SEAM: ext.neighbour (C) what the relay sent -> the event log; idle when off
 
     // [EVENTS] RETIRED: the BANISHED_LIVE_EVENTS resource-shortage scanner used to
     // run here (a second port of FUN_14008c100 via EventLog_CheckResourceShortages).
@@ -2268,6 +2270,8 @@ GameUpdateLoop::~GameUpdateLoop() {
     // EXT SEAM (NOT RETAIL): release this loop's class B / C lock (ignored
     // when a reload's new loop already holds it).
     Ext::UnlockForGame(this);
+    // ext.neighbour: hang up (ignored when a reload's new loop already owns the line).
+    Neighbour::EndGame(this);
 }
 
 // The exe cell 0x1401c3dd8 (B3R STORAGE; was the file-static

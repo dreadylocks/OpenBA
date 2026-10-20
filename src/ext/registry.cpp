@@ -179,6 +179,15 @@ const Entry kEntries[] = {
       "Blends the end of each looping ambient sound into its start, removing the dropout at the loop "
       "point. Takes effect at the next start.",
       0, [](State& s) -> bool& { return s.ext.seamless_loops; } },
+    // NEIGHBOUR TOWNS (this fork; docs/fork/NEIGHBOUR_TOWNS.md): two players' towns talk through
+    // a relay server (neighbour.* keys in settings.cfg). Class C: the town's room state is in the
+    // save's tail record (src/ext/neighbour/protocol.h SavedState).
+    { "neighbour", Tier::Extension, Class::C, false,
+      "Neighbour towns",
+      "Connects this town to a friend's town through a relay server (set neighbour.server, "
+      "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
+      "appear in the event log.",
+      1, [](State& s) -> bool& { return s.ext.neighbour; } },
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.

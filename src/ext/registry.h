@@ -88,6 +88,7 @@ struct Extensions {
     bool async_save_compress = false; // class A: the IO::CompressedStream seam (docs/extensions/handins/HITCH_SAVE.md)
     bool drain_split = false; // class B: src/ext/drain_split/ (docs/extensions/handins/HITCH_DRAINSPLIT.md)
     bool background_save = false; // class A: src/ext/background_save/ (docs/extensions/handins/HITCH_SAVESNAP.md)
+    bool neighbour = false; // class C: src/ext/neighbour/ (docs/fork/NEIGHBOUR_TOWNS.md): two towns, one relay
 #ifdef BANISHED_UNIT_TEST
     // tests/unit/ext_registry_test.cpp only: one extension per class, so the
     // lock semantics are tested before a real extension exists. Not in the exe.
