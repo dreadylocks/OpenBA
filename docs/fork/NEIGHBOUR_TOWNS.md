@@ -13,10 +13,12 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status (2026-10-20): M0, M1 and most of M2 done. A Multiplayer lobby on the main menu creates and
-joins rooms; both towns build the same map; the neighbour's land is claimed and their buildings
-are drawn in your game. In game, N opens the Neighbour panel (chat, goods, a family). What was
-built and how it was tested: §7 (M0), §8 (M1), §9 (M2). Next steps: §6.
+Status (2026-10-20): M0 to M3 done, except a colour tint on the neighbour's buildings. A
+Multiplayer lobby on the main menu creates and joins rooms; both towns build the same map with the
+same forests; the neighbour's land is claimed, their buildings are drawn in your game and are solid,
+their roads are real roads, and a tree felled or planted in one town is felled or planted in the
+other. In game, N opens the Neighbour panel (chat, goods, a family). What was built and how it was
+tested: §7 (M0), §8 (M1), §9 (M2), §10 (M2 leftovers and M3). Next steps: §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -194,11 +196,11 @@ town plus a mirror of the neighbour's buildings, roads and resource changes.
   game connects, joins a room, shows a chat line in the event log; class C payload plumbing.
 - **M1 Letters** (DONE 2026-10-19, §8; works on two separate maps): goods parcels, families,
   chat from the game (the Neighbour panel).
-- **M2 Shared map** (MOSTLY DONE 2026-10-20, §9): the Multiplayer lobby, seed and settings from the
-  room, hash check, two start towns, land claims, the neighbour's buildings mirrored. Open: mirrors
-  blocking paths, a real colour tint, fence / bridge claims.
-- **M3 Shared roads and resources**: real neighbour roads; the same resource scatter on both
-  screens; resource change events.
+- **M2 Shared map** (DONE 2026-10-20, §9, §10): the Multiplayer lobby, seed and settings from the
+  room, hash check, two start towns, land claims (fences and bridges too), the neighbour's buildings
+  mirrored with their construction stage and solid for walking. Open: a real colour tint.
+- **M3 Shared roads and resources** (DONE 2026-10-20, §10): real neighbour roads; the same resource
+  scatter on both screens; resource change events (felled, mined out, planted).
 - **M4 Extras**: speed lock, visible boats/walkers carrying parcels and migrants.
 
 ---------------------------------------------------------------------------------------------
@@ -276,9 +278,9 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 2. The user deploys the relay to their Cloudflare account (`tools/neighbour_server/README.md`:
    `npx wrangler login`, `npm run deploy`); both players point `neighbour.server` at it.
 3. DONE (M1): the Neighbour panel, goods, families.
-4. M2 leftovers (§9 "Not done"): mirrors that block paths (needs a save-safe way to mark tiles),
-   a real colour tint (needs a tinted material copy), claims for fences and bridges, mirrors of
-   structures that exist when a save is loaded, construction stages on mirrors. Then M3.
+4. DONE (M2 leftovers, M3; §10), except the colour tint: it needs a copy of each building's
+   material with one pixel-shader constant changed (`MaterialInstance` has no ported copy
+   constructor; the constant names are in retail's shaders, found at run time). Then M4.
 5. M1 follow-ups, when wanted: barter through a merchant boat at the trading post (the plan's
    original trade), an accept / refuse window for an arriving family, families walking in from
    the map edge rather than appearing among the townspeople.
@@ -426,3 +428,59 @@ follow-ups (§6).
     holds their last state); mirrors always show the finished building, not its construction stage.
   - Placement refusal on the neighbour's land was not tried by hand (the code path is the game's
     own `TestPlacement`).
+  - (2026-10-20: all but the tint are done; §10.)
+
+---------------------------------------------------------------------------------------------
+
+## 10. M2 leftovers and M3 as built (2026-10-20)
+
+- **Fences and bridges** claim their land and are mirrored like any structure (EXT SEAMs in
+  `FencedTool::CalcCost` / `RegisterWithList`, `BridgeTool` validate / `CalcPath`). A structure's
+  id is its footprint origin plus a hash of its template (a fence post and its fence share an origin).
+- **Construction stages**: a structure reports how far its model is (`built`, from the mesh index in
+  its group); re-sent when it changes (checked every ~5 s); the mirror draws that stage's mesh.
+- **A loaded lobby save** reports every structure standing again (`SharedMap::ScanExisting`).
+- **Solid mirrors**: each building says which of its footprint tiles it blocks (`bm`, from
+  `Map::cells[].blocker`); the neighbour's copy marks them in the PATH WORKER's own terrain bytes
+  (`PathfinderThread::SetCellTerrain(cell, 31)`, a type no walk mask has), never in `Map::cells`, so
+  nothing of it is saved and the real type comes back when the mirror goes. Citizens route round
+  them; zones and regions do not know, so a target behind a mirror can cost a detour or a failed
+  path, as any unreachable tile does.
+- **Roads**: a road tile this town finishes (`Map::FinishRoadCell`, EXT SEAM at its end) is sent
+  with its road type and the road tool's template; the relay keeps every town's road tiles and hands
+  them to a town that joins. The neighbour's become finished roads here at once: the tile's road
+  stamp as `PlaceRoadCell` writes it, then the game's own completion `FinishRoadCell` (terrain,
+  heights, the road mesh); the road's ground type comes from the template's `MapDescription`, and
+  its batch material is stored from the template's decal when this town has never laid that kind.
+  Taking a road up works the same way. A tile where this town stands or is building a road is left
+  alone.
+- **The same forests**: in a lobby game the start scatter (`StartTown_SpawnResources`) runs on its
+  own random numbers (the world's `m_random` swapped for the call), restarted per candidate tile from
+  (seed, pool, tile), so a tile one copy skips cannot shift the others. Both games work out BOTH
+  towns' real start sites with the game's own search (`NoteSpawnTiles`; the spiral can wander far
+  from its centre) and keep a disk of twice the town size clear round each. The log line
+  `[Neighbour] scatter: N resources away from the towns, fingerprint F` is the same on both PCs when
+  the forests match.
+- **Resource changes**: every natural resource freed (`EntityList::DrainRemovals` EXT SEAM: felled,
+  quarried, mined out, cleared, gathered) is sent as (tile, template); the neighbour's copy removes
+  the same one (`QueueDestroy`). A forester's sapling (`CreateNaturalResource` EXT SEAM) is sent and
+  planted on a free tile. Natural spreading stays local (mirroring it too would double the forests).
+  The relay queues changes (the newest 20 000) for a town that is away. What the neighbour's changes
+  did is logged every ~5 s when it changes (`[Neighbour] shared map: from the neighbour so far: ...`,
+  with the last reason one was not applied).
+- **Pacing**: the shared map sends at most 40 messages a second (a burst of 120); the relay's flood
+  guard is now 600 a socket in 10 s (it was 30, which a town re-sending its buildings could hit).
+- **Relay**: `road` (cell, type, ground type, template; `off` to take one up), `nat` (`rm` / `add`,
+  cell, template), `bm` on `build`. selftest: 40 checks.
+- **Tested on the PC** against the local relay, with a stand-in creator script: the game joined as
+  town 2 and as town 1 of rooms with the same seed; both printed the same start sites and the same
+  scatter fingerprint (10 909 resources). A building sent by the stand-in marked 40 tiles solid; 37
+  road tiles arrived and were drawn as a dirt road beside the town (screenshot); 4 saplings were
+  planted (the fifth hit the old flood guard); the game's own felled trees and gathered mushrooms were
+  sent to the stand-in. Unit 1189 tests, 0 failures; the faithful gate unchanged (no `[Neighbour]`
+  line).
+- **Not done / not verified**:
+  - No colour tint (§6 item 4).
+  - Citizens walking round a solid mirror was not watched in game.
+  - Both towns felling the same tree at the same moment can give its wood twice.
+  - Saplings grow on each copy's own clock, so a tree can be ripe in one town and not the other.
