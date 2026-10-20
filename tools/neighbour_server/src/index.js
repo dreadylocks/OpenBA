@@ -18,6 +18,9 @@ const kMaxPassChars = 128;
 const kMaxChatChars = 200;
 const kKeepChats = 200;
 const kReplayChats = 20;
+const kMaxParcels = 64;          // waiting for one town
+const kMaxParcelBody = 8 * 1024;
+const kParcelId = /^[0-9a-z_-]{1,40}$/;
 const kSeats = 2;
 // Flood guard: at most this many messages per socket in kWindowMs.
 const kBurst = 30;
@@ -110,6 +113,8 @@ export class Room {
     if (msg.t === "hello") return this.onHello(ws, a, msg);
     if (a.seat < 0) return this.fail(ws, "say hello first", true);
     if (msg.t === "chat") return this.onChat(ws, a, msg);
+    if (msg.t === "parcel") return this.onParcel(ws, a, msg);
+    if (msg.t === "ack") return this.onAck(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
   }
@@ -152,6 +157,46 @@ export class Room {
     const missed = chats.filter((c) => c.seq > lastSeq && c.seat !== seat).slice(-kReplayChats);
     for (const c of missed) this.send(ws, { t: "chat", from: c.from, text: c.text, seq: c.seq });
     for (const peer of this.socketsFor(other)) this.send(peer, { t: "peer", name, online: true });
+
+    // Parcels that waited for this town.
+    for (const p of await this.parcels()) {
+      if (p.to === seat) this.send(ws, { t: "parcel", id: p.id, kind: p.kind, body: p.body, from: p.from });
+    }
+  }
+
+  // ---- parcels: goods and families. Kept until the receiving town acknowledges them. ----------
+
+  async parcels() {
+    return (await this.ctx.storage.get("parcels")) || [];
+  }
+
+  async onParcel(ws, a, msg) {
+    const id = typeof msg.id === "string" ? msg.id : "";
+    if (!kParcelId.test(id)) return this.fail(ws, "bad parcel id", false);
+    if (msg.kind !== "goods" && msg.kind !== "family") return this.fail(ws, "unknown parcel kind", false);
+    if (typeof msg.body !== "string" || msg.body.length === 0 || msg.body.length > kMaxParcelBody) {
+      return this.fail(ws, "bad parcel contents", false);
+    }
+    const list = await this.parcels();
+    const to = 1 - a.seat;
+    // A parcel sent again (the sender reconnected before it heard "stored"): stored already.
+    if (!list.some((p) => p.id === id && p.fromSeat === a.seat)) {
+      if (list.filter((p) => p.to === to).length >= kMaxParcels) {
+        return this.fail(ws, "too many parcels are waiting for your neighbour", false);
+      }
+      const entry = { id, kind: msg.kind, body: msg.body, from: a.name, fromSeat: a.seat, to };
+      list.push(entry);
+      await this.ctx.storage.put("parcels", list);
+      for (const peer of this.socketsFor(to)) this.send(peer, { t: "parcel", id, kind: entry.kind, body: entry.body, from: a.name });
+    }
+    this.send(ws, { t: "stored", id });
+  }
+
+  async onAck(ws, a, msg) {
+    const id = typeof msg.id === "string" ? msg.id : "";
+    const list = await this.parcels();
+    const keep = list.filter((p) => !(p.id === id && p.to === a.seat));
+    if (keep.length !== list.length) await this.ctx.storage.put("parcels", keep);
   }
 
   async onChat(ws, a, msg) {

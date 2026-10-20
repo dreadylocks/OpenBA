@@ -71,12 +71,40 @@ const third = town("Thirdton", "pw");
 const e2 = await tryWait(third.wait((m) => m.t === "error"));
 check(e2 && /two towns/.test(e2.why), "a third town is refused");
 
+// Parcels: sent while the neighbour is away, stored, delivered when it joins, gone once acked,
+// and a resend of the same id is not a second parcel.
+await b2.leave();
+a.ws.send(JSON.stringify({ t: "parcel", id: "p-1", kind: "goods", body: "Template/Fish.rsc:25" }));
+const st1 = await tryWait(a.wait((m) => m.t === "stored" && m.id === "p-1"));
+check(!!st1, "the relay confirms it holds a parcel");
+a.ws.send(JSON.stringify({ t: "parcel", id: "p-1", kind: "goods", body: "Template/Fish.rsc:25" }));
+await tryWait(a.wait((m) => m.t === "stored" && m.id === "p-1" && m !== st1));
+const b3 = town("Brookvale", "pw", 2);
+const p1 = await tryWait(b3.wait((m) => m.t === "parcel" && m.id === "p-1"));
+check(p1 && p1.kind === "goods" && p1.body === "Template/Fish.rsc:25" && p1.from === "Ashford",
+      "a parcel sent while the neighbour was away arrives when it joins");
+await new Promise((r) => setTimeout(r, 300));
+check(b3.inbox.filter((m) => m.t === "parcel" && m.id === "p-1").length === 1, "a resent parcel arrives once");
+b3.ws.send(JSON.stringify({ t: "ack", id: "p-1" }));
+await new Promise((r) => setTimeout(r, 300));
+await b3.leave();
+const b4 = town("Brookvale", "pw", 2);
+await tryWait(b4.wait((m) => m.t === "welcome"));
+await new Promise((r) => setTimeout(r, 400));
+check(!b4.inbox.some((m) => m.t === "parcel"), "an acknowledged parcel is not delivered again");
+a.ws.send(JSON.stringify({ t: "parcel", id: "p-2", kind: "family", body: "30.0/1/0;28.5/0/0;6.2/0/1" }));
+const p2 = await tryWait(b4.wait((m) => m.t === "parcel" && m.id === "p-2"));
+check(p2 && p2.kind === "family", "a parcel to a town that is online is passed on at once");
+a.ws.send(JSON.stringify({ t: "parcel", id: "BAD ID", kind: "goods", body: "x:1" }));
+const e3 = await tryWait(a.wait((m) => m.t === "error" && /parcel id/.test(m.why)));
+check(!!e3, "a malformed parcel is refused");
+
 const bad = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
 await new Promise((r) => bad.addEventListener("open", r));
 bad.send('{"t":"chat","text":"no hello"}');
 const badClose = await new Promise((r) => bad.addEventListener("close", (ev) => r(ev)));
 check(badClose.code === 4000, "chat before hello closes the line");
 
-a.ws.close(); b2.ws.close();
+a.ws.close(); b4.ws.close();
 console.log(failures === 0 ? "\nrelay selftest: all good" : `\nrelay selftest: ${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

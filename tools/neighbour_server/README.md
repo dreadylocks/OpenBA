@@ -5,6 +5,8 @@ Cloudflare Worker with one Durable Object per room. The game's side is `src/ext/
 
 What a room does:
 - It has **two seats and a password**. The first town in sets the password; a third town is refused.
+- It **carries parcels** (goods and families): it answers `stored` to the sender, keeps the parcel
+  while the other town is away (up to 64), and deletes it once the receiving town says `ack`.
 - It **passes chat lines on** and keeps the last 200 lines. A town that was away gets up to the
   20 newest lines it missed when it comes back, because the game remembers (in its save) the last
   line number it saw.
@@ -33,8 +35,17 @@ third town being refused.
 node fake_neighbour.mjs --room pc-test --pass test --name "Fake Town" --say "Hello from next door!"
 ```
 
-It joins the room like a game does, prints what it receives, and sends each line you type.
-`--every 20 "text"` repeats a line, and `--quit-after 60` leaves after a minute.
+It joins the room like a game does, prints what it receives (and acknowledges parcels), and
+sends each line you type. `--every 20 "text"` repeats a line, and `--quit-after 60` leaves after a
+minute. Parcels:
+
+```bash
+node fake_neighbour.mjs --room pc-test --pass test --send-goods "Template\RawMaterialPotato.rsc:resource:30"
+node fake_neighbour.mjs --room pc-test --pass test --send-family "31.0/1/0;29.5/0/0;7.0/1/1"
+```
+
+or type `/goods <path> <count>` / `/family <members>` while it runs. A family is
+`age/gender/child` per person, separated by `;`, adults first.
 
 ## Point the game at it
 
@@ -49,7 +60,7 @@ neighbour.name=My Town
 ```
 
 Then start a new game or load a save. The event log shows "Joined the room ..." and the
-neighbour's lines. The gate (`tools/build.sh run`) forces every extension off, so it is not
+neighbour's lines. Press **N** in game for the Neighbour panel: chat, send goods, send a family. The gate (`tools/build.sh run`) forces every extension off, so it is not
 affected.
 
 ## Put it on Cloudflare (always on, free plan)
