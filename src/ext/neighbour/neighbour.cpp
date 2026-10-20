@@ -7,12 +7,14 @@
 
 #include "ext/neighbour/neighbour.h"
 
+#include <chrono>
 #include <cstdio>
 #include <mutex>
 #include <vector>
 
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
+#include "ext/neighbour/town.h"
 #include "ext/registry.h"   // Ext::Ext().neighbour
 #include "ext/savetail.h"   // Ext::SaveTail::RegisterPayload
 
@@ -20,6 +22,9 @@
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
 #include "io/Persistence.h"        // the settings map (neighbour.* keys)
 #include "system/String.h"
+#include "system/Filename.h"
+#include "object/External.h"
+#include "Component/ComponentDescription.h"
 
 namespace Neighbour {
 
@@ -45,6 +50,12 @@ std::unique_ptr<Link> s_link;
 Config                s_config;
 bool                  s_announcedOffline = false;   // one "cannot reach" line per outage
 bool                  s_everConnected = false;
+bool                  s_joined = false;      // a welcome arrived on the current line
+std::string           s_peerName;            // the neighbour town, as the relay names it
+bool                  s_peerOnline = false;
+uint64_t              s_frame = 0;
+uint64_t              s_parcelCounter = 0;
+constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
 
 std::mutex  s_savedMu;   // SavePayload may run on the background-save worker
 SavedState  s_saved;     // what goes into the save
@@ -120,6 +131,148 @@ Message Hello() {
     return m;
 }
 
+// --- parcels --------------------------------------------------------------
+
+std::string PeerLabel() { return s_peerName.empty() ? std::string("your neighbour") : s_peerName; }
+
+// A fresh parcel id: this town's clock and a counter, in base 36 (ValidParcelId's alphabet).
+std::string NewParcelId() {
+    static const char kDigits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    const uint64_t t = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const uint64_t parts[2] = {t, ++s_parcelCounter};
+    std::string id;
+    for (uint64_t v : parts) {
+        std::string chunk;
+        do { chunk += kDigits[v % 36]; v /= 36; } while (v != 0);
+        if (!id.empty()) id += '-';
+        id.append(chunk.rbegin(), chunk.rend());
+    }
+    return id;
+}
+
+Message ParcelMessage(const Parcel& p) {
+    Message m("parcel");
+    m.Set("id", p.id).Set("kind", p.kind).Set("body", p.body);
+    return m;
+}
+
+// Every parcel the relay has not confirmed, again (each join: the line may have dropped first).
+void ResendOutbox() {
+    if (!s_link) return;
+    std::vector<Parcel> out;
+    {
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        out = s_saved.outbox;
+    }
+    for (const Parcel& p : out) s_link->Send(ParcelMessage(p));
+}
+
+void Queue(const Parcel& p) {
+    {
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        s_saved.outbox.push_back(p);
+    }
+    if (s_link && s_joined) s_link->Send(ParcelMessage(p));   // else the next welcome sends it
+}
+
+std::string GoodsText(const std::vector<std::pair<std::string, int>>& goods) {
+    std::string out;
+    ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
+    for (size_t i = 0; i < goods.size(); ++i) {
+        if (i > 0) out += (i + 1 == goods.size()) ? " and " : ", ";
+        ComponentDescription* res = f != nullptr
+            ? f->FindOrLoadAs<ComponentDescription>(System::Filename(goods[i].first.c_str())) : nullptr;
+        out += std::to_string(goods[i].second) + " " + Sanitize(Town::DisplayName(res), 40);
+    }
+    return out;
+}
+
+// Deliver as much of a goods parcel as fits; `p.body` keeps what did not. True when all of it
+// is delivered (or the parcel is unusable and dropped).
+bool DeliverGoods(Parcel& p, bool firstTry) {
+    std::vector<std::pair<std::string, int>> goods, left, given;
+    if (!DecodeGoods(p.body, goods)) {
+        Post("A parcel from " + PeerLabel() + " could not be read; it was dropped.", kColourProblem);
+        return true;
+    }
+    for (const auto& g : goods) {
+        const int n = Town::GiveGoods(g.first, g.second);
+        if (n < 0) {
+            Post("A parcel from " + PeerLabel() + " holds goods this game does not know (" +
+                     Sanitize(g.first, 60) + "); they were dropped.", kColourProblem);
+            continue;
+        }
+        if (n > 0) given.emplace_back(g.first, n);
+        if (n < g.second) left.emplace_back(g.first, g.second - n);
+    }
+    const std::string from = p.from.empty() ? PeerLabel() : p.from;
+    if (!given.empty())
+        Post(firstTry ? from + " sent you " + GoodsText(given) + "."
+                      : "More of " + from + "'s parcel fitted: " + GoodsText(given) + ".", kColourChat);
+    if (!left.empty() && firstTry)
+        Post("Not everything fitted in your storage (" + GoodsText(left) +
+                 "); the rest arrives when there is room.", kColourStatus);
+    if (!left.empty()) p.body = EncodeGoods(left);
+    return left.empty();
+}
+
+bool DeliverFamily(const Parcel& p) {
+    std::vector<FamilyMember> members;
+    if (!DecodeMembers(p.body, members)) {
+        Post("A family from " + PeerLabel() + " could not be read; the parcel was dropped.", kColourProblem);
+        return true;
+    }
+    const int made = Town::ReceiveFamily(members);
+    if (made == 0) return false;   // no townsperson to copy yet: later
+    const std::string from = p.from.empty() ? PeerLabel() : p.from;
+    Post("A family of " + std::to_string(made) + " from " + from + " has joined your town.", kColourChat);
+    return true;
+}
+
+// A parcel the relay delivered: apply it once, remember it, acknowledge it.
+void OnParcel(const Message& m) {
+    Parcel p;
+    if (!m.Get("id", p.id) || !ValidParcelId(p.id) || !m.Get("kind", p.kind) || !m.Get("body", p.body)) return;
+    if (p.kind != "goods" && p.kind != "family") return;
+    if (!Town::InGame()) return;   // not acknowledged: the relay keeps it
+    p.from = Sanitize(m.GetOr("from", ""), kMaxNameChars);
+    bool seen = false;
+    {
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        for (const std::string& id : s_saved.received) seen |= id == p.id;
+    }
+    if (!seen) {
+        const bool done = p.kind == "goods" ? DeliverGoods(p, true) : DeliverFamily(p);
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        s_saved.received.push_back(p.id);
+        while (s_saved.received.size() > kKeepReceivedIds) s_saved.received.erase(s_saved.received.begin());
+        if (!done && s_saved.waiting.size() < kMaxSavedParcels) s_saved.waiting.push_back(p);
+    }
+    if (s_link) {
+        Message ack("ack");
+        ack.Set("id", p.id);
+        s_link->Send(ack);
+    }
+}
+
+// Waiting parcels (goods that did not fit, a family with nobody to copy yet): try again.
+void RetryWaiting() {
+    std::vector<Parcel> waiting;
+    {
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        if (s_saved.waiting.empty()) return;
+        waiting.swap(s_saved.waiting);
+    }
+    std::vector<Parcel> still;
+    for (Parcel& p : waiting) {
+        const bool done = p.kind == "goods" ? DeliverGoods(p, false) : DeliverFamily(p);
+        if (!done) still.push_back(p);
+    }
+    std::lock_guard<std::mutex> lock(s_savedMu);
+    for (Parcel& p : still) s_saved.waiting.push_back(std::move(p));
+}
+
 // --- incoming -------------------------------------------------------------
 
 void OnMessage(const Message& m) {
@@ -138,6 +291,10 @@ void OnMessage(const Message& m) {
         const std::string peer = Sanitize(m.GetOr("peer", ""), kMaxNameChars);
         bool online = false;
         m.GetBool("online", online);
+        s_joined = true;
+        s_peerName = peer;
+        s_peerOnline = online;
+        ResendOutbox();
         std::string line = "Joined the room \"" + s_config.room + "\".";
         if (peer.empty())  line += " No neighbour has joined yet.";
         else if (online)   line += " " + peer + " is here.";
@@ -147,7 +304,19 @@ void OnMessage(const Message& m) {
         const std::string peer = Sanitize(m.GetOr("name", "Your neighbour"), kMaxNameChars);
         bool online = false;
         m.GetBool("online", online);
+        s_peerName = peer;
+        s_peerOnline = online;
         Post(peer + (online ? " has arrived." : " has left."), kColourStatus);
+    } else if (m.type == "parcel") {
+        OnParcel(m);
+    } else if (m.type == "stored") {
+        std::string id;
+        if (m.Get("id", id)) {
+            std::lock_guard<std::mutex> lock(s_savedMu);
+            auto& out = s_saved.outbox;
+            for (size_t i = 0; i < out.size(); ++i)
+                if (out[i].id == id) { out.erase(out.begin() + static_cast<long>(i)); break; }
+        }
     } else if (m.type == "error") {
         Post("The neighbour server says: " + Sanitize(m.GetOr("why", "an unknown problem"), kMaxChatChars),
              kColourProblem);
@@ -166,6 +335,8 @@ void OnIncoming(Incoming& in) {
         s_announcedOffline = false;
         break;
     case Incoming::Kind::Disconnected:
+        s_joined = false;
+        s_peerOnline = false;
         if (in.detail.empty()) break;   // our own Stop
         fprintf(stderr, "[Neighbour] offline: %s\n", in.detail.c_str());
         if (!s_announcedOffline) {
@@ -183,11 +354,13 @@ void OnIncoming(Incoming& in) {
 
 namespace {
 void HangUp() {
+    PanelClose();
     if (s_link) {
         s_link->Stop();
         s_link.reset();
     }
     s_active = false;
+    s_joined = false;
 }
 }  // namespace
 
@@ -213,14 +386,19 @@ void SelectForGame() {
         // A loaded town keeps its room unless settings.cfg names another one now.
         if (s_loadedFromSave && !s_saved.room.empty() && s_saved.room != s_config.room) {
             fprintf(stderr, "[Neighbour] the save was in room \"%s\"; settings.cfg names \"%s\" -- "
-                    "joining the settings' room\n", s_saved.room.c_str(), s_config.room.c_str());
+                    "joining the settings' room (%u unsent parcel(s) for the old room dropped)\n",
+                    s_saved.room.c_str(), s_config.room.c_str(), static_cast<unsigned>(s_saved.outbox.size()));
             s_saved.lastSeq = 0;   // another room's sequence numbers mean nothing here
+            s_saved.outbox.clear();
         }
         s_saved.room = s_config.room;
     }
     s_active = true;
     s_announcedOffline = false;
     s_everConnected = false;
+    s_joined = false;
+    s_peerName.clear();
+    s_peerOnline = false;
     if (s_config.server.empty()) {
         Post("Neighbour towns is on, but no server is set (neighbour.server in settings.cfg).",
              kColourProblem);
@@ -236,7 +414,11 @@ void SelectForGame() {
 }
 
 void BeginFrame() {
-    if (!s_active || !s_link) return;
+    if (!s_active) return;
+    ++s_frame;
+    PanelPollHotkey();
+    if (s_frame % kRetryWaitingFrames == 0) RetryWaiting();
+    if (!s_link) return;
     std::vector<Incoming> got;
     s_link->Poll(got);
     for (Incoming& in : got) OnIncoming(in);
@@ -246,6 +428,53 @@ void EndGame(const void* owner) {
     if (owner == nullptr || owner != s_owner) return;
     HangUp();
     s_owner = nullptr;
+}
+
+Status GetStatus() {
+    Status st;
+    st.active = s_active;
+    st.serverSet = !s_config.server.empty();
+    st.connected = s_link && s_link->Connected();
+    st.joined = s_joined;
+    st.room = s_config.room;
+    st.name = s_config.name;
+    st.peer = s_peerName;
+    st.peerOnline = s_peerOnline;
+    std::lock_guard<std::mutex> lock(s_savedMu);
+    st.unsent = static_cast<int>(s_saved.outbox.size());
+    st.waiting = static_cast<int>(s_saved.waiting.size());
+    return st;
+}
+
+std::string SendGoods(const ComponentDescription* resource, int count) {
+    if (!s_active) return "Neighbour towns is not on for this game.";
+    if (resource == nullptr || count <= 0) return "Pick some goods first.";
+    const int taken = Town::TakeGoods(resource, count);
+    if (taken <= 0) return "None of that is left in storage.";
+    const System::Filename path = resource->GetPath();
+    const char* name = path.AsString()._data;
+    std::vector<std::pair<std::string, int>> goods;
+    goods.emplace_back(name != nullptr ? name : "", taken);
+    Parcel p;
+    p.id = NewParcelId();
+    p.kind = "goods";
+    p.body = EncodeGoods(goods);
+    Queue(p);
+    Post("You sent " + GoodsText(goods) + " to " + PeerLabel() + ".", kColourChat);
+    return std::string();
+}
+
+std::string SendFamily() {
+    if (!s_active) return "Neighbour towns is not on for this game.";
+    const std::vector<FamilyMember> members = Town::SendFamily();
+    if (members.empty()) return "No family can leave right now (the town keeps at least one family).";
+    Parcel p;
+    p.id = NewParcelId();
+    p.kind = "family";
+    p.body = EncodeMembers(members);
+    Queue(p);
+    Post("A family of " + std::to_string(members.size()) + " moved to " + PeerLabel() + ".", kColourChat);
+    return std::string();
 }
 
 void SendChat(const std::string& text) {

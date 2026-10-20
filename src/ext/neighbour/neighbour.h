@@ -26,6 +26,8 @@
 #include <memory>
 #include <string>
 
+class ComponentDescription;
+
 namespace Neighbour {
 
 class Transport;
@@ -40,6 +42,26 @@ void EndGame(const void* owner);   // hang up (joins the network threads) if `ow
 
 // Queue a chat line to the neighbour (no-op while the extension is off for this game).
 void SendChat(const std::string& text);
+
+// What the Neighbour panel shows.
+struct Status {
+    bool        active = false;      // ext.neighbour on for this game
+    bool        serverSet = false;
+    bool        connected = false;   // the line is up
+    bool        joined = false;      // the relay welcomed us into the room
+    std::string room, name, peer;
+    bool        peerOnline = false;
+    int         unsent = 0;          // parcels the relay has not confirmed yet
+    int         waiting = 0;         // received parcels not fully delivered yet
+};
+Status GetStatus();
+// Send goods / a family now (offline: they wait in the outbox). "" on success, else why not.
+std::string SendGoods(const ComponentDescription* resource, int count);
+std::string SendFamily();
+
+// neighbour_panel.cpp: the in-game Neighbour panel (N opens and closes it).
+void PanelPollHotkey();   // from BeginFrame
+void PanelClose();        // the game ends: close it if open
 
 // link_platform.cpp: the Link's transport over the Platform WebSocket seam.
 std::unique_ptr<Transport> MakePlatformTransport();

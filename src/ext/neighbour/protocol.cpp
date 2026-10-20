@@ -374,6 +374,116 @@ std::string RoomUrl(const std::string& server, const std::string& room) {
 }
 
 // ---------------------------------------------------------------------------
+// Parcel contents
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A whole decimal integer in [lo, hi]; nothing else in the text.
+bool ParseIntIn(const std::string& s, int lo, int hi, int& out) {
+    if (s.empty() || s.size() > 9) return false;
+    int v = 0;
+    for (char c : s) {
+        if (c < '0' || c > '9') return false;
+        v = v * 10 + (c - '0');
+    }
+    if (v < lo || v > hi) return false;
+    out = v;
+    return true;
+}
+
+std::vector<std::string> Split(const std::string& s, char sep) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (;;) {
+        const size_t at = s.find(sep, start);
+        parts.push_back(s.substr(start, at == std::string::npos ? std::string::npos : at - start));
+        if (at == std::string::npos) break;
+        start = at + 1;
+    }
+    return parts;
+}
+
+}  // namespace
+
+std::string EncodeGoods(const std::vector<std::pair<std::string, int>>& goods) {
+    std::string out;
+    for (const auto& g : goods) {
+        if (!out.empty()) out += ',';
+        out += g.first;
+        out += ':';
+        out += std::to_string(g.second);
+    }
+    return out;
+}
+
+bool DecodeGoods(const std::string& text, std::vector<std::pair<std::string, int>>& out) {
+    std::vector<std::pair<std::string, int>> goods;
+    if (text.empty()) return false;
+    const std::vector<std::string> lines = Split(text, ',');
+    if (static_cast<int>(lines.size()) > kMaxParcelLines) return false;
+    for (const std::string& line : lines) {
+        const size_t colon = line.rfind(':');
+        if (colon == std::string::npos || colon == 0 || colon > 255) return false;
+        const std::string path = line.substr(0, colon);
+        for (unsigned char c : path)
+            if (c < 0x20 || c == 0x7F) return false;   // a path is printable text
+        int count = 0;
+        if (!ParseIntIn(line.substr(colon + 1), 1, kMaxParcelCount, count)) return false;
+        goods.emplace_back(path, count);
+    }
+    out = std::move(goods);
+    return true;
+}
+
+std::string EncodeMembers(const std::vector<FamilyMember>& members) {
+    std::string out;
+    for (const FamilyMember& m : members) {
+        if (!out.empty()) out += ';';
+        // Ages in tenths of a year, as an integer: no locale, no float formatting.
+        int tenths = static_cast<int>(m.age * 10.0f + 0.5f);
+        if (tenths < 0) tenths = 0;
+        out += std::to_string(tenths / 10) + "." + std::to_string(tenths % 10);
+        out += '/';
+        out += m.gender ? '1' : '0';
+        out += '/';
+        out += m.child ? '1' : '0';
+    }
+    return out;
+}
+
+bool DecodeMembers(const std::string& text, std::vector<FamilyMember>& out) {
+    std::vector<FamilyMember> members;
+    if (text.empty()) return false;
+    const std::vector<std::string> parts = Split(text, ';');
+    if (static_cast<int>(parts.size()) > kMaxFamily) return false;
+    for (const std::string& part : parts) {
+        const std::vector<std::string> f = Split(part, '/');
+        if (f.size() != 3) return false;
+        const size_t dot = f[0].find('.');
+        int whole = 0, tenth = 0;
+        if (dot == std::string::npos) {
+            if (!ParseIntIn(f[0], 0, 200, whole)) return false;
+        } else {
+            if (!ParseIntIn(f[0].substr(0, dot), 0, 200, whole) || !ParseIntIn(f[0].substr(dot + 1), 0, 9, tenth))
+                return false;
+        }
+        int gender = 0, child = 0;
+        if (!ParseIntIn(f[1], 0, 1, gender) || !ParseIntIn(f[2], 0, 1, child)) return false;
+        FamilyMember m;
+        m.age = static_cast<float>(whole) + static_cast<float>(tenth) / 10.0f;
+        m.gender = gender;
+        m.child = child != 0;
+        members.push_back(m);
+    }
+    bool anyAdult = false;
+    for (const FamilyMember& m : members) anyAdult |= !m.child;
+    if (!anyAdult) return false;   // a family has an adult
+    out = std::move(members);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // The save payload
 // ---------------------------------------------------------------------------
 
@@ -416,23 +526,80 @@ constexpr size_t kMaxRoomChars = 64;
 
 }  // namespace
 
+bool ValidParcelId(const std::string& id) {
+    if (id.empty() || id.size() > kMaxParcelIdChars) return false;
+    for (char c : id) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '_' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+namespace {
+
+void PutStr(std::vector<uint8_t>& out, const std::string& s) {
+    PutU32(out, static_cast<uint32_t>(s.size()));
+    out.insert(out.end(), s.begin(), s.end());
+}
+void PutParcels(std::vector<uint8_t>& out, const std::vector<Parcel>& list) {
+    const size_t n = list.size() < kMaxSavedParcels ? list.size() : kMaxSavedParcels;
+    PutU32(out, static_cast<uint32_t>(n));
+    for (size_t i = list.size() - n; i < list.size(); ++i) {   // the newest kMaxSavedParcels
+        PutStr(out, list[i].id);
+        PutStr(out, list[i].kind);
+        PutStr(out, list[i].body);
+        PutStr(out, list[i].from);
+    }
+}
+bool GetParcels(ByteReader& r, std::vector<Parcel>& list) {
+    uint32_t n = 0;
+    if (!r.U32(n) || n > kMaxSavedParcels) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        Parcel p;
+        if (!r.Str(p.id, kMaxParcelIdChars) || !r.Str(p.kind, 16) || !r.Str(p.body, kMaxMessageBytes) ||
+            !r.Str(p.from, 64))
+            return false;
+        if (!ValidParcelId(p.id) || (p.kind != "goods" && p.kind != "family")) return false;
+        list.push_back(std::move(p));
+    }
+    return true;
+}
+
+}  // namespace
+
 std::vector<uint8_t> EncodeState(const SavedState& s) {
     std::vector<uint8_t> out;
     const std::string room = s.room.size() > kMaxRoomChars ? s.room.substr(0, kMaxRoomChars) : s.room;
-    PutU32(out, static_cast<uint32_t>(room.size()));
-    out.insert(out.end(), room.begin(), room.end());
+    PutStr(out, room);
     PutU64(out, static_cast<uint64_t>(s.lastSeq));
+    // v2
+    PutParcels(out, s.outbox);
+    const size_t n = s.received.size() < kKeepReceivedIds ? s.received.size() : kKeepReceivedIds;
+    PutU32(out, static_cast<uint32_t>(n));
+    for (size_t i = s.received.size() - n; i < s.received.size(); ++i) PutStr(out, s.received[i]);
+    PutParcels(out, s.waiting);
     return out;
 }
 
 bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, SavedState& out) {
-    if (formatVersion != 1) return false;
+    if (formatVersion < 1 || formatVersion > kPayloadFormat) return false;
     ByteReader r{bytes.data(), bytes.size()};
     SavedState s;
     uint64_t seq = 0;
-    if (!r.Str(s.room, kMaxRoomChars) || !r.U64(seq) || r.left != 0) return false;
+    if (!r.Str(s.room, kMaxRoomChars) || !r.U64(seq)) return false;
     if (seq > static_cast<uint64_t>(INT64_MAX)) return false;
     s.lastSeq = static_cast<int64_t>(seq);
+    if (formatVersion >= 2) {
+        uint32_t n = 0;
+        if (!GetParcels(r, s.outbox) || !r.U32(n) || n > kKeepReceivedIds) return false;
+        for (uint32_t i = 0; i < n; ++i) {
+            std::string id;
+            if (!r.Str(id, kMaxParcelIdChars) || !ValidParcelId(id)) return false;
+            s.received.push_back(std::move(id));
+        }
+        if (!GetParcels(r, s.waiting)) return false;
+    }
+    if (r.left != 0) return false;
     out = std::move(s);
     return true;
 }

@@ -74,14 +74,50 @@ std::string Sanitize(const std::string& text, size_t maxChars);
 // name, percent-encoded. The relay keeps one Durable Object per room name.
 std::string RoomUrl(const std::string& server, const std::string& room);
 
-// The class C save payload (savetail.h RegisterPayload): what a town remembers about its
-// room between sessions. Version 1: the room name and the last chat sequence number seen
-// (the relay replays anything newer).
-struct SavedState {
-    std::string room;
-    int64_t     lastSeq = 0;
+// A parcel's contents on the wire. Goods: "path:count,path:count" (a path has no ',' and its
+// count is the text after the LAST ':'; 1..kMaxParcelCount each, at most kMaxParcelLines lines).
+// A family: "age/gender/child;..." (age in years, gender 0|1, child 0|1; 1..kMaxFamily members).
+constexpr int kMaxParcelCount = 100000;
+constexpr int kMaxParcelLines = 16;
+constexpr int kMaxFamily      = 12;
+struct FamilyMember {
+    float   age = 0.0f;
+    int32_t gender = 0;
+    bool    child = false;
 };
-constexpr int32_t kPayloadFormat = 1;   // the registry row's formatVersion
+std::string EncodeGoods(const std::vector<std::pair<std::string, int>>& goods);
+bool DecodeGoods(const std::string& text, std::vector<std::pair<std::string, int>>& out);
+std::string EncodeMembers(const std::vector<FamilyMember>& members);
+bool DecodeMembers(const std::string& text, std::vector<FamilyMember>& out);
+
+// A parcel: goods or a family, with an id unique to its sender (the relay and the receiver use it
+// to never deliver one twice). `body` is EncodeGoods / EncodeMembers text.
+struct Parcel {
+    std::string id;     // 1..kMaxParcelIdChars of [0-9a-z_-]
+    std::string kind;   // "goods" | "family"
+    std::string body;
+    std::string from;   // the sending town's name (received parcels)
+};
+constexpr size_t kMaxParcelIdChars = 40;
+bool ValidParcelId(const std::string& id);
+
+// The class C save payload (savetail.h RegisterPayload): what a town remembers about its
+// room between sessions.
+//   v1: the room name and the last chat sequence number seen (the relay replays anything newer).
+//   v2: + the OUTBOX (parcels this town sent that the relay has not yet confirmed it holds; they
+//       are sent again on the next connect), the RECEIVED ids (the last kKeepReceivedIds parcels
+//       applied here; a repeat is acknowledged and dropped) and the WAITING parcels (goods that
+//       did not fit in storage yet; delivered as room appears).
+struct SavedState {
+    std::string              room;
+    int64_t                  lastSeq = 0;
+    std::vector<Parcel>      outbox;
+    std::vector<std::string> received;
+    std::vector<Parcel>      waiting;
+};
+constexpr int32_t kPayloadFormat   = 2;   // the registry row's formatVersion
+constexpr size_t  kKeepReceivedIds = 128;
+constexpr size_t  kMaxSavedParcels = 64;   // per list
 std::vector<uint8_t> EncodeState(const SavedState& s);
 bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, SavedState& out);
 

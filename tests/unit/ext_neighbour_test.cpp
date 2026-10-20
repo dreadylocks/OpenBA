@@ -96,21 +96,80 @@ UNIT_TEST(ext_neighbour_saved_state) {
     Neighbour::SavedState s;
     s.room = "river-folk";
     s.lastSeq = 123456789012LL;
+    s.outbox.push_back({"a-1", "goods", "Template/Fish.rsc:25", ""});
+    s.received = {"x-1", "x-2"};
+    s.waiting.push_back({"x-3", "family", "30.0/1/0;6.5/0/1", "Ann"});
     const std::vector<uint8_t> bytes = Neighbour::EncodeState(s);
     Neighbour::SavedState back;
     CHECK(Neighbour::DecodeState(Neighbour::kPayloadFormat, bytes, back));
     CHECK_STREQ(back.room.c_str(), "river-folk");
     CHECK_EQ(back.lastSeq, 123456789012LL);
-    // Every cut fails, a longer buffer fails, an unknown version fails; `out` is untouched.
+    CHECK_EQ(static_cast<int>(back.outbox.size()), 1);
+    CHECK_EQ(static_cast<int>(back.received.size()), 2);
+    CHECK_EQ(static_cast<int>(back.waiting.size()), 1);
+    if (back.waiting.size() == 1) {
+        CHECK_STREQ(back.waiting[0].body.c_str(), "30.0/1/0;6.5/0/1");
+        CHECK_STREQ(back.waiting[0].from.c_str(), "Ann");
+    }
+    // Every cut fails, a longer buffer fails, a newer version fails; `out` is untouched.
     for (size_t n = 0; n < bytes.size(); ++n) {
         std::vector<uint8_t> cut(bytes.begin(), bytes.begin() + static_cast<long>(n));
-        CHECK(!Neighbour::DecodeState(1, cut, back));
+        CHECK(!Neighbour::DecodeState(Neighbour::kPayloadFormat, cut, back));
     }
     std::vector<uint8_t> longer = bytes;
     longer.push_back(0);
-    CHECK(!Neighbour::DecodeState(1, longer, back));
-    CHECK(!Neighbour::DecodeState(2, bytes, back));
+    CHECK(!Neighbour::DecodeState(Neighbour::kPayloadFormat, longer, back));
+    CHECK(!Neighbour::DecodeState(Neighbour::kPayloadFormat + 1, bytes, back));
     CHECK_STREQ(back.room.c_str(), "river-folk");
+
+    // A version 1 payload (M0's saves): the room and the sequence number only.
+    std::vector<uint8_t> v1 = {4, 0, 0, 0, 'r', 'o', 'o', 'm', 7, 0, 0, 0, 0, 0, 0, 0};
+    Neighbour::SavedState old;
+    CHECK(Neighbour::DecodeState(1, v1, old));
+    CHECK_STREQ(old.room.c_str(), "room");
+    CHECK_EQ(old.lastSeq, 7);
+    CHECK(old.outbox.empty() && old.received.empty() && old.waiting.empty());
+}
+
+UNIT_TEST(ext_neighbour_parcel_bodies) {
+    // Goods: the count after the LAST ':', so a path may hold one.
+    std::vector<std::pair<std::string, int>> g;
+    CHECK(Neighbour::DecodeGoods("Template/Fish.rsc:25,C:/x/Logs.rsc:3", g));
+    CHECK_EQ(static_cast<int>(g.size()), 2);
+    if (g.size() == 2) {
+        CHECK_STREQ(g[0].first.c_str(), "Template/Fish.rsc");
+        CHECK_EQ(g[0].second, 25);
+        CHECK_STREQ(g[1].first.c_str(), "C:/x/Logs.rsc");
+        CHECK_EQ(g[1].second, 3);
+    }
+    CHECK_STREQ(Neighbour::EncodeGoods(g).c_str(), "Template/Fish.rsc:25,C:/x/Logs.rsc:3");
+    const char* badGoods[] = {"", "Fish", "Fish:", ":5", "Fish:0", "Fish:-1", "Fish:1x", "Fish:100001",
+                              "Fish:5,", "Fi\x01sh:5"};
+    for (const char* b : badGoods) CHECK(!Neighbour::DecodeGoods(b, g));
+
+    // A family: ages in tenths, adults first; it must have an adult.
+    std::vector<Neighbour::FamilyMember> m = {{30.04f, 1, false}, {28.46f, 0, false}, {6.0f, 0, true}};
+    const std::string wire = Neighbour::EncodeMembers(m);
+    CHECK_STREQ(wire.c_str(), "30.0/1/0;28.5/0/0;6.0/0/1");
+    std::vector<Neighbour::FamilyMember> back;
+    CHECK(Neighbour::DecodeMembers(wire, back));
+    CHECK_EQ(static_cast<int>(back.size()), 3);
+    if (back.size() == 3) {
+        CHECK(back[2].child);
+        CHECK_EQ(back[1].gender, 0);
+        CHECK(back[1].age > 28.4f && back[1].age < 28.6f);
+    }
+    CHECK(Neighbour::DecodeMembers("31/0/0", back));   // a whole number of years is fine
+    const char* badFamilies[] = {"", "6.0/0/1", "30/2/0", "30/1/2", "30/1", "300/1/0", "30.55/1/0", "a/1/0",
+                                 "30/1/0;", "30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0;30/1/0"};
+    for (const char* b : badFamilies) {
+        if (Neighbour::DecodeMembers(b, back)) std::printf("  accepted family: %s\n", b);
+        CHECK(!Neighbour::DecodeMembers(b, back));
+    }
+    CHECK(Neighbour::ValidParcelId("lx3k2-1"));
+    CHECK(!Neighbour::ValidParcelId(""));
+    CHECK(!Neighbour::ValidParcelId("Bad Id"));
+    CHECK(!Neighbour::ValidParcelId(std::string(41, 'a')));
 }
 
 // ---------------------------------------------------------------------------
