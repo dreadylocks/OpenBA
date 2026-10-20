@@ -26,8 +26,8 @@
 //     u32  idLength     1..kMaxIdLength, the bytes of the id, no NUL
 //     u8   id[idLength] [a-z0-9_]+ (Ext::ValidId)
 //     i32  formatVersion  the extension's format version, >= 1
-//     u32  payloadLength  0 today; a class C extension's own state goes here
-//     u8   payload[payloadLength]
+//     u32  payloadLength  0 unless the extension registered a payload writer
+//     u8   payload[payloadLength]   (RegisterPayload below)
 //   }
 //   u32  bodyLength     the byte count of everything above (magic .. last payload)
 //   u32  crc            CRC-32 (IEEE, reflected 0xEDB88320) of those bytes
@@ -56,8 +56,20 @@ constexpr uint32_t kTrailerBytes = 8;
 struct Record {
     std::string          id;
     int32_t              formatVersion = 0;
-    std::vector<uint8_t> payload;   // empty today (the manifest); class C's state later
+    std::vector<uint8_t> payload;   // the extension's own state (RegisterPayload), else empty
 };
+
+// A class C extension's own state in its record. The writer runs when a save is
+// written -- possibly on the background-save worker thread, so it must only read
+// state it can copy safely -- and returns the payload bytes. The reader runs when
+// a save's manifest is accepted (ExtSave_ReadTail), on the main thread, with the
+// record's formatVersion; it must treat the bytes as untrusted. One pair per id,
+// registered once at boot; registering an id again replaces the pair.
+using PayloadWriter = std::vector<uint8_t> (*)();
+using PayloadReader = void (*)(int32_t formatVersion, const std::vector<uint8_t>& payload);
+void RegisterPayload(const char* id, PayloadWriter writer, PayloadReader reader);
+// Hand each record's payload to its id's reader (records with no reader: skipped).
+void DeliverPayloads(const std::vector<Record>& records);
 
 enum class Status : uint8_t {
     NoManifest,          // nothing there, or bytes that do not start with kMagic: not ours, ignored
@@ -86,7 +98,8 @@ Status Decode(const uint8_t* data, size_t size, std::vector<Record>& out);
 Status Validate(const std::vector<Record>& records, std::string* offending);
 
 // The registry's ACTIVE class B / C extensions as records, in table order
-// (the same set Ext::PseudoModsForSave reports).
+// (the same set Ext::PseudoModsForSave reports), each with its registered
+// writer's payload.
 std::vector<Record> ActiveRecords();
 // Encode(ActiveRecords()): zero bytes while no B / C extension is active.
 std::vector<uint8_t> EncodeActive();

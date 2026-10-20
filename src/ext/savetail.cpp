@@ -43,7 +43,39 @@ struct Reader {
     }
 };
 
+// The payload hooks (RegisterPayload). A handful of class C extensions at most:
+// a linear scan, filled at boot, read when a save is written or read.
+struct PayloadHooks {
+    std::string   id;
+    PayloadWriter writer = nullptr;
+    PayloadReader reader = nullptr;
+};
+std::vector<PayloadHooks>& Hooks() {
+    static std::vector<PayloadHooks> hooks;
+    return hooks;
+}
+const PayloadHooks* FindHooks(const std::string& id) {
+    for (const PayloadHooks& h : Hooks())
+        if (h.id == id) return &h;
+    return nullptr;
+}
+
 }  // namespace
+
+void RegisterPayload(const char* id, PayloadWriter writer, PayloadReader reader) {
+    if (id == nullptr) return;
+    for (PayloadHooks& h : Hooks()) {
+        if (h.id == id) { h.writer = writer; h.reader = reader; return; }
+    }
+    Hooks().push_back(PayloadHooks{id, writer, reader});
+}
+
+void DeliverPayloads(const std::vector<Record>& records) {
+    for (const Record& r : records) {
+        const PayloadHooks* h = FindHooks(r.id);
+        if (h != nullptr && h->reader != nullptr) h->reader(r.formatVersion, r.payload);
+    }
+}
 
 const char* StatusName(Status s) {
     switch (s) {
@@ -170,6 +202,8 @@ std::vector<Record> ActiveRecords() {
         Record r;
         r.id = e.id;
         r.formatVersion = e.formatVersion;
+        if (const PayloadHooks* h = FindHooks(r.id))
+            if (h->writer != nullptr) r.payload = h->writer();
         out.push_back(std::move(r));
     }
     return out;

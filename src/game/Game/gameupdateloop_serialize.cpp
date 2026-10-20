@@ -829,9 +829,12 @@ static void ExtSave_ReadTail(GameUpdateLoop* owner, IO::CompressedMemoryStream* 
     fprintf(stderr, "[ExtSave] manifest: %u B / C extension(s) locked for this game from the save:",
             static_cast<unsigned>(records.size()));
     for (const Ext::SaveTail::Record& r : records)
-        fprintf(stderr, " %s(v%d)", r.id.c_str(), r.formatVersion);
+        fprintf(stderr, " %s(v%d, %u payload bytes)", r.id.c_str(), r.formatVersion,
+                static_cast<unsigned>(r.payload.size()));
     fprintf(stderr, "\n");
     fflush(stderr);
+    // Class C state: each record's payload to its extension (savetail.h RegisterPayload).
+    Ext::SaveTail::DeliverPayloads(records);
 }
 
 // NOT RETAIL (ext.background_save, docs/extensions/handins/HITCH_SAVESNAP.md): the save arm

@@ -220,3 +220,37 @@ UNIT_TEST(ext_savetail_load_notice_status) {
     CHECK_EQ(Ext::PseudoModLoadStatus("Mods/x.pkm", 1), 1);
     Ext::Install(With({}), Ext::Profile::PerEntry, false);
 }
+
+// RegisterPayload: an active class C extension's writer fills its record, the
+// payload survives Encode / Decode, and DeliverPayloads hands it to the reader
+// with the record's format version; no writer = an empty payload, as before.
+namespace {
+std::vector<uint8_t> g_unitCReceived;
+int32_t              g_unitCVersion = 0;
+std::vector<uint8_t> UnitCWrite() { return {7, 8, 9}; }
+void UnitCRead(int32_t v, const std::vector<uint8_t>& p) { g_unitCVersion = v; g_unitCReceived = p; }
+}  // namespace
+
+UNIT_TEST(ext_savetail_payload_hooks) {
+    Ext::Install(With({"unit_b", "unit_c"}), Ext::Profile::PerEntry, false);
+    Ext::SaveTail::RegisterPayload("unit_c", &UnitCWrite, &UnitCRead);
+
+    const std::vector<Record> active = Ext::SaveTail::ActiveRecords();
+    CHECK_EQ(static_cast<int>(active.size()), 2);
+    CHECK(active[0].payload.empty());                            // unit_b: no writer
+    CHECK(active[1].payload == std::vector<uint8_t>({7, 8, 9}));  // unit_c: its writer
+
+    std::vector<Record> back;
+    const std::vector<uint8_t> bytes = Ext::SaveTail::EncodeActive();
+    CHECK(Ext::SaveTail::Decode(bytes.data(), bytes.size(), back) == Status::Ok);
+    g_unitCReceived.clear();
+    g_unitCVersion = 0;
+    Ext::SaveTail::DeliverPayloads(back);
+    CHECK_EQ(g_unitCVersion, 3);
+    CHECK(g_unitCReceived == std::vector<uint8_t>({7, 8, 9}));
+
+    // Unregistering (null hooks) restores the empty payload.
+    Ext::SaveTail::RegisterPayload("unit_c", nullptr, nullptr);
+    CHECK(Ext::SaveTail::ActiveRecords()[1].payload.empty());
+    Ext::Install(With({}), Ext::Profile::PerEntry, false);
+}
