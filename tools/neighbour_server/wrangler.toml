@@ -1,0 +1,15 @@
+# The neighbour-towns relay (docs/fork/NEIGHBOUR_TOWNS.md §3): one Worker, one Durable Object
+# per room. `npm run dev` runs it locally (no Cloudflare account needed); `npm run deploy`
+# puts it on your Cloudflare account (run `npx wrangler login` once first).
+name = "openba-neighbour"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed Durable Objects are the kind the Workers free plan offers.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
