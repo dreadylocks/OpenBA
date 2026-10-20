@@ -13,8 +13,9 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status: M0 done (2026-10-19): the game joins a room on the relay and the neighbour's chat lines
-appear in the event log. What was built, and how to try it: §7. Next steps: §6.
+Status (2026-10-19): M0 and M1 done. The game joins a room on the relay; in game, N opens the
+Neighbour panel to chat, send goods and send a family; the neighbour's lines, parcels and families
+arrive. What was built and how it was tested: §7 (M0), §8 (M1). Next steps: §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -190,7 +191,8 @@ town plus a mirror of the neighbour's buildings, roads and resource changes.
 ### Milestones
 - **M0 Plumbing** (DONE 2026-10-19, §7): game built and running on the PC; relay server up; the
   game connects, joins a room, shows a chat line in the event log; class C payload plumbing.
-- **M1 Letters** (works even on two separate maps): trade parcels and migrants.
+- **M1 Letters** (DONE 2026-10-19, §8; works on two separate maps): goods parcels, families,
+  chat from the game (the Neighbour panel).
 - **M2 Shared map**: seed from the server, hash check, two start towns, land claims, the
   neighbour's buildings mirrored, tinted and solid.
 - **M3 Shared roads and resources**: real neighbour roads; the same resource scatter on both
@@ -271,10 +273,13 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 1. DONE: the PC set up (§4); M0 (§7).
 2. The user deploys the relay to their Cloudflare account (`tools/neighbour_server/README.md`:
    `npx wrangler login`, `npm run deploy`); both players point `neighbour.server` at it.
-3. A way to SEND chat from the game (today only `Neighbour::SendChat` exists, no UI calls it):
-   a small chat box, or a key that opens one.
-4. M1 Letters: trade parcels and migrants (§2), then M2 (shared map, claims, mirrored buildings).
-5. Still ask the user before: pushing, opening a network port beyond 127.0.0.1, deploying.
+3. DONE (M1): the Neighbour panel, goods, families.
+4. M2: the shared map (seed from the relay, the world-hash check, two start towns), land claims,
+   the neighbour's buildings mirrored, tinted and solid (§2 "Mixed world design").
+5. M1 follow-ups, when wanted: barter through a merchant boat at the trading post (the plan's
+   original trade), an accept / refuse window for an arriving family, families walking in from
+   the map edge rather than appearing among the townspeople.
+6. Still ask the user before: pushing, opening a network port beyond 127.0.0.1, deploying.
 
 ---------------------------------------------------------------------------------------------
 
@@ -314,3 +319,51 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
   eye: the rows in the event log window (the logs show each one posted).
 - **Not done**: sending chat from the game (no UI yet); the Cloudflare deploy (needs the user's
   account); a resave-gate golden under the extension (no `Gate.sav` on this PC).
+
+---------------------------------------------------------------------------------------------
+
+## 8. M1 as built (2026-10-19)
+
+Simpler than §2 on purpose, so the two towns can exchange things now; the richer versions are
+follow-ups (§6).
+- **The Neighbour panel** (`src/ext/neighbour/neighbour_panel.cpp`, `src/ext/ui/Dialog/ExtensionsNeighbour.rsc`):
+  N opens / closes it in a game with `ext.neighbour` on (not while a text box has the keyboard).
+  A status line (room, the neighbour, parcels not yet sent / waiting), a chat box (Enter or Send;
+  Esc keeps the text), goods (`<` `>` pick a material the town holds, `-` `+` the amount
+  1..500, capped at the stock; Send goods) and the family that would move (Send this family).
+  Modal, does not pause. The chat box is the New Game dialog's name box with an empty filter;
+  `text_reader.cpp` learned `EditDescription` for it. Buttons are the shared Ok button's frame
+  with our caption.
+- **Goods** (`src/ext/neighbour/town.cpp`): sending takes the amount out of the town's storages at
+  once (count minus reserved). Receiving puts it into storages that accept it and have room
+  (largest fit per storage); what does not fit WAITS (saved) and is retried every ~10 s. Goods are
+  named on the wire by their template path (`Template\RawMaterialPotato.rsc:resource`); an unknown
+  path is dropped with a line in the log. No barter, no boat yet.
+- **Families**: "send" picks the town's smallest household that has an adult, never the town's
+  last family, and removes it in one frame, children first (`EntityList::QueueDestroy`; a child
+  whose last parent is removed first is buried by `CitizenComponent::OnRemove`). An arriving
+  family becomes new citizens the way a birth makes one (a copy of a townsperson's template,
+  `CitizenComponent::Initialize`, `RegisterEntity`), standing where a townsperson stands, the two
+  adults married; they find homes and work like accepted nomads. Ages travel in the game's own
+  age unit. No accept / refuse window, no walk from the edge yet.
+- **Delivery that loses nothing**: every parcel has an id. The sender keeps it in its OUTBOX (saved)
+  and sends it again on every join until the relay answers `stored`; the relay keeps it until the
+  receiver's `ack`, and a resend with the same id is not a second parcel; the receiver remembers
+  the last 128 ids it applied, so a repeat is acknowledged and dropped. One gap, as in any single
+  player game: a parcel received and then not saved (the game quit without a save) is gone.
+- **Save payload v2** (`protocol.h` SavedState, registry formatVersion 2): + outbox, received ids,
+  waiting parcels. v1 saves (M0) still load.
+- **Relay** (`tools/neighbour_server/src/index.js`): `parcel` -> `stored`, `ack`, parcels kept for an
+  absent town (at most 64, 8 KB each) and delivered on its join. `fake_neighbour.mjs`:
+  `--send-goods path:count`, `--send-family "age/gender/child;..."`, `/goods` and `/family` typed,
+  and it acknowledges what it receives.
+- **Tested on the PC**: unit 1186 tests, 0 failures (`ext_neighbour_parcel_bodies`, the v2 payload,
+  the panel resource); relay selftest 16 checks; the faithful gate loads a new game with no
+  `[Neighbour]` line. In game against the local relay and the fake town: a family of 3 arrived in
+  a new game; 30 Potato arrived; an unknown material was dropped safely; the panel opened (N), its
+  goods list matched the storage, Send goods sent 25 Firewood, typed chat with punctuation arrived;
+  on the user's Save0 (36 citizens) Send this family sent a family of 1 and the town ran on with no
+  crash. Not checked: capital letters typed (the test script could not send Shift for letters; the
+  game's key table has them); a save / load holding a v2 payload in game (covered by the unit
+  test only). `Save3.sav` crashes the port while loading, with or without the extension:
+  `docs/known_port_issues.md` row 1331.
