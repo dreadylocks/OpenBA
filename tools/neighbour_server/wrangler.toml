@@ -13,3 +13,12 @@ class_name = "Room"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# M2: the public list of rooms (the game's Multiplayer lobby).
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]

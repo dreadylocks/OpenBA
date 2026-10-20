@@ -5,7 +5,18 @@
 // it missed when it comes back (its hello carries the last number it saw).
 //
 //   GET /room/<name>   (WebSocket upgrade)   -> that room's Durable Object
+//   GET /lobby         (WebSocket upgrade)   -> the Directory: the public list of rooms
 //   GET /              -> a one-line health text
+//
+// ROOMS AND THE LOBBY (M2). A room made from the game's Multiplayer lobby is CREATED: its
+// creator sends {"t":"create"} with the password, its town name, the seed and the new-game
+// settings; the room keeps them and tells the Directory. Joining sends a hello as before, and
+// the welcome then carries the room's seed and settings so the joiner's game builds the same
+// map. A room never created (the settings.cfg route of M0 / M1) still works as before.
+// The Directory lists rooms that were active in the last kRoomIdleDays (name, creator town,
+// seats taken, settings; never a password), at most kMaxListedRooms, and limits each internet
+// address to kCreatesPerDay new rooms. Each town reports its world hash; the room says whether
+// the two towns built the same map.
 //
 // Every message is a JSON object with a string "t". Anything malformed, oversized or out of
 // order gets an {"t":"error"} and, for a bad hello, the line is closed.
@@ -22,6 +33,17 @@ const kMaxParcels = 64;          // waiting for one town
 const kMaxParcelBody = 8 * 1024;
 const kParcelId = /^[0-9a-z_-]{1,40}$/;
 const kSeats = 2;
+const kRoomIdleDays = 60;
+const kMaxListedRooms = 500;
+const kCreatesPerDay = 5;
+const kDayMs = 24 * 60 * 60 * 1000;
+// The new-game settings a room carries, besides the seed: the map size row and the disasters
+// switch as small whole numbers, and the start condition, terrain and climate as the game's
+// resource paths (the same data on both PCs resolves them to the same generators).
+const kIntSettings = ["size", "disasters"];
+const kPathSettings = ["start", "terrain", "climate"];
+const kSettingKeys = [...kIntSettings, ...kPathSettings];
+const kMaxPathChars = 160;
 // Flood guard: at most this many messages per socket in kWindowMs.
 const kBurst = 30;
 const kWindowMs = 10_000;
@@ -39,7 +61,12 @@ export default {
       const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
       const fwd = new Request(request);
       fwd.headers.set("X-Neighbour-Room", room);
+      fwd.headers.set("X-Neighbour-Ip", request.headers.get("CF-Connecting-IP") || "local");
       return stub.fetch(fwd);
+    }
+    if (url.pathname === "/lobby" || url.pathname === "/lobby/") {
+      if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
+      return env.DIRECTORY.get(env.DIRECTORY.idFromName("directory")).fetch(request);
     }
     if (url.pathname === "/") return new Response("OpenBA neighbour relay: connect to /room/<name>\n");
     return new Response("not found", { status: 404 });
@@ -69,7 +96,11 @@ export class Room {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ room: request.headers.get("X-Neighbour-Room") || "", seat: -1, name: "", window: 0, count: 0 });
+    server.serializeAttachment({
+      room: request.headers.get("X-Neighbour-Room") || "",
+      ip: request.headers.get("X-Neighbour-Ip") || "local",
+      seat: -1, name: "", window: 0, count: 0,
+    });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -78,6 +109,22 @@ export class Room {
 
   async meta() {
     return (await this.ctx.storage.get("meta")) || { passHash: null, seats: new Array(kSeats).fill(null), seq: 0 };
+  }
+
+  directory() {
+    return this.env.DIRECTORY.get(this.env.DIRECTORY.idFromName("directory"));
+  }
+
+  // Tell the Directory how this room stands (created rooms only; the Directory is the list).
+  async publish(room, meta) {
+    if (!meta.created) return;
+    const entry = {
+      name: room, creator: meta.creator || "", seats: meta.seats.filter((x) => x !== null).length,
+      lastActive: Date.now(), seed: meta.seed, ...meta.settings,
+    };
+    try {
+      await this.directory().fetch("https://directory/update", { method: "POST", body: JSON.stringify(entry) });
+    } catch { /* the list is best effort; the room itself is unaffected */ }
   }
 
   socketsFor(seat) {
@@ -111,12 +158,66 @@ export class Room {
     if (!msg || typeof msg !== "object" || typeof msg.t !== "string") return this.fail(ws, "no message type", false);
 
     if (msg.t === "hello") return this.onHello(ws, a, msg);
+    if (msg.t === "create") return this.onCreate(ws, a, msg);
     if (a.seat < 0) return this.fail(ws, "say hello first", true);
     if (msg.t === "chat") return this.onChat(ws, a, msg);
     if (msg.t === "parcel") return this.onParcel(ws, a, msg);
     if (msg.t === "ack") return this.onAck(ws, a, msg);
+    if (msg.t === "hash") return this.onHash(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
+  }
+
+  async onCreate(ws, a, msg) {
+    if (a.seat >= 0) return this.fail(ws, "already joined", false);
+    if (msg.v !== kProtocolVersion) return this.fail(ws, `this relay speaks protocol ${kProtocolVersion}; update the game or the relay`, true);
+    const meta = await this.meta();
+    if (meta.created || meta.seats.some((x) => x !== null)) return this.fail(ws, `a room called "${a.room}" already exists; pick another name`, true);
+    const name = clean(msg.name, kMaxNameChars);
+    if (!name) return this.fail(ws, "give your town a name", true);
+    if (typeof msg.pass !== "string" || msg.pass.length < 1) return this.fail(ws, "a room needs a password", true);
+    if (!Number.isInteger(msg.seed)) return this.fail(ws, "the room needs a seed", true);
+    const settings = {};
+    for (const k of kIntSettings) {
+      if (!Number.isInteger(msg[k]) || msg[k] < 0 || msg[k] > 64) return this.fail(ws, `bad setting ${k}`, true);
+      settings[k] = msg[k];
+    }
+    for (const k of kPathSettings) {
+      if (typeof msg[k] !== "string" || msg[k].length < 1 || msg[k].length > kMaxPathChars || /[ -]/.test(msg[k])) {
+        return this.fail(ws, `bad setting ${k}`, true);
+      }
+      settings[k] = msg[k];
+    }
+    // The creation allowance (per internet address, per day).
+    let allowed = true;
+    try {
+      const r = await this.directory().fetch("https://directory/allow", { method: "POST", body: JSON.stringify({ ip: a.ip }) });
+      allowed = r.ok;
+    } catch { allowed = true; }
+    if (!allowed) return this.fail(ws, `at most ${kCreatesPerDay} new rooms a day from one place; try again tomorrow`, true);
+    meta.created = true;
+    meta.creator = name;
+    meta.seed = msg.seed;
+    meta.settings = settings;
+    meta.createdAt = Date.now();
+    meta.passHash = await passwordHash(a.room, msg.pass.slice(0, kMaxPassChars));
+    await this.ctx.storage.put("meta", meta);
+    // Now an ordinary join as the room's first town.
+    return this.onHello(ws, a, { ...msg, t: "hello", lastSeq: 0 });
+  }
+
+  async onHash(ws, a, msg) {
+    if (typeof msg.hash !== "string" || !/^[0-9a-fA-F]{1,32}$/.test(msg.hash)) return this.fail(ws, "bad world hash", false);
+    const meta = await this.meta();
+    meta.hashes = meta.hashes || [null, null];
+    meta.hashes[a.seat] = msg.hash.toLowerCase();
+    await this.ctx.storage.put("meta", meta);
+    const other = meta.hashes[1 - a.seat];
+    if (!other) return;   // the neighbour has not built its map yet; it will be told when it does
+    const same = other === meta.hashes[a.seat];
+    const report = (seat) => ({ t: "hashCheck", same, mine: meta.hashes[seat], theirs: meta.hashes[1 - seat] });
+    this.send(ws, report(a.seat));
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, report(1 - a.seat));
   }
 
   async onHello(ws, a, msg) {
@@ -127,6 +228,7 @@ export class Room {
     if (!name) return this.fail(ws, "set neighbour.name in settings.cfg", true);
 
     const meta = await this.meta();
+    if (msg.join === true && !meta.created) return this.fail(ws, `there is no room called "${a.room}"`, true);
     const hash = await passwordHash(a.room, pass);
     if (meta.passHash === null) meta.passHash = hash;              // the first town sets it
     else if (meta.passHash !== hash) return this.fail(ws, "wrong room password", true);
@@ -148,7 +250,14 @@ export class Room {
     const other = 1 - seat;
     const peerName = meta.seats[other] || "";
     const peerOnline = this.socketsFor(other).length > 0;
-    this.send(ws, { t: "welcome", seat, peer: peerName, online: peerOnline });
+    const welcome = { t: "welcome", seat, peer: peerName, online: peerOnline, created: !!meta.created };
+    if (meta.created) {
+      welcome.seed = meta.seed;
+      welcome.creator = meta.creator;
+      for (const k of kSettingKeys) welcome[k] = meta.settings[k];
+    }
+    this.send(ws, welcome);
+    await this.publish(a.room, meta);
 
     // What it missed: the neighbour's lines newer than the last one it saw.
     const lastSeq = Number.isInteger(msg.lastSeq) && msg.lastSeq > 0 ? msg.lastSeq : 0;
@@ -227,5 +336,86 @@ export class Room {
     // Still connected on another line (a reconnect replaced this one): not a departure.
     if (this.socketsFor(a.seat).some((s) => s !== ws)) return;
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "peer", name: a.name, online: false });
+    await this.publish(a.room, await this.meta());
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Directory: one Durable Object holding the public list of created rooms.
+//   internal (from Room objects): POST /update {room entry}, POST /allow {ip}
+//   public (the game's lobby, WebSocket /lobby): {"t":"list"} -> {"t":"room", ...} per room,
+//   newest activity first, then {"t":"roomsEnd", "count": n}
+// ---------------------------------------------------------------------------------------------
+export class Directory {
+  constructor(ctx, env) {
+    this.ctx = ctx;
+    this.env = env;
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
+  }
+
+  async rooms() {
+    const all = (await this.ctx.storage.get("rooms")) || {};
+    const cutoff = Date.now() - kRoomIdleDays * kDayMs;
+    let changed = false;
+    for (const [name, r] of Object.entries(all)) {
+      if (!r || r.lastActive < cutoff) { delete all[name]; changed = true; }
+    }
+    if (changed) await this.ctx.storage.put("rooms", all);
+    return all;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/update") {
+      const e = await request.json();
+      if (!e || typeof e.name !== "string") return new Response("bad", { status: 400 });
+      const all = await this.rooms();
+      all[e.name] = e;
+      const names = Object.keys(all);
+      if (names.length > kMaxListedRooms) {   // drop the longest idle
+        names.sort((x, y) => all[x].lastActive - all[y].lastActive);
+        for (const n of names.slice(0, names.length - kMaxListedRooms)) delete all[n];
+      }
+      await this.ctx.storage.put("rooms", all);
+      return new Response("ok");
+    }
+    if (request.method === "POST" && url.pathname === "/allow") {
+      const { ip } = await request.json();
+      const key = `creates:${ip || "?"}`;
+      const now = Date.now();
+      const recent = ((await this.ctx.storage.get(key)) || []).filter((t) => t > now - kDayMs);
+      if (recent.length >= kCreatesPerDay) return new Response("limit", { status: 429 });
+      recent.push(now);
+      await this.ctx.storage.put(key, recent);
+      return new Response("ok");
+    }
+    if (request.headers.get("Upgrade") !== "websocket") return new Response("not found", { status: 404 });
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ window: 0, count: 0 });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, raw) {
+    const a = ws.deserializeAttachment() || { window: 0, count: 0 };
+    const now = Date.now();
+    if (now - a.window > kWindowMs) { a.window = now; a.count = 0; }
+    if (++a.count > kBurst) { ws.serializeAttachment(a); return; }
+    ws.serializeAttachment(a);
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (!msg || msg.t !== "list") return;
+    const all = Object.values(await this.rooms()).sort((x, y) => y.lastActive - x.lastActive);
+    for (const r of all) {
+      const out = { t: "room", name: r.name, creator: r.creator, seats: r.seats, lastActive: Math.floor(r.lastActive / 1000) };
+      for (const k of kSettingKeys) out[k] = r[k];
+      try { ws.send(JSON.stringify(out)); } catch { return; }
+    }
+    try { ws.send(JSON.stringify({ t: "roomsEnd", count: all.length })); } catch { /* gone */ }
+  }
+
+  async webSocketClose(ws, code, reason) {
+    try { ws.close(code, reason); } catch { /* closed */ }
   }
 }

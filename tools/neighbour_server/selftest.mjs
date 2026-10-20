@@ -99,6 +99,71 @@ a.ws.send(JSON.stringify({ t: "parcel", id: "BAD ID", kind: "goods", body: "x:1"
 const e3 = await tryWait(a.wait((m) => m.t === "error" && /parcel id/.test(m.why)));
 check(!!e3, "a malformed parcel is refused");
 
+// M2: a CREATED room (the lobby's route): settings and seed kept and handed to the joiner, the
+// room on the public list, a taken name refused, a join to a missing room refused, the world
+// hash compared.
+const lobbyRoom = `lobbytest-${Date.now()}`;
+const settings = { seed: 123456789, size: 1, terrain: "Game/Terrain/Valleys.rsc", climate: "Game/Climate/Mild.rsc", start: "Game/StartCondition/Easy.rsc", disasters: 1 };
+function opener(roomName, first) {
+  const ws = new WebSocket(`${server}/room/${encodeURIComponent(roomName)}`);
+  const inbox = [];
+  const waiters = [];
+  ws.addEventListener("open", () => ws.send(JSON.stringify(first)));
+  ws.addEventListener("message", (ev) => {
+    const m = JSON.parse(ev.data);
+    inbox.push(m);
+    for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+  });
+  return {
+    ws, inbox,
+    wait: (pred, ms = 5000) => {
+      const hit = inbox.find(pred);
+      if (hit) return Promise.resolve(hit);
+      return new Promise((resolve, reject) => { waiters.push({ pred, resolve }); setTimeout(() => reject(new Error("timed out")), ms); });
+    },
+  };
+}
+const creator = opener(lobbyRoom, { t: "create", v: 1, pass: "pw2", name: "Creatorville", ...settings });
+const cw = await tryWait(creator.wait((m) => m.t === "welcome"));
+check(cw && cw.created === true && cw.seed === settings.seed && cw.size === 1 && cw.terrain === settings.terrain && cw.seat === 0,
+      "creating a room keeps its seed and settings");
+const dup = opener(lobbyRoom, { t: "create", v: 1, pass: "x", name: "Copycat", ...settings });
+const de = await tryWait(dup.wait((m) => m.t === "error"));
+check(de && /already exists/.test(de.why), "a taken room name is refused");
+const missing = opener(`nosuchroom-${Date.now()}`, { t: "hello", v: 1, pass: "x", name: "Lost", join: true });
+const me = await tryWait(missing.wait((m) => m.t === "error"));
+check(me && /no room/.test(me.why), "joining a room that does not exist is refused");
+const joiner = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true });
+const jw = await tryWait(joiner.wait((m) => m.t === "welcome"));
+check(jw && jw.seed === settings.seed && jw.climate === settings.climate && jw.start === settings.start && jw.disasters === 1 && jw.creator === "Creatorville",
+      "the joiner gets the room's seed and settings");
+
+const lobby = new WebSocket(`${server}/lobby`);
+const listed = [];
+const listDone = new Promise((resolve) => {
+  lobby.addEventListener("message", (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.t === "room") listed.push(m);
+    if (m.t === "roomsEnd") resolve(m);
+  });
+  setTimeout(() => resolve(null), 5000);
+});
+lobby.addEventListener("open", () => lobby.send(JSON.stringify({ t: "list" })));
+const end = await listDone;
+const mine = listed.find((r) => r.name === lobbyRoom);
+check(!!end && mine && mine.creator === "Creatorville" && mine.seats === 2 && mine.size === 1 && !("pass" in mine) && !("passHash" in mine),
+      "the lobby lists the room (seats, settings) and no password");
+lobby.close();
+
+creator.ws.send(JSON.stringify({ t: "hash", hash: "abcdef12" }));
+joiner.ws.send(JSON.stringify({ t: "hash", hash: "ABCDEF12" }));
+const h1 = await tryWait(creator.wait((m) => m.t === "hashCheck"));
+check(h1 && h1.same === true, "two towns with the same world hash are told the maps match");
+joiner.ws.send(JSON.stringify({ t: "hash", hash: "00000001" }));
+const h2 = await tryWait(joiner.wait((m) => m.t === "hashCheck" && m.same === false));
+check(h2 && h2.theirs === "abcdef12", "a different world hash is reported to both towns");
+creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();
+
 const bad = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
 await new Promise((r) => bad.addEventListener("open", r));
 bad.send('{"t":"chat","text":"no hello"}');
