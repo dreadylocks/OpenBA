@@ -11,6 +11,11 @@ What a room does:
   20 newest lines it missed when it comes back, because the game remembers (in its save) the last
   line number it saw.
 - It tells each town when the other one **arrives or leaves**.
+- **Lobby rooms** (M2): a room created from the game's Multiplayer lobby keeps its seed and map
+  settings and hands them to the town that joins; `/lobby` lists such rooms (never a password;
+  rooms idle 60 days drop off; 5 new rooms a day per address, not counted on the local relay).
+- **The shared map**: it compares the two towns' world hash, referees land claims (first come
+  first served) and keeps each town's buildings so the other town can draw them.
 
 ## Run it on this PC (no Cloudflare account needed)
 
@@ -26,8 +31,8 @@ The relay is then at `ws://127.0.0.1:8787` (this PC only). In another terminal:
 node selftest.mjs ws://127.0.0.1:8787
 ```
 
-The self-test checks two towns chatting, a missed line being replayed, a wrong password and a
-third town being refused.
+The self-test (33 checks) covers chat and missed lines, passwords and full rooms, parcels,
+lobby rooms and their list, the world-hash check, land claims and mirrored buildings.
 
 ## Pretend to be the neighbour
 

@@ -44,6 +44,15 @@ const kIntSettings = ["size", "disasters"];
 const kPathSettings = ["start", "terrain", "climate"];
 const kSettingKeys = [...kIntSettings, ...kPathSettings];
 const kMaxPathChars = 160;
+// Land claims and mirrored buildings (M2). A claim is a list of tile rectangles "x,y,w,h;...";
+// the room keeps who owns each tile in kClaimBlock x kClaimBlock blocks (one string of seat
+// digits per block, "." = free). A town's buildings are kept as the latest record per building id.
+const kMaxMapDim = 1024;
+const kClaimBlock = 32;
+const kMaxClaimRects = 64;
+const kMaxClaimTiles = 4096;   // per message
+const kMaxBuildings = 4000;    // per town
+const kBuildingId = /^[0-9a-z_-]{1,40}$/;
 // Flood guard: at most this many messages per socket in kWindowMs.
 const kBurst = 30;
 const kWindowMs = 10_000;
@@ -164,6 +173,10 @@ export class Room {
     if (msg.t === "parcel") return this.onParcel(ws, a, msg);
     if (msg.t === "ack") return this.onAck(ws, a, msg);
     if (msg.t === "hash") return this.onHash(ws, a, msg);
+    if (msg.t === "claim") return this.onClaim(ws, a, msg);
+    if (msg.t === "release") return this.onRelease(ws, a, msg);
+    if (msg.t === "build") return this.onBuild(ws, a, msg);
+    if (msg.t === "unbuild") return this.onUnbuild(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
   }
@@ -189,8 +202,10 @@ export class Room {
       settings[k] = msg[k];
     }
     // The creation allowance (per internet address, per day).
+    // The local test relay (wrangler dev) sees no outside address: no allowance there.
+    const localTest = a.ip === "local" || a.ip === "127.0.0.1" || a.ip === "::1";
     let allowed = true;
-    try {
+    if (!localTest) try {
       const r = await this.directory().fetch("https://directory/allow", { method: "POST", body: JSON.stringify({ ip: a.ip }) });
       allowed = r.ok;
     } catch { allowed = true; }
@@ -204,6 +219,119 @@ export class Room {
     await this.ctx.storage.put("meta", meta);
     // Now an ordinary join as the room's first town.
     return this.onHello(ws, a, { ...msg, t: "hello", lastSeq: 0 });
+  }
+
+  // ---- land claims ----------------------------------------------------------------------------
+
+  parseRects(text) {
+    if (typeof text !== "string" || text.length === 0 || text.length > 4096) return null;
+    const rects = [];
+    let tiles = 0;
+    for (const part of text.split(";")) {
+      const n = part.split(",").map((x) => Number(x));
+      if (n.length !== 4 || n.some((v) => !Number.isInteger(v) || v < 0 || v > kMaxMapDim)) return null;
+      const [x, y, w, h] = n;
+      if (w < 1 || h < 1 || x + w > kMaxMapDim || y + h > kMaxMapDim) return null;
+      tiles += w * h;
+      if (rects.length >= kMaxClaimRects || tiles > kMaxClaimTiles) return null;
+      rects.push({ x, y, w, h });
+    }
+    return rects;
+  }
+
+  // Visit every tile of `rects`, block by block; `fn(block, offset)` reads or writes one char.
+  async eachTile(rects, write, fn) {
+    const blocks = new Map();
+    for (const r of rects) {
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const key = `claims:${Math.floor(x / kClaimBlock)}:${Math.floor(y / kClaimBlock)}`;
+          if (!blocks.has(key)) {
+            const v = (await this.ctx.storage.get(key)) || ".".repeat(kClaimBlock * kClaimBlock);
+            blocks.set(key, v.split(""));
+          }
+          const off = (y % kClaimBlock) * kClaimBlock + (x % kClaimBlock);
+          if (fn(blocks.get(key), off) === false) return false;
+        }
+      }
+    }
+    if (write) {
+      const out = {};
+      for (const [k, v] of blocks) out[k] = v.join("");
+      await this.ctx.storage.put(out);
+    }
+    return true;
+  }
+
+  async onClaim(ws, a, msg) {
+    const id = typeof msg.id === "string" && kParcelId.test(msg.id) ? msg.id : "";
+    const rects = this.parseRects(msg.rects);
+    if (!id || !rects) return this.fail(ws, "bad claim", false);
+    const mine = String(a.seat);
+    let takenBy = null;
+    await this.eachTile(rects, false, (b, off) => {
+      if (b[off] !== "." && b[off] !== mine) { takenBy = b[off]; return false; }
+      return true;
+    });
+    if (takenBy !== null) return this.send(ws, { t: "claimed", id, ok: false, why: "your neighbour already holds that land" });
+    await this.eachTile(rects, true, (b, off) => { b[off] = mine; return true; });
+    this.send(ws, { t: "claimed", id, ok: true });
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "claims", seat: a.seat, rects: msg.rects });
+  }
+
+  async onRelease(ws, a, msg) {
+    const rects = this.parseRects(msg.rects);
+    if (!rects) return this.fail(ws, "bad release", false);
+    const mine = String(a.seat);
+    await this.eachTile(rects, true, (b, off) => { if (b[off] === mine) b[off] = "."; return true; });
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "released", seat: a.seat, rects: msg.rects });
+  }
+
+  // Everything the neighbour holds, for a town that just joined: one message per block.
+  async sendClaims(ws, seat) {
+    const other = String(1 - seat);
+    const all = await this.ctx.storage.list({ prefix: "claims:" });
+    for (const [key, v] of all) {
+      if (!v.includes(other)) continue;
+      const [, bx, by] = key.split(":");
+      this.send(ws, { t: "claimBlock", bx: Number(bx), by: Number(by), size: kClaimBlock, owner: v.replace(new RegExp(`[^${other}]`, "g"), ".") });
+    }
+  }
+
+  // ---- mirrored buildings ----------------------------------------------------------------------
+
+  async onBuild(ws, a, msg) {
+    const id = typeof msg.id === "string" && kBuildingId.test(msg.id) ? msg.id : "";
+    if (!id || typeof msg.tmpl !== "string" || msg.tmpl.length < 1 || msg.tmpl.length > kMaxPathChars) {
+      return this.fail(ws, "bad building", false);
+    }
+    const rec = { id, tmpl: msg.tmpl };
+    for (const k of ["x", "y", "z", "rot", "tx", "ty", "tw", "th", "built"]) {
+      if (!Number.isInteger(msg[k]) || Math.abs(msg[k]) > 10_000_000) return this.fail(ws, `bad building ${k}`, false);
+      rec[k] = msg[k];
+    }
+    rec.grp = Number.isInteger(msg.grp) && msg.grp >= 0 && msg.grp < 64 ? msg.grp : 0;   // the model variant
+    const key = `mirror:${a.seat}`;
+    const all = (await this.ctx.storage.get(key)) || {};
+    if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
+    all[id] = rec;
+    await this.ctx.storage.put(key, all);
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "build", ...rec });
+  }
+
+  async onUnbuild(ws, a, msg) {
+    const id = typeof msg.id === "string" && kBuildingId.test(msg.id) ? msg.id : "";
+    if (!id) return this.fail(ws, "bad building", false);
+    const key = `mirror:${a.seat}`;
+    const all = (await this.ctx.storage.get(key)) || {};
+    if (id in all) { delete all[id]; await this.ctx.storage.put(key, all); }
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "unbuild", id });
+  }
+
+  async sendMirror(ws, seat) {
+    const all = (await this.ctx.storage.get(`mirror:${1 - seat}`)) || {};
+    for (const rec of Object.values(all)) this.send(ws, { t: "build", ...rec });
+    this.send(ws, { t: "mirrorEnd", count: Object.keys(all).length });
   }
 
   async onHash(ws, a, msg) {
@@ -270,6 +398,11 @@ export class Room {
     // Parcels that waited for this town.
     for (const p of await this.parcels()) {
       if (p.to === seat) this.send(ws, { t: "parcel", id: p.id, kind: p.kind, body: p.body, from: p.from });
+    }
+    // The neighbour's land and buildings (a shared-map room).
+    if (meta.created) {
+      await this.sendClaims(ws, seat);
+      await this.sendMirror(ws, seat);
     }
   }
 

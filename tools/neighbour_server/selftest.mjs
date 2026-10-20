@@ -162,6 +162,45 @@ check(h1 && h1.same === true, "two towns with the same world hash are told the m
 joiner.ws.send(JSON.stringify({ t: "hash", hash: "00000001" }));
 const h2 = await tryWait(joiner.wait((m) => m.t === "hashCheck" && m.same === false));
 check(h2 && h2.theirs === "abcdef12", "a different world hash is reported to both towns");
+// Land claims: first come first served, the neighbour told, released land free again.
+creator.ws.send(JSON.stringify({ t: "claim", id: "cl1", rects: "10,10,3,3" }));
+const cl1 = await tryWait(creator.wait((m) => m.t === "claimed" && m.id === "cl1"));
+check(cl1 && cl1.ok === true, "a claim on free land is granted");
+const told = await tryWait(joiner.wait((m) => m.t === "claims" && m.rects === "10,10,3,3"));
+check(told && told.seat === 0, "the neighbour is told about the claim");
+joiner.ws.send(JSON.stringify({ t: "claim", id: "cl2", rects: "11,11,2,2" }));
+const cl2 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl2"));
+check(cl2 && cl2.ok === false, "a claim overlapping the neighbour's land is refused");
+joiner.ws.send(JSON.stringify({ t: "claim", id: "cl3", rects: "40,40,2,2;50,50,1,1" }));
+const cl3 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl3"));
+check(cl3 && cl3.ok === true, "a claim elsewhere is granted");
+joiner.ws.send(JSON.stringify({ t: "claim", id: "cl4", rects: "1,2,3" }));
+check(!!(await tryWait(joiner.wait((m) => m.t === "error" && /claim/.test(m.why)))), "a malformed claim is refused");
+
+// Mirrored buildings: passed on, kept, and handed to a town that joins later.
+creator.ws.send(JSON.stringify({ t: "build", id: "b1", tmpl: "Template\\WoodHouse.rsc", x: 1250, y: -300, z: 40, rot: 90, tx: 10, ty: 10, tw: 3, th: 3, built: 25 }));
+const b1 = await tryWait(joiner.wait((m) => m.t === "build" && m.id === "b1"));
+check(b1 && b1.tmpl === "Template\\WoodHouse.rsc" && b1.built === 25 && b1.tw === 3, "a building is mirrored to the neighbour");
+creator.ws.send(JSON.stringify({ t: "build", id: "b1", tmpl: "Template\\WoodHouse.rsc", x: 1250, y: -300, z: 40, rot: 90, tx: 10, ty: 10, tw: 3, th: 3, built: 100 }));
+await tryWait(joiner.wait((m) => m.t === "build" && m.id === "b1" && m.built === 100));
+joiner.ws.close();
+await new Promise((r) => setTimeout(r, 300));
+const rejoin = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
+const blk = await tryWait(rejoin.wait((m) => m.t === "claimBlock"));
+check(blk && blk.bx === 0 && blk.by === 0 && blk.owner[10 * 32 + 10] === "0" && blk.owner[40 * 32 + 40] !== "1",
+      "a town joining gets the neighbour's land (and only the neighbour's)");
+const mEnd = await tryWait(rejoin.wait((m) => m.t === "mirrorEnd"));
+const b1again = rejoin.inbox.find((m) => m.t === "build" && m.id === "b1");
+check(mEnd && mEnd.count === 1 && b1again && b1again.built === 100, "a town joining gets the neighbour's buildings, up to date");
+creator.ws.send(JSON.stringify({ t: "unbuild", id: "b1" }));
+check(!!(await tryWait(rejoin.wait((m) => m.t === "unbuild" && m.id === "b1"))), "a removed building is removed from the mirror");
+creator.ws.send(JSON.stringify({ t: "release", rects: "10,10,3,3" }));
+await tryWait(rejoin.wait((m) => m.t === "released"));
+rejoin.ws.send(JSON.stringify({ t: "claim", id: "cl5", rects: "11,11,2,2" }));
+const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"));
+check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
+rejoin.ws.close();
+
 creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();
 
 const bad = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
