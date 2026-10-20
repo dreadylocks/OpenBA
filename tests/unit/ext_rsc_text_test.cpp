@@ -37,11 +37,12 @@ bool ParseEmbedded(const char* path, File& f) {
 }  // namespace
 
 UNIT_TEST(ext_rsc_text_embedded_files) {
-    CHECK(kEmbeddedCount == 4);
+    CHECK(kEmbeddedCount == 5);
     CHECK(Embedded("Dialog/Extensions.rsc") != nullptr);
     CHECK(Embedded("Dialog/EnhancedOptions.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsStringTable.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsNeighbour.rsc") != nullptr);   // ext.neighbour's panel (this fork)
+    CHECK(Embedded("Dialog/ExtensionsLobby.rsc") != nullptr);       // ext.neighbour's lobby (M2)
 }
 
 // ext.neighbour's panel (this fork): it parses, its dialog is modal without pausing the game, and
@@ -115,9 +116,9 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
     CHECK(ParseEmbedded("Dialog/ExtensionsStringTable.rsc", s));
     CHECK(s.objects.size() == 1 && s.objects[0].type == "StringTable" && s.objects[0].name == "resource");
     const Field* strings = s.objects[0].body.Find("_strings");
-    CHECK(strings && strings->blocks.size() == 32);
-    if (strings && strings->blocks.size() == 32) {
-        const Field* t = strings->blocks[31].Find("_text");
+    CHECK(strings && strings->blocks.size() == 41);
+    if (strings && strings->blocks.size() == 41) {
+        const Field* t = strings->blocks[40].Find("_text");
         CHECK(t && t->tokens[0].text.find("~n~n@0 [@1]") != std::string::npos);
     }
 }

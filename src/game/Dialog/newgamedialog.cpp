@@ -57,6 +57,8 @@
 #include "Dialog/exe_bodies.h"
 #include "system/MemoryAllocator.h"   // B3R: the allocator doors
 #include "rt_crt.h"   // rtcrt::StrICmp, retail's _stricmp (D.4 Q9)
+#include "ext/neighbour/neighbour.h"     // EXT SEAM: Neighbour::BeforeNewGame / ClearLobbyStart (NOT RETAIL)
+#include "ext/neighbour/lobby_panel.h"   // EXT SEAM: Neighbour::Lobby_Open (a refused create) (NOT RETAIL)
 
 // ============================================================
 // Helper: find element by name, returns the typed element
@@ -672,6 +674,16 @@ void* MainMenuDialog::StartNewGame(const System::String& name, uint32_t seed, ui
                                    ClimateGenerator* climateGen,
                                    uint32_t scenarioResIdx,
                                    const Object::InternalPtr<Achievement::AchievementInstance>* savedStateIBP) {
+    // EXT SEAM (NOT RETAIL, ext.neighbour M2): a game the Multiplayer lobby is creating a room for
+    // registers the room with these settings first; a refusal (a taken name, no network) goes back
+    // to the lobby with the reason and starts nothing. Any other game: nothing happens here.
+    {
+        std::string why;
+        if (!Neighbour::BeforeNewGame(seed, terrainSize, disastersOff, mapGen, terrainGen, climateGen, why)) {
+            Neighbour::Lobby_Open(this, "Could not create the room: " + why);
+            return nullptr;
+        }
+    }
     {
         LoadTime::Stamp("newgame.click");   // NOT RETAIL: print-only
         fprintf(stderr, "[StartNewGame] ENTER worldSetup=%p seed=%u size=%u disastersOff=%d "
@@ -755,6 +767,7 @@ void NewGameDialog::OnElementEvent(Object::InternalPtr<UI::Element>* /*element*/
         }
         if (eventData == 3) {
             // buttonCancel: close dialog
+            Neighbour::ClearLobbyStart();   // EXT SEAM (NOT RETAIL): a lobby "Create room" given up
             Object::InternalPtr<UI::DialogInstance> basePtr(this);
             _ui->CloseDialog(&basePtr);
             return;

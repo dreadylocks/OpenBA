@@ -351,3 +351,78 @@ UNIT_TEST(ext_neighbour_room_url) {
                 "ws://127.0.0.1:8787/room/Our%20Two%20Towns%21");
     CHECK_STREQ(Neighbour::RoomUrl("ws://h", "a/b?c").c_str(), "ws://h/room/a%2Fb%3Fc");
 }
+
+// ---------------------------------------------------------------------------
+// M2: the lobby's conversations (lobby.cpp) over the fake transport
+// ---------------------------------------------------------------------------
+#include "ext/neighbour/lobby.h"
+
+UNIT_TEST(ext_neighbour_lobby_settings) {
+    Message m("welcome");
+    m.SetInt("seed", 4000000000LL).SetInt("size", 1).SetInt("disasters", 0)
+     .Set("start", "Game/StartCondition/StartEasy.rsc:resource").Set("terrain", "Game\\Terrain\\Valleys.rsc")
+     .Set("climate", "Game/Climate/Mild.rsc");
+    Neighbour::RoomSettings s;
+    CHECK(Neighbour::ReadSettings(m, s));
+    CHECK_EQ(s.seed, 4000000000LL);
+    CHECK_EQ(s.size, 1);
+    CHECK(!s.disasters);
+    CHECK_STREQ(Neighbour::DescribeSettings(s).c_str(), "Medium map, Valleys, Mild, StartEasy start, disasters off");
+    Message bad = m;
+    bad.SetInt("size", 3);
+    CHECK(!Neighbour::ReadSettings(bad, s));
+    Message noPath("welcome");
+    noPath.SetInt("seed", 1).SetInt("size", 0).SetInt("disasters", 1);
+    CHECK(!Neighbour::ReadSettings(noPath, s));
+    CHECK_STREQ(Neighbour::LobbyUrl("wss://x.dev/").c_str(), "wss://x.dev/lobby");
+}
+
+UNIT_TEST(ext_neighbour_lobby_list_and_join) {
+    FakeNet net;
+    g_net = &net;
+    // The list: two rooms (one with a bad size, dropped), then the end.
+    net.toReceive.push_back("{\"t\":\"room\",\"name\":\"river\",\"creator\":\"Ann\",\"seats\":1,\"size\":2,\"disasters\":1,"
+                            "\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\",\"lastActive\":5}");
+    net.toReceive.push_back("{\"t\":\"room\",\"name\":\"broken\",\"seats\":1,\"size\":9,\"disasters\":1,"
+                            "\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
+    net.toReceive.push_back("{\"t\":\"roomsEnd\",\"count\":2}");
+    std::vector<Neighbour::RoomInfo> rooms;
+    std::string why;
+    CHECK(Neighbour::ListRooms(&MakeFake, "ws://fake", rooms, why, 3000));
+    CHECK_EQ(static_cast<int>(rooms.size()), 1);
+    if (rooms.size() == 1) {
+        CHECK_STREQ(rooms[0].name.c_str(), "river");
+        CHECK_EQ(rooms[0].seats, 1);
+        CHECK_EQ(rooms[0].settings.size, 2);
+    }
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        CHECK(!net.sent.empty() && net.sent[0] == "{\"t\":\"list\"}");
+        net.sent.clear();
+    }
+
+    // A join: the welcome's seed and settings come back; the hello asked to join.
+    net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"peer\":\"Ann\",\"online\":true,\"created\":true,\"creator\":\"Ann\","
+                            "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
+    Neighbour::RoomJoin j;
+    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", j, why, 3000));
+    CHECK_EQ(j.seat, 1);
+    CHECK_EQ(j.settings.seed, 77);
+    CHECK_STREQ(j.creator.c_str(), "Ann");
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        CHECK(!net.sent.empty() && net.sent[0].find("\"join\":true") != std::string::npos);
+    }
+
+    // A refusal ends the conversation with the relay's reason; a room without settings is refused too.
+    net.toReceive.push_back("{\"t\":\"error\",\"why\":\"wrong room password\"}");
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "bad", "Bob", j, why, 3000));
+    CHECK_STREQ(why.c_str(), "wrong room password");
+    net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":0,\"peer\":\"\",\"online\":false,\"created\":false}");
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "old", "pw", "Bob", j, why, 3000));
+    CHECK(why.find("lobby") != std::string::npos);
+
+    // No answer: a timeout, not a hang.
+    CHECK(!Neighbour::ListRooms(&MakeFake, "ws://fake", rooms, why, 300));
+    g_net = nullptr;
+}

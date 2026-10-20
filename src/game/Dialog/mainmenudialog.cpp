@@ -26,6 +26,7 @@
 #include "Game/GameLoaderLoop.h"
 #include "Dialog/ModDialog.h"
 #include "Dialog/ExtensionsDialog.h"   // EXT SEAM: the Extensions button (NOT RETAIL)
+#include "ext/neighbour/lobby_panel.h"    // EXT SEAM: ext.neighbour's Multiplayer button (NOT RETAIL)
 #include "Dialog/NewGameDialog.h"
 #include "Dialog/MapParamsDialog.h"
 #include "Dialog/AchievementDialog.h"
@@ -538,6 +539,7 @@ void MainMenuDialog::OnOpened() {
     // Extensions button beside Mods. Retail's steps above are untouched; under
     // the gate's command-line faithful profile this adds nothing.
     ExtensionsDialog_AttachMenuButton(this);
+    Neighbour::Lobby_AttachMenuButton(this);   // EXT SEAM: Multiplayer, front end only (NOT RETAIL)
 }
 
 // ============================================================
@@ -656,6 +658,11 @@ void MainMenuDialog::OnElementEvent(Object::InternalPtr<UI::Element>* /*element*
         // AttachMenuButton adds in OnOpened. Retail has no id 13.
         printf("[MainMenuDialog::OnCommand] -> OpenExtensions (ExtensionsDialog)\n");
         ExtensionsDialog_OpenFromMainMenu(this);
+        break;
+    case Neighbour::kMultiplayerMenuButtonId:
+        // EXT SEAM (NOT RETAIL): ext.neighbour's Multiplayer button (lobby_panel.cpp). Retail has no id 14.
+        printf("[MainMenuDialog::OnCommand] -> Multiplayer lobby\n");
+        Neighbour::Lobby_Open(this, std::string());
         break;
     default:
         printf("[MainMenuDialog::OnCommand] button id=%d not yet wired in standalone\n", id);

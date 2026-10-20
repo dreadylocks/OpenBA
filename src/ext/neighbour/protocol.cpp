@@ -578,6 +578,11 @@ std::vector<uint8_t> EncodeState(const SavedState& s) {
     PutU32(out, static_cast<uint32_t>(n));
     for (size_t i = s.received.size() - n; i < s.received.size(); ++i) PutStr(out, s.received[i]);
     PutParcels(out, s.waiting);
+    // v3
+    PutStr(out, s.town.substr(0, kMaxNameChars));
+    PutStr(out, s.pass.substr(0, 128));
+    PutStr(out, s.server.substr(0, 256));
+    PutStr(out, s.worldHash.substr(0, 32));
     return out;
 }
 
@@ -598,6 +603,10 @@ bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, Saved
             s.received.push_back(std::move(id));
         }
         if (!GetParcels(r, s.waiting)) return false;
+    }
+    if (formatVersion >= 3) {
+        if (!r.Str(s.town, kMaxNameChars) || !r.Str(s.pass, 128) || !r.Str(s.server, 256) || !r.Str(s.worldHash, 32))
+            return false;
     }
     if (r.left != 0) return false;
     out = std::move(s);

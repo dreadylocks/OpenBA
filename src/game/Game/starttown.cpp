@@ -112,6 +112,7 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::StartCentre (NOT RETAIL)
 
 // ============================================================================
 // Economy Brick M-D — live town storage (BANISHED_LIVE_STORAGE, default OFF).
@@ -367,7 +368,10 @@ static bool StartTown_DiskBuildable(const Map* game, int tileX, int tileY, int s
 // whose disk passes StartTown_DiskBuildable.
 static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* outY) {
     const int dim    = game->size;
-    const int half   = dim >> 1;
+    // EXT SEAM (NOT RETAIL, ext.neighbour M2): on a lobby room's shared map each town's spiral
+    // starts from its own side; otherwise the map centre, as retail.
+    int cx = dim >> 1, cy = dim >> 1;
+    Neighbour::StartCentre(dim, &cx, &cy);
     const int sizeSq = size * size;
     const int step   = (size * 3) >> 2;        // floor(size*3/4); size > 0
     const float fullCircle = 360.0f;           // DAT_140172238
@@ -378,8 +382,8 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
     for (int ring = 0; ring < kMaxRings; ++ring) {
         for (int i = 0; i < points; ++i) {
             const float ang = (float)i * (fullCircle / (float)points) * kDeg2Rad;
-            const int tx = (int)(cosf(ang) * radius) + half;   // local_res8 (cos) * r + dim/2
-            const int ty = (int)(sinf(ang) * radius) + half;   // local_res10 (sin) * r + dim/2
+            const int tx = (int)(cosf(ang) * radius) + cx;   // local_res8 (cos) * r + dim/2
+            const int ty = (int)(sinf(ang) * radius) + cy;   // local_res10 (sin) * r + dim/2
             if (StartTown_DiskBuildable(game, tx, ty, size, sizeSq)) {
                 *outX = tx; *outY = ty;
                 return true;
@@ -388,7 +392,7 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
         points *= 2;
         radius += (float)step;
     }
-    *outX = half; *outY = half;                // fallback: map center (should not happen)
+    *outX = cx; *outY = cy;                    // fallback: map center (should not happen)
     return false;
 }
 

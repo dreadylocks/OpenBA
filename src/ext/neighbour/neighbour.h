@@ -23,10 +23,14 @@
 // The save: one payload in the class C tail record (protocol.h SavedState, savetail.h).
 // ============================================================================
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
+#include "ext/neighbour/lobby.h"   // RoomSettings
+
 class ComponentDescription;
+namespace Object { class External; }
 
 namespace Neighbour {
 
@@ -58,6 +62,33 @@ Status GetStatus();
 // Send goods / a family now (offline: they wait in the outbox). "" on success, else why not.
 std::string SendGoods(const ComponentDescription* resource, int count);
 std::string SendFamily();
+
+// ---- M2: the Multiplayer lobby --------------------------------------------------------------
+// The next new game belongs to a lobby room: set by the lobby right before the game starts,
+// taken by the next ResetForGame (a new game only), dropped by a refused BeforeNewGame. While set
+// it also turns ext.neighbour on for that one game (Ext::SetRequested, restored once the game has
+// taken its lock), so starting from the lobby needs no settings.cfg editing.
+struct LobbyStart {
+    bool         create = false;   // true: the room is created when the game starts (BeforeNewGame)
+    std::string  server, room, pass, town;
+    int          seat = -1;        // a join knows its seat at once; a create learns 0
+    RoomSettings settings;         // a join: the room's (StartNewGame is called with them)
+};
+void SetLobbyStart(const LobbyStart& start);
+bool HasLobbyStart();
+void ClearLobbyStart();
+
+// EXT SEAM, MainMenuDialog::StartNewGame (its first line): a lobby create registers the room with
+// the settings the player chose before anything is built. False = refused (`why` says why); the
+// caller then does not start the game. Anything else: true, nothing done.
+bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const Object::External* mapGen,
+                   const Object::External* terrainGen, const Object::External* climateGen, std::string& why);
+// EXT SEAM, StartTown_FindSpawnTile: the centre of the start spiral on a lobby room's shared map
+// (the two towns start apart); false = the map centre, as retail.
+bool StartCentre(int dim, int* cx, int* cy);
+// EXT SEAM, WorldGen_BuildTerrain: the height hash it prints ([WorldHash] height f32), the
+// fingerprint of the land alone (seed, size, terrain), compared with the neighbour's on join.
+void NoteWorldHash(uint64_t hash);
 
 // neighbour_panel.cpp: the in-game Neighbour panel (N opens and closes it).
 void PanelPollHotkey();   // from BeginFrame

@@ -108,14 +108,18 @@ bool ValidParcelId(const std::string& id);
 //       are sent again on the next connect), the RECEIVED ids (the last kKeepReceivedIds parcels
 //       applied here; a repeat is acknowledged and dropped) and the WAITING parcels (goods that
 //       did not fit in storage yet; delivered as room appears).
+//   v3: + how to get back in: the town's name, the room password and the relay address (a game
+//       started from the Multiplayer lobby has no settings.cfg keys), and the world hash its map
+//       was built with (empty when unknown).
 struct SavedState {
     std::string              room;
     int64_t                  lastSeq = 0;
     std::vector<Parcel>      outbox;
     std::vector<std::string> received;
     std::vector<Parcel>      waiting;
+    std::string              town, pass, server, worldHash;
 };
-constexpr int32_t kPayloadFormat   = 2;   // the registry row's formatVersion
+constexpr int32_t kPayloadFormat   = 3;   // the registry row's formatVersion
 constexpr size_t  kKeepReceivedIds = 128;
 constexpr size_t  kMaxSavedParcels = 64;   // per list
 std::vector<uint8_t> EncodeState(const SavedState& s);

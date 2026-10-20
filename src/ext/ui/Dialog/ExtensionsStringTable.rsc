@@ -51,6 +51,17 @@ StringTable resource
 		{ String _name = "NeighbourSendGoods";		String _text = "Send goods"; }
 		{ String _name = "NeighbourSendFamily";		String _text = "Send this family"; }
 
+		// the Multiplayer lobby (ExtensionsLobby.rsc, ext.neighbour M2)
+		{ String _name = "LobbyButton";			String _text = "Multiplayer"; }
+		{ String _name = "LobbyTip";			String _text = "Play next to a friend's town: create a room or join one."; }
+		{ String _name = "LobbyTitle";			String _text = "Multiplayer: Neighbour Towns"; }
+		{ String _name = "LobbyRoom";			String _text = "Room name"; }
+		{ String _name = "LobbyPassword";		String _text = "Password"; }
+		{ String _name = "LobbyTown";			String _text = "Your town"; }
+		{ String _name = "LobbyRefresh";		String _text = "Refresh"; }
+		{ String _name = "LobbyCreate";			String _text = "Create room"; }
+		{ String _name = "LobbyJoin";			String _text = "Join"; }
+
 		{ String _name = "ExtensionTurnedOff";		String _text = "The following extension is turned off, but this save was made with it.~n~n@0 [@1]~nSaved with extension version @2~n~nA save keeps the extensions it was made with, so it will be turned on for this game. Do you still want to load the save game?"; }
 	]
 }

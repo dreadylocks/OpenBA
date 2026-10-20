@@ -54,6 +54,16 @@ bool                  s_joined = false;      // a welcome arrived on the current
 std::string           s_peerName;            // the neighbour town, as the relay names it
 bool                  s_peerOnline = false;
 uint64_t              s_frame = 0;
+// M2: the lobby. s_pending is set by the lobby for the next new game; ResetForGame moves it to
+// s_lobby for the game's lifetime.
+bool                  s_hasPending = false;
+LobbyStart            s_pending;
+bool                  s_pendingPrevRequested = false;
+bool                  s_lobbyGame = false;
+LobbyStart            s_lobby;
+bool                  s_restoreRequested = false;
+bool                  s_restoreTo = false;
+std::string           s_worldHashNew;     // NoteWorldHash during this Load (a new game's map)
 uint64_t              s_parcelCounter = 0;
 constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
 
@@ -75,6 +85,7 @@ std::string Setting(const char* key) {
 Config ReadConfig() {
     Config c;
     c.server   = Setting("neighbour.server");
+    if (c.server.empty()) c.server = DefaultServer();
     c.room     = Sanitize(Setting("neighbour.room"), 64);
     c.password = Setting("neighbour.password");
     c.name     = Sanitize(Setting("neighbour.name"), kMaxNameChars);
@@ -295,6 +306,16 @@ void OnMessage(const Message& m) {
         s_peerName = peer;
         s_peerOnline = online;
         ResendOutbox();
+        std::string hash;
+        {
+            std::lock_guard<std::mutex> lock(s_savedMu);
+            hash = s_saved.worldHash;
+        }
+        if (!hash.empty() && s_link) {
+            Message h("hash");
+            h.Set("hash", hash);
+            s_link->Send(h);
+        }
         std::string line = "Joined the room \"" + s_config.room + "\".";
         if (peer.empty())  line += " No neighbour has joined yet.";
         else if (online)   line += " " + peer + " is here.";
@@ -309,6 +330,13 @@ void OnMessage(const Message& m) {
         Post(peer + (online ? " has arrived." : " has left."), kColourStatus);
     } else if (m.type == "parcel") {
         OnParcel(m);
+    } else if (m.type == "hashCheck") {
+        bool same = false;
+        m.GetBool("same", same);
+        if (same) Post("Your map and " + PeerLabel() + "'s are the same land.", kColourStatus);
+        else Post("Your map and " + PeerLabel() + "'s are NOT the same land: the two games differ (a different "
+                  "version of the game, different mods, or a different seed). Shared-map play will not line up.",
+                  kColourProblem);
     } else if (m.type == "stored") {
         std::string id;
         if (m.Get("id", id)) {
@@ -368,9 +396,77 @@ void ResetForGame(const void* owner) {
     HangUp();
     s_owner = owner;
     Ext::SaveTail::RegisterPayload("neighbour", &SavePayload, &LoadPayload);
+    s_lobbyGame = false;
+    s_worldHashNew.clear();
+    if (s_hasPending) {   // the lobby's room, for this game
+        s_lobby = s_pending;
+        s_lobbyGame = true;
+        s_hasPending = false;
+        s_restoreRequested = true;
+        s_restoreTo = s_pendingPrevRequested;
+    }
     std::lock_guard<std::mutex> lock(s_savedMu);
     s_saved = SavedState();
     s_loadedFromSave = false;
+}
+
+void SetLobbyStart(const LobbyStart& start) {
+    if (const Ext::Entry* e = Ext::FindEntry("neighbour")) {
+        if (!s_hasPending) s_pendingPrevRequested = Ext::Requested(*e);
+        Ext::SetRequested(*e, true);   // this one game; restored in SelectForGame
+    }
+    s_pending = start;
+    s_hasPending = true;
+}
+
+bool HasLobbyStart() { return s_hasPending; }
+
+void ClearLobbyStart() {
+    if (!s_hasPending) return;
+    if (const Ext::Entry* e = Ext::FindEntry("neighbour")) Ext::SetRequested(*e, s_pendingPrevRequested);
+    s_hasPending = false;
+}
+
+bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const ::Object::External* mapGen,
+                   const ::Object::External* terrainGen, const ::Object::External* climateGen, std::string& why) {
+    if (!s_hasPending || !s_pending.create) return true;
+    auto path = [](const ::Object::External* x) {
+        if (x == nullptr) return std::string();
+        const System::Filename p = x->GetPath();
+        return p.AsString()._data != nullptr ? std::string(p.AsString()._data) : std::string();
+    };
+    RoomSettings rs;
+    rs.seed = static_cast<int64_t>(seed);
+    rs.size = static_cast<int>(terrainSize);
+    rs.disasters = !disastersOff;
+    rs.start = path(mapGen);
+    rs.terrain = path(terrainGen);
+    rs.climate = path(climateGen);
+    RoomJoin j;
+    if (!CreateRoom(&MakePlatformTransport, s_pending.server, s_pending.room, s_pending.pass, s_pending.town, rs, j, why)) {
+        fprintf(stderr, "[Neighbour] creating room \"%s\" refused: %s\n", s_pending.room.c_str(), why.c_str());
+        ClearLobbyStart();
+        return false;
+    }
+    s_pending.seat = j.seat;
+    s_pending.settings = rs;
+    fprintf(stderr, "[Neighbour] room \"%s\" created (seed %u, %s)\n", s_pending.room.c_str(), seed,
+            DescribeSettings(rs).c_str());
+    return true;
+}
+
+bool StartCentre(int dim, int* cx, int* cy) {
+    if (!s_lobbyGame || s_lobby.seat < 0 || dim <= 0) return false;
+    // The two towns start a quarter of the map apart, either side of the centre.
+    *cx = s_lobby.seat == 0 ? (dim * 3) / 8 : (dim * 5) / 8;
+    *cy = dim / 2;
+    return true;
+}
+
+void NoteWorldHash(uint64_t hash) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(hash));
+    s_worldHashNew = buf;
 }
 
 void SelectForGame() {
@@ -380,7 +476,30 @@ void SelectForGame() {
         return;
     }
     if (s_active) return;   // already running for this game
+    if (s_restoreRequested) {   // the lobby turned the extension on for this game only
+        if (const Ext::Entry* e = Ext::FindEntry("neighbour")) Ext::SetRequested(*e, s_restoreTo);
+        s_restoreRequested = false;
+    }
     s_config = ReadConfig();
+    {
+        std::lock_guard<std::mutex> lock(s_savedMu);
+        if (s_lobbyGame) {   // a new game from the lobby: its room, its password, its name
+            s_config.server = s_lobby.server.empty() ? std::string(DefaultServer()) : s_lobby.server;
+            s_config.room = s_lobby.room;
+            s_config.password = s_lobby.pass;
+            s_config.name = s_lobby.town;
+        } else if (s_loadedFromSave && !s_saved.pass.empty() && !s_saved.room.empty()) {
+            // A lobby game loaded from its save: it knows its own way back in.
+            if (!s_saved.server.empty()) s_config.server = s_saved.server;
+            s_config.room = s_saved.room;
+            s_config.password = s_saved.pass;
+            if (!s_saved.town.empty()) s_config.name = s_saved.town;
+        }
+        if (!s_worldHashNew.empty()) s_saved.worldHash = s_worldHashNew;   // a new game's map
+        s_saved.town = s_config.name;
+        s_saved.pass = s_lobbyGame || !s_saved.pass.empty() ? s_config.password : std::string();
+        s_saved.server = s_config.server;
+    }
     {
         std::lock_guard<std::mutex> lock(s_savedMu);
         // A loaded town keeps its room unless settings.cfg names another one now.
