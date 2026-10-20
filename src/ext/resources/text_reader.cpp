@@ -149,6 +149,12 @@ const FieldDesc kSlider[] = {
     F("_number", Ext), F("", Ext), F("", String), F("", String), F("", String), F("", String), F("", String),
     F("", Int), F("", Int), F("", Float), F("", Float), F("", Int),
 };
+// UI::EditDescription::Serialize (editdescription.cpp), version 0: the font (+0x68), the initial
+// text (+0x70), the max length (+0x78), the password flag (+0x7c), the allowed characters (+0x80;
+// empty = any). EditElement.h names the copies _font / _text / _maxLength / _password / _filter.
+const FieldDesc kEdit[] = {
+    F("_font", Ext), F("_text", String), F("_maxLength", Int), F("_password", Bool), F("_filter", String),
+};
 const FieldDesc kOverride[] = { F("_element", Ext), F("_name", String) };
 const FieldDesc kController[] = { F("", UInt), F("", Ext), F("", Ext), F("", String) };
 // UI::Dialog::Serialize (dialog_vtable.cpp), version 0.
@@ -182,6 +188,7 @@ const Level kLevels[] = {
     L("TableDescription",     "ElementDescription", kTable),
     L("ImageDescription",     "ElementDescription", kImage),
     L("SliderDescription",    "ElementDescription", kSlider),
+    L("EditDescription",      "ElementDescription", kEdit),
     L("Dialog",               nullptr,              kDialog),
     L("StringTable",          nullptr,              kStringTable),
 };
