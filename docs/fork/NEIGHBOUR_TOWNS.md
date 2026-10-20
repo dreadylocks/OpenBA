@@ -13,9 +13,10 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status (2026-10-19): M0 and M1 done. The game joins a room on the relay; in game, N opens the
-Neighbour panel to chat, send goods and send a family; the neighbour's lines, parcels and families
-arrive. What was built and how it was tested: §7 (M0), §8 (M1). Next steps: §6.
+Status (2026-10-20): M0, M1 and most of M2 done. A Multiplayer lobby on the main menu creates and
+joins rooms; both towns build the same map; the neighbour's land is claimed and their buildings
+are drawn in your game. In game, N opens the Neighbour panel (chat, goods, a family). What was
+built and how it was tested: §7 (M0), §8 (M1), §9 (M2). Next steps: §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -193,8 +194,9 @@ town plus a mirror of the neighbour's buildings, roads and resource changes.
   game connects, joins a room, shows a chat line in the event log; class C payload plumbing.
 - **M1 Letters** (DONE 2026-10-19, §8; works on two separate maps): goods parcels, families,
   chat from the game (the Neighbour panel).
-- **M2 Shared map**: seed from the server, hash check, two start towns, land claims, the
-  neighbour's buildings mirrored, tinted and solid.
+- **M2 Shared map** (MOSTLY DONE 2026-10-20, §9): the Multiplayer lobby, seed and settings from the
+  room, hash check, two start towns, land claims, the neighbour's buildings mirrored. Open: mirrors
+  blocking paths, a real colour tint, fence / bridge claims.
 - **M3 Shared roads and resources**: real neighbour roads; the same resource scatter on both
   screens; resource change events.
 - **M4 Extras**: speed lock, visible boats/walkers carrying parcels and migrants.
@@ -274,8 +276,9 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 2. The user deploys the relay to their Cloudflare account (`tools/neighbour_server/README.md`:
    `npx wrangler login`, `npm run deploy`); both players point `neighbour.server` at it.
 3. DONE (M1): the Neighbour panel, goods, families.
-4. M2: the shared map (seed from the relay, the world-hash check, two start towns), land claims,
-   the neighbour's buildings mirrored, tinted and solid (§2 "Mixed world design").
+4. M2 leftovers (§9 "Not done"): mirrors that block paths (needs a save-safe way to mark tiles),
+   a real colour tint (needs a tinted material copy), claims for fences and bridges, mirrors of
+   structures that exist when a save is loaded, construction stages on mirrors. Then M3.
 5. M1 follow-ups, when wanted: barter through a merchant boat at the trading post (the plan's
    original trade), an accept / refuse window for an arriving family, families walking in from
    the map edge rather than appearing among the townspeople.
@@ -367,3 +370,59 @@ follow-ups (§6).
   game's key table has them); a save / load holding a v2 payload in game (covered by the unit
   test only). `Save3.sav` crashes the port while loading, with or without the extension:
   `docs/known_port_issues.md` row 1331.
+
+---------------------------------------------------------------------------------------------
+
+## 9. M2 as built (2026-10-20)
+
+- **The Multiplayer lobby** (`src/ext/neighbour/lobby*.{h,cpp}`, `src/ext/ui/Dialog/ExtensionsLobby.rsc`):
+  a Multiplayer button on the front-end menu (not the pause menu, not under `/profile:faithful`)
+  opens a list of every room on the relay, with Room name / Password / Your town fields and Refresh,
+  Create room, Join, Cancel. Asking the relay waits a few seconds at most, on the menu.
+  - **Create room** remembers the room for the next new game and opens the game's own New Game
+    dialog; pressing Ok there reaches `MainMenuDialog::StartNewGame`, whose first line (EXT SEAM,
+    `Neighbour::BeforeNewGame`) creates the room with exactly the chosen seed and settings
+    (generators by resource path). A refusal (a taken name, no network) goes back to the lobby with
+    the reason; New Game's Cancel forgets the room (`ClearLobbyStart`).
+  - **Join** asks the room for its seed and settings and calls `StartNewGame` with them.
+  - Either way ext.neighbour is on for that one game (`Ext::SetRequested`, restored once the game
+    has its lock): no settings.cfg editing. The relay defaults to the user's Worker
+    (`lobby.cpp` DefaultServer); `neighbour.server` overrides it. A lobby game's save (payload v3)
+    remembers its town name, password, relay and world hash and reconnects by itself.
+- **The shared map**: the two towns' start spirals begin at 3/8 and 5/8 of the map
+  (`StartTown_FindSpawnTile` EXT SEAM, `Neighbour::StartCentre`). The land's height hash
+  (`[WorldHash] height f32`, worldgen EXT SEAM `Neighbour::NoteWorldHash`; it depends on seed, size
+  and terrain only) is sent on join; the relay compares the two towns' and the event log says
+  "the same land" or warns (different exe, mods or seed).
+- **Land claims** (`src/ext/neighbour/shared_map.*`): every structure this town makes
+  (`PlacementTool::CreateAt`, `DragPlacementTool` fields, the start town's `placeStructure`) claims
+  its footprint, a road tile its tile (`Map::PlaceRoadCell`); the relay grants first come first
+  served and tells the neighbour. This town keeps a byte per tile of what the neighbour holds:
+  `Map::TestPlacement` (buildings, fields, the red / green overlay) and `Map::PlaceRoadCell` refuse
+  those tiles. A structure's claim is released when it is gone (checked every ~5 s). A claim refused
+  by the relay (two towns placing on the same tile in the same moment) is reported, not undone.
+- **Mirrors**: every structure is reported (template path, position, rotation, model variant,
+  footprint); the relay keeps the latest per id (`s<x>_<y>`, the footprint origin) and hands the
+  whole set to a town that joins. The neighbour's are drawn as bare `Graphics::MeshInstance`s in the
+  scene, the way the placement preview is drawn: not entities, so this town's manager never counts
+  them and nothing can work on them. Trees and rocks (`NaturalResourceComponent`) under a mirror are
+  removed in this copy (`QueueDestroy`).
+- **Relay**: `create`, the Directory (`/lobby`), `hash` / `hashCheck`, `claim` / `claimed` /
+  `claims` / `release` / `released` / `claimBlock`, `build` / `unbuild` / `mirrorEnd`. Local test
+  connections (no outside address) are exempt from the 5-rooms-a-day limit. selftest: 33 checks.
+- **Tested on the PC** against the local relay: the lobby listed rooms; Create made pclobby1 /
+  pclobby2 with the New Game choices; Join as a second town built the same land (the same height
+  hash on both, "the same land" in the log) on the other side of the map; the creator's start town
+  (barn, stockyard, six houses) arrived as claims + 8 mirrors and was drawn, trees cleared, in the
+  joiner's game (screenshot). Unit 1189 tests, 0 failures; the faithful gate unchanged (no
+  Multiplayer button, no `[Neighbour]` line, the start town at the map centre).
+- **Not done / not verified**:
+  - Mirrors do NOT block paths yet: the save-safe way to mark tiles (the pathfinder's own blocked
+    bytes, or terrain types restored before a save) is open.
+  - No colour tint: `MeshInstance::_color` is the model scale, not a colour; the opacity written is
+    not visibly honoured for buildings. A tint needs a tinted copy of the material.
+  - Fences and bridges do their own checks: not yet claim-aware.
+  - Structures already standing when a lobby save is loaded are not re-reported (the relay still
+    holds their last state); mirrors always show the finished building, not its construction stage.
+  - Placement refusal on the neighbour's land was not tried by hand (the code path is the game's
+    own `TestPlacement`).
