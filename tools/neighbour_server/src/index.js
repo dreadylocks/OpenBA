@@ -53,8 +53,15 @@ const kMaxClaimRects = 64;
 const kMaxClaimTiles = 4096;   // per message
 const kMaxBuildings = 4000;    // per town
 const kBuildingId = /^[0-9a-z_-]{1,40}$/;
+// M3: shared roads and resources. A town's finished road tiles are kept (cell -> road) and handed
+// to a joining town; natural-resource changes (a tree felled, a deposit gone, a sapling planted)
+// go straight to the neighbour, or wait in a queue (the newest kMaxNatQueue) while it is away.
+const kMaxRoadCells = 200_000;
+const kMaxNatQueue = 20_000;
+const kMaxCell = kMaxMapDim * kMaxMapDim;
 // Flood guard: at most this many messages per socket in kWindowMs.
-const kBurst = 30;
+// The game paces its shared-map messages to 40 a second (shared_map.cpp kSendRate), a burst of 120.
+const kBurst = 600;
 const kWindowMs = 10_000;
 
 export default {
@@ -177,6 +184,8 @@ export class Room {
     if (msg.t === "release") return this.onRelease(ws, a, msg);
     if (msg.t === "build") return this.onBuild(ws, a, msg);
     if (msg.t === "unbuild") return this.onUnbuild(ws, a, msg);
+    if (msg.t === "road") return this.onRoad(ws, a, msg);
+    if (msg.t === "nat") return this.onNat(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
   }
@@ -311,6 +320,8 @@ export class Room {
       rec[k] = msg[k];
     }
     rec.grp = Number.isInteger(msg.grp) && msg.grp >= 0 && msg.grp < 64 ? msg.grp : 0;   // the model variant
+    // M3: which footprint tiles are solid (row by row, "1" solid, "0" walkable); citizens walk round them.
+    if (typeof msg.bm === "string" && msg.bm.length === rec.tw * rec.th && msg.bm.length <= 4096 && /^[01]*$/.test(msg.bm)) rec.bm = msg.bm;
     const key = `mirror:${a.seat}`;
     const all = (await this.ctx.storage.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
@@ -326,6 +337,58 @@ export class Room {
     const all = (await this.ctx.storage.get(key)) || {};
     if (id in all) { delete all[id]; await this.ctx.storage.put(key, all); }
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "unbuild", id });
+  }
+
+  // ---- shared roads (M3) ------------------------------------------------------------------------
+
+  async onRoad(ws, a, msg) {
+    const cell = msg.cell, type = msg.type, tt = msg.tt;
+    if (!Number.isInteger(cell) || cell < 0 || cell >= kMaxCell) return this.fail(ws, "bad road", false);
+    const removed = msg.off === true;
+    if (!removed && (!Number.isInteger(type) || type < 0 || type > 254 || !Number.isInteger(tt) || tt < 0 || tt > 31 ||
+        typeof msg.tmpl !== "string" || msg.tmpl.length > kMaxPathChars)) {
+      return this.fail(ws, "bad road", false);
+    }
+    const key = `roads:${a.seat}`;
+    const all = (await this.ctx.storage.get(key)) || {};
+    if (removed) delete all[cell];
+    else {
+      if (!(cell in all) && Object.keys(all).length >= kMaxRoadCells) return this.fail(ws, "too many road tiles", false);
+      all[cell] = [type, tt, msg.tmpl];
+    }
+    await this.ctx.storage.put(key, all);
+    const out = removed ? { t: "road", cell, off: true } : { t: "road", cell, type, tt, tmpl: msg.tmpl };
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, out);
+  }
+
+  async sendRoads(ws, seat) {
+    const all = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    for (const [cell, [type, tt, tmpl]] of Object.entries(all)) this.send(ws, { t: "road", cell: Number(cell), type, tt, tmpl });
+  }
+
+  // ---- shared natural resources (M3) -------------------------------------------------------------
+
+  async onNat(ws, a, msg) {
+    const cell = msg.cell;
+    if (!Number.isInteger(cell) || cell < 0 || cell >= kMaxCell || (msg.op !== "rm" && msg.op !== "add") ||
+        typeof msg.tmpl !== "string" || msg.tmpl.length > kMaxPathChars) {
+      return this.fail(ws, "bad resource change", false);
+    }
+    const ev = { t: "nat", op: msg.op, cell, tmpl: msg.tmpl };
+    const peers = this.socketsFor(1 - a.seat);
+    if (peers.length > 0) { for (const peer of peers) this.send(peer, ev); return; }
+    const key = `natq:${1 - a.seat}`;
+    const q = (await this.ctx.storage.get(key)) || [];
+    q.push([ev.op === "rm" ? 0 : 1, cell, ev.tmpl]);
+    while (q.length > kMaxNatQueue) q.shift();
+    await this.ctx.storage.put(key, q);
+  }
+
+  async sendNatQueue(ws, seat) {
+    const key = `natq:${seat}`;
+    const q = (await this.ctx.storage.get(key)) || [];
+    for (const [op, cell, tmpl] of q) this.send(ws, { t: "nat", op: op === 0 ? "rm" : "add", cell, tmpl });
+    if (q.length > 0) await this.ctx.storage.delete(key);
   }
 
   async sendMirror(ws, seat) {
@@ -403,6 +466,8 @@ export class Room {
     if (meta.created) {
       await this.sendClaims(ws, seat);
       await this.sendMirror(ws, seat);
+      await this.sendRoads(ws, seat);
+      await this.sendNatQueue(ws, seat);
     }
   }
 

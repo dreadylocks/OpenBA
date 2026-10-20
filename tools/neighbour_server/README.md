@@ -16,6 +16,8 @@ What a room does:
   rooms idle 60 days drop off; 5 new rooms a day per address, not counted on the local relay).
 - **The shared map**: it compares the two towns' world hash, referees land claims (first come
   first served) and keeps each town's buildings so the other town can draw them.
+- **Shared roads and resources** (M3): it keeps each town's finished road tiles for the other town,
+  and passes on trees felled and saplings planted (queued, the newest 20 000, while a town is away).
 
 ## Run it on this PC (no Cloudflare account needed)
 
@@ -31,8 +33,9 @@ The relay is then at `ws://127.0.0.1:8787` (this PC only). In another terminal:
 node selftest.mjs ws://127.0.0.1:8787
 ```
 
-The self-test (33 checks) covers chat and missed lines, passwords and full rooms, parcels,
-lobby rooms and their list, the world-hash check, land claims and mirrored buildings.
+The self-test (40 checks) covers chat and missed lines, passwords and full rooms, parcels,
+lobby rooms and their list, the world-hash check, land claims, mirrored buildings, shared roads and
+resource changes.
 
 ## Pretend to be the neighbour
 

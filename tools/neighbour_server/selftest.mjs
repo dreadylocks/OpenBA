@@ -199,7 +199,33 @@ await tryWait(rejoin.wait((m) => m.t === "released"));
 rejoin.ws.send(JSON.stringify({ t: "claim", id: "cl5", rects: "11,11,2,2" }));
 const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"));
 check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
+
+// M3: solid tiles, shared roads and resource changes.
+creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 50, ty: 50, tw: 2, th: 2, built: 100, bm: "1101" }));
+const bb2 = await tryWait(rejoin.wait((m) => m.t === "build" && m.id === "b2"));
+check(bb2 && bb2.bm === "1101", "a building's solid tiles are passed on");
+creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+const rd = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70000));
+check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\RoadDirt.rsc", "a finished road tile is passed on");
+creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "Template\RoadStone.rsc" }));
+await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70001, off: true }));
+check(!!(await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001 && m.off === true))), "a removed road tile is passed on");
+creator.ws.send(JSON.stringify({ t: "road", cell: -4, type: 0, tt: 6, tmpl: "" }));
+check(!!(await tryWait(creator.wait((m) => m.t === "error" && /road/.test(m.why)))), "a malformed road is refused");
+creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\Tree.rsc" }));
+const nr = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1234));
+check(nr && nr.op === "rm", "a felled tree is passed on");
 rejoin.ws.close();
+await new Promise((r) => setTimeout(r, 300));
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\Tree.rsc" }));
+await new Promise((r) => setTimeout(r, 300));
+const rejoin2 = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
+const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));
+check(queued && queued.op === "add", "a resource change waits for a town that is away");
+const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
+check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001), "a town joining gets the neighbour's roads (not removed ones)");
+rejoin2.ws.close();
 
 creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();
 
