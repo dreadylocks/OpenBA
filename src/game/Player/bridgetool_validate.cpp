@@ -28,6 +28,7 @@
 //   +0x30 maskNeighbor — terrain permitted in the clearance ring around the span
 //   +0x34 neighborRadius
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "BridgeTool.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
 #include <cstdint>
@@ -145,6 +146,9 @@ uint32_t BridgeTool::ValidatePath(int startCell, int endCell, int* outLength) co
                 for (int n = maxCol - minCol + 1; n > 0; n--, cell++) {
                     if (cell->blocker != nullptr)
                         result = 0;                     // cell already occupied
+                    // EXT SEAM (NOT RETAIL, ext.neighbour M2): not on the neighbour's land.
+                    if (Neighbour::SharedMap::PeerHoldsCell(static_cast<uint32_t>(cell - terrainBase)))
+                        result = 0;
                     const uint32_t bit = TerrainBit(cell);
 
                     if (state == 0) {
@@ -236,6 +240,8 @@ uint32_t BridgeTool::ValidatePath(int startCell, int endCell, int* outLength) co
                                && ((bit & 1) == 0)
                                && (static_cast<int8_t>(cell->field_0x2A) == -1);
                 if (!free || PendingContains(mapGrid, idx))
+                    result = 0;
+                if (Neighbour::SharedMap::PeerHoldsCell(static_cast<uint32_t>(idx)))   // EXT SEAM (NOT RETAIL, ext.neighbour M2)
                     result = 0;
             }
         }

@@ -38,6 +38,7 @@
 // The runtime type headers come FIRST: they pull src/engine/volume/Volume.h,
 // whose global-scope `struct Rectangle` is hidden by <wingdi.h>'s `Rectangle()`
 // once <windows.h> has been seen through resolve.h.  ENDGAME B.3.5 batch I2.
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "graphics/Geometry.h"
 #include <new>
 #include "graphics/Camera.h"
@@ -139,6 +140,7 @@ void RegisterWithList(GameUpdateLoop* gw, ComponentEntity* entity, const Compone
     Object::InternalPtr<ComponentEntity> val = entity;
     int prio = static_cast<int>(tmpl->_category);
     gw->m_entityList->RegisterEntity(&val, prio);
+    Neighbour::SharedMap::NoteStructure(entity);   // EXT SEAM (NOT RETAIL): claim + mirror (ext.neighbour M2)
 }
 
 // ============================================================

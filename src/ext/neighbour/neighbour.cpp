@@ -23,9 +23,15 @@
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
 #include "io/Persistence.h"        // the settings map (neighbour.* keys)
 #include "system/String.h"
+#include "system/Value.h"      // System::Random
 #include "system/Filename.h"
 #include "object/External.h"
 #include "Component/ComponentDescription.h"
+#include "Component/MapComponent.h"
+#include "Component/NaturalResourceComponent.h"
+#include "Entity/ComponentEntity.h"
+#include "Entity/EntityList.h"
+#include "Game/Map.h"
 
 namespace Neighbour {
 
@@ -476,6 +482,103 @@ bool StartCentre(int dim, int* cx, int* cy) {
     return true;
 }
 
+namespace {
+System::Random* s_scatter = nullptr;        // the scatter's own random numbers (a lobby game)
+System::Random* s_scatterSaved = nullptr;   // the world's, put back by ScatterEnd
+uint32_t        s_scatterSeed = 0;
+bool            s_haveSpawns = false;   // both towns' spawn tiles are known (NoteSpawnTiles)
+int             s_spawnX[2] = {0, 0}, s_spawnY[2] = {0, 0};
+int             s_townSize = 0;
+
+// Inside the clear disk of either town: twice the town's own radius round each real site.
+bool NearATown(int x, int y, int townSize) {
+    const int r2 = townSize * townSize * 4;
+    for (int s = 0; s < 2; ++s) {
+        const int dx = x - s_spawnX[s], dy = y - s_spawnY[s];
+        if (dx * dx + dy * dy < r2) return true;
+    }
+    return false;
+}
+alignas(System::Random) unsigned char s_scatterMem[sizeof(System::Random)];
+}  // namespace
+
+void NoteSpawnTiles(int ownX, int ownY, int townSize, const std::function<void(int*, int*)>& find) {
+    s_haveSpawns = false;
+    if (!s_lobbyGame || s_lobby.seat < 0 || s_lobby.seat > 1 || !find) return;
+    const int seat = s_lobby.seat;
+    int ox = 0, oy = 0;
+    s_lobby.seat = 1 - seat;   // StartCentre answers for the other town while its search runs
+    find(&ox, &oy);
+    s_lobby.seat = seat;
+    s_spawnX[seat] = ownX;
+    s_spawnY[seat] = ownY;
+    s_spawnX[1 - seat] = ox;
+    s_spawnY[1 - seat] = oy;
+    s_townSize = townSize;
+    s_haveSpawns = true;
+    fprintf(stderr, "[Neighbour] start sites: town 1 at %d,%d, town 2 at %d,%d (this town: %d)\n", s_spawnX[0],
+            s_spawnY[0], s_spawnX[1], s_spawnY[1], seat + 1);
+}
+
+void ScatterBegin(GameUpdateLoop* world) {
+    if (!s_lobbyGame || world == nullptr || s_scatter != nullptr) return;
+    s_scatterSeed = static_cast<uint32_t>(world->m_seed) ^ 0x5ca77e12u;
+    s_scatter = ::new (s_scatterMem) System::Random(s_scatterSeed);
+    s_scatterSaved = world->m_random;
+    world->m_random = s_scatter;
+}
+
+void ScatterEnd(GameUpdateLoop* world) {
+    if (s_scatter == nullptr || world == nullptr) return;
+    world->m_random = s_scatterSaved;
+    // The fingerprint of the scatter away from both towns' sites: the same in both towns' logs
+    // when the forests match ([Neighbour] scatter).
+    if (world->m_entityList != nullptr && world->m_game != nullptr) {
+        const int dim = world->m_game->size;
+        uint64_t h = 1469598103934665603ull;
+        int n = 0;
+        int sampleCell = -1;
+        std::string sample;
+        const auto& all = world->m_entityList->masterArray;
+        for (int i = 0; i < all._size; ++i) {
+            ComponentEntity* e = all._data[i].Get();
+            if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+            MapComponent* mc = e->FindComponent<MapComponent>();
+            if (mc == nullptr) continue;
+            const int x = mc->tileX0, y = mc->tileY0;
+            if (s_haveSpawns ? NearATown(x, y, s_townSize + 4) : false) continue;
+            const uint64_t v = static_cast<uint64_t>(y * dim + x);
+            h = (h ^ v) * 1099511628211ull;   // the order of the list is the scatter's own
+            if (n++ == 0) {   // one of them, named (handy for testing a felled tree by hand)
+                sampleCell = y * dim + x;
+                const System::Filename path = e->_description->GetPath();
+                if (path.AsString()._data != nullptr) sample = path.AsString()._data;
+            }
+        }
+        fprintf(stderr, "[Neighbour] scatter: %d resources away from the towns, fingerprint %016llx (first: cell %d %s)\n", n,
+                static_cast<unsigned long long>(h), sampleCell, sample.c_str());
+    }
+    s_scatter = nullptr;
+    s_scatterSaved = nullptr;
+}
+
+void ScatterCell(int pool, int cellIdx) {
+    if (s_scatter == nullptr) return;
+    uint32_t h = s_scatterSeed;
+    for (uint32_t v : {static_cast<uint32_t>(pool), static_cast<uint32_t>(cellIdx)}) {
+        h ^= v + 0x9e3779b9u + (h << 6) + (h >> 2);
+        h *= 0x85ebca6bu;
+        h ^= h >> 13;
+    }
+    ::new (s_scatterMem) System::Random(h);
+}
+
+bool ScatterExcluded(int dim, int x, int y, int sizeSq) {
+    if (s_scatter == nullptr || dim <= 0 || !s_haveSpawns) return false;
+    (void)sizeSq;   // the town's own disk (radius = its size) is inside this one
+    return NearATown(x, y, s_townSize);
+}
+
 void NoteWorldHash(uint64_t hash) {
     char buf[24];
     snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(hash));
@@ -509,7 +612,10 @@ void SelectForGame() {
             if (!s_saved.town.empty()) s_config.name = s_saved.town;
         }
         if (!s_worldHashNew.empty()) s_saved.worldHash = s_worldHashNew;   // a new game's map
-        if (!s_lobbyGame && s_loadedFromSave && !s_saved.pass.empty()) SharedMap::Begin(true);   // a lobby save
+        if (!s_lobbyGame && s_loadedFromSave && !s_saved.pass.empty()) {   // a lobby save: its structures again
+            SharedMap::Begin(true);
+            SharedMap::ScanExisting();
+        }
         s_saved.town = s_config.name;
         s_saved.pass = s_lobbyGame || !s_saved.pass.empty() ? s_config.password : std::string();
         s_saved.server = s_config.server;

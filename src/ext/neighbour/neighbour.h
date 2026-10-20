@@ -25,12 +25,15 @@
 
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <string>
 
 #include "ext/neighbour/lobby.h"   // RoomSettings
 
 class ComponentDescription;
 namespace Object { class External; }
+
+class GameUpdateLoop;
 
 namespace Neighbour {
 
@@ -86,6 +89,19 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
 // EXT SEAM, StartTown_FindSpawnTile: the centre of the start spiral on a lobby room's shared map
 // (the two towns start apart); false = the map centre, as retail.
 bool StartCentre(int dim, int* cx, int* cy);
+// EXT SEAMs, StartTown_SpawnResources (M3): on a lobby room's shared map both towns scatter the
+// same trees and rocks. Begin / End swap the world's random numbers for the scatter's own, seeded
+// from the map seed; ScatterCell restarts them for each candidate tile (a tile one copy skips --
+// its own buildings stand there -- cannot shift the others); ScatterExcluded keeps both towns'
+// sites clear, not just this one's. Outside a lobby game all four do nothing.
+// NoteSpawnTiles (StartTown_SpawnEntities, right after its own spawn tile): the other town's spawn
+// tile, found by the same search from the other seat's centre (`find` runs the game's search) --
+// both towns' real sites, the same on both PCs, are what the scatter keeps clear.
+void NoteSpawnTiles(int ownX, int ownY, int townSize, const std::function<void(int*, int*)>& find);
+void ScatterBegin(GameUpdateLoop* world);
+void ScatterEnd(GameUpdateLoop* world);
+void ScatterCell(int pool, int cellIdx);
+bool ScatterExcluded(int dim, int x, int y, int sizeSq);
 // EXT SEAM, WorldGen_BuildTerrain: the height hash it prints ([WorldHash] height f32), the
 // fingerprint of the land alone (seed, size, terrain), compared with the neighbour's on join.
 void NoteWorldHash(uint64_t hash);

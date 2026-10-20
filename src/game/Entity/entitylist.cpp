@@ -21,6 +21,7 @@
 //
 // Decompiled from Application-x64.exe using Ghidra.
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour shared map (NOT RETAIL)
 #include "ui/UserInterface.h"
 #include "options.h"
 #include "ext/perfx/perfx.h"   // [PerfX] TREE_SNAPSHOT walk
@@ -1188,6 +1189,7 @@ void EntityList::DrainRemovals() {
     for (int64_t i = 0; i < removalCount; i++) {
         ComponentEntity* entityIBP = removalList._data[i];
         AuditDyingEntity(entityIBP);
+        Neighbour::SharedMap::NoteRemoved(entityIBP);   // EXT SEAM (NOT RETAIL): shared resources (ext.neighbour M3)
         RemoveEntity(&entityIBP);
     }
 

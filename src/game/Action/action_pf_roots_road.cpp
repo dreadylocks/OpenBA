@@ -4,6 +4,7 @@
 // refresh. NONE is exercised on the autostart path, so a wrong transcription is
 // undetectable silent corruption — every offset is taken verbatim from the Ghidra
 // decompile. Do NOT "improve" or simplify.
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour shared map (NOT RETAIL)
 #include "Action/exe_bodies.h"
 //
 // Registration point: RegisterPfRootsRoadBatch() in standalone/reg_pf_roots_road.cpp.
@@ -228,4 +229,5 @@ void Map::FinishRoadCell(int param_2, uint8_t param_3, uint param_4) {
     } while (true);
 LAB_14009c6d2:
     GameUpdateLoop::_singleton->m_worldGeometry->RebuildRoadMesh(this);   // 0x1400af370
+    Neighbour::SharedMap::NoteRoadFinished(param_2, param_4);   // EXT SEAM (NOT RETAIL): shared roads (ext.neighbour M3)
 }

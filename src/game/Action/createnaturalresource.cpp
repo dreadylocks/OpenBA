@@ -8,6 +8,7 @@
 //
 // Decompiled from Application-x64.exe using Ghidra.
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour shared map (NOT RETAIL)
 #include "CreateNaturalResource.h"
 #include "object/TypeInfo.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
@@ -195,6 +196,7 @@ int  CreateNaturalResource::AbstractImpl(ActionStack* actionStack) {
     Object::InternalPtr<ComponentEntity> entityRef = entityIBP;
     int typeGroup = static_cast<int>(descEntity->_category);
     gameWorld->m_entityList->RegisterEntity(&entityRef, typeGroup);   // 0x1400c48a0
+    Neighbour::SharedMap::NotePlanted(entityIBP);   // EXT SEAM (NOT RETAIL): shared saplings (ext.neighbour M3)
 
     return 0;
 }

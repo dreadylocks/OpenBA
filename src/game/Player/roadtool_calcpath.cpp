@@ -273,6 +273,7 @@ bool RoadTool::CalcPath(int startCell, int endCell) {
 
     WorldGeometry* decalMgr = gameWorld->m_worldGeometry;
     decalMgr->StoreBatchMaterial((int)roadType, decal);
+    Neighbour::SharedMap::NoteRoadTemplate(roadType, descEntity);   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
 
     for (int i = 0; i < pathLen; ++i) {
         mapGrid->PlaceRoadCell((uint32_t)pathBuf[i], roadType,

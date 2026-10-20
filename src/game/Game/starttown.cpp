@@ -4734,6 +4734,7 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
             for (int x = 0; x < dim; ++x) {
                 float p = RtUtility_PerlinNoise_Generate(&perlin, (float)x * scale, (float)y * scale);
                 if (threshold > p * 0.5f + 0.5f) continue;
+                Neighbour::ScatterCell(e, dim * y + x);   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
                 if (rng->RandFloat() > density) continue;
 
                 const int idx = dim * y + x;
@@ -4760,6 +4761,7 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
                 if (cells[idx].blocker) { ++zoneSkips; continue; }
                 const int dy = y - spawnY, dx = x - spawnX;
                 if (dy * dy + dx * dx < sizeSq) continue;   // town exclusion
+                if (Neighbour::ScatterExcluded(dim, x, y, sizeSq)) continue;   // EXT SEAM (NOT RETAIL): both towns' sites
 
                 // Terrain height + slope from the heightmap sampler.
                 const float center = (float)(dim >> 1) - kCenterBias;
@@ -5101,6 +5103,7 @@ extern "C" void StartTown_SpawnEntities(MapGenerator* startConfig, GameUpdateLoo
         int size = sc->subdivisions;
         if (size <= 0) size = 1;
         StartTown_FindSpawnTile(game, size, &spawnX, &spawnY);
+        Neighbour::NoteSpawnTiles(spawnX, spawnY, size, [&](int* x, int* y) { StartTown_FindSpawnTile(game, size, x, y); });   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
     }
     g_stSpawnX = spawnX; g_stSpawnY = spawnY;
 
@@ -5137,7 +5140,9 @@ extern "C" void StartTown_SpawnEntities(MapGenerator* startConfig, GameUpdateLoo
     // excluding the town site (radius = townSize, sizeSq = size*size).
     int resSize = sc->subdivisions;
     if (resSize <= 0) resSize = 1;
+    Neighbour::ScatterBegin(world);   // EXT SEAM (NOT RETAIL): the same scatter in both towns (ext.neighbour M3)
     int nr = StartTown_SpawnResources(sc, world, spawnX, spawnY, resSize * resSize);
+    Neighbour::ScatterEnd(world);     // EXT SEAM (NOT RETAIL)
     int afterRes = entityList->masterArray._size;
     fprintf(stderr, "[startTown::spawn] resources: spawned %d; entityList count %d -> %d\n",
             nr, afterCitizens, afterRes);

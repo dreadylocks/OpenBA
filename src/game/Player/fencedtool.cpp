@@ -19,6 +19,7 @@
 // The runtime type headers come FIRST: they pull src/engine/volume/Volume.h,
 // whose global-scope `struct Rectangle` is hidden by <wingdi.h>'s `Rectangle()`
 // once <windows.h> has been seen through resolve.h.  ENDGAME B.3.5 batch I2.
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "graphics/Scene.h"
 #include "graphics/Mesh.h"
 #include "Player/FencedTool.h"
@@ -300,6 +301,8 @@ int FencedTool::CalcCost(int startCell, int endCell,
 
             int cellIdx = mapWidth * row + col;
             const MapCell* cellPtr = &cellDataBase[cellIdx];
+            // EXT SEAM (NOT RETAIL, ext.neighbour M2): not on the neighbour's land.
+            if (Neighbour::SharedMap::PeerHoldsCell(static_cast<uint32_t>(cellIdx))) { allValid = false; break; }
 
             // Check terrain type mask
             uint8_t terrainByte = cellPtr->terrainType;
