@@ -15,6 +15,7 @@
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/town.h"
+#include "ext/neighbour/shared_map.h"
 #include "ext/registry.h"   // Ext::Ext().neighbour
 #include "ext/savetail.h"   // Ext::SaveTail::RegisterPayload
 
@@ -287,6 +288,13 @@ void RetryWaiting() {
 // --- incoming -------------------------------------------------------------
 
 void OnMessage(const Message& m) {
+    {
+        std::string notice;
+        if (SharedMap::OnMessage(m, &notice)) {   // claims and mirrors (lobby games)
+            if (!notice.empty()) Post(notice, kColourProblem);
+            return;
+        }
+    }
     if (m.type == "chat") {
         const std::string from = Sanitize(m.GetOr("from", "Neighbour"), kMaxNameChars);
         const std::string text = Sanitize(m.GetOr("text", ""), kMaxChatChars);
@@ -306,6 +314,7 @@ void OnMessage(const Message& m) {
         s_peerName = peer;
         s_peerOnline = online;
         ResendOutbox();
+        SharedMap::OnJoined(s_link.get());
         std::string hash;
         {
             std::lock_guard<std::mutex> lock(s_savedMu);
@@ -383,6 +392,7 @@ void OnIncoming(Incoming& in) {
 namespace {
 void HangUp() {
     PanelClose();
+    SharedMap::End();
     if (s_link) {
         s_link->Stop();
         s_link.reset();
@@ -405,6 +415,9 @@ void ResetForGame(const void* owner) {
         s_restoreRequested = true;
         s_restoreTo = s_pendingPrevRequested;
     }
+    // A lobby game is a shared map from its first structure on (the start town is built during
+    // this Load, before SelectForGame).
+    SharedMap::Begin(s_lobbyGame);
     std::lock_guard<std::mutex> lock(s_savedMu);
     s_saved = SavedState();
     s_loadedFromSave = false;
@@ -496,6 +509,7 @@ void SelectForGame() {
             if (!s_saved.town.empty()) s_config.name = s_saved.town;
         }
         if (!s_worldHashNew.empty()) s_saved.worldHash = s_worldHashNew;   // a new game's map
+        if (!s_lobbyGame && s_loadedFromSave && !s_saved.pass.empty()) SharedMap::Begin(true);   // a lobby save
         s_saved.town = s_config.name;
         s_saved.pass = s_lobbyGame || !s_saved.pass.empty() ? s_config.password : std::string();
         s_saved.server = s_config.server;
@@ -538,6 +552,7 @@ void BeginFrame() {
     PanelPollHotkey();
     if (s_frame % kRetryWaitingFrames == 0) RetryWaiting();
     if (!s_link) return;
+    SharedMap::Tick(s_link.get(), s_frame);
     std::vector<Incoming> got;
     s_link->Poll(got);
     for (Incoming& in : got) OnIncoming(in);

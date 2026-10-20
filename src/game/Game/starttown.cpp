@@ -113,6 +113,7 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <algorithm>
 #include <functional>
 #include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::StartCentre (NOT RETAIL)
+#include "ext/neighbour/shared_map.h"  // EXT SEAM: Neighbour::SharedMap::NoteStructure (NOT RETAIL)
 
 // ============================================================================
 // Economy Brick M-D — live town storage (BANISHED_LIVE_STORAGE, default OFF).
@@ -1790,6 +1791,7 @@ static int StartTown_SpawnStructures(MapGenerator* startConfig, EntityList* enti
         }
 
         ++g_stDiag.structPlaced;   // [WGPAR] folded into the summary line
+        Neighbour::SharedMap::NoteStructure(ent);   // EXT SEAM (NOT RETAIL): claim + mirror (ext.neighbour M2)
         return ent;
     };
     g_stPlaceStructure = placeStructure;   // for the deferred spawn tick

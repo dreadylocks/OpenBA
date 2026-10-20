@@ -90,6 +90,14 @@ bool DecodeGoods(const std::string& text, std::vector<std::pair<std::string, int
 std::string EncodeMembers(const std::vector<FamilyMember>& members);
 bool DecodeMembers(const std::string& text, std::vector<FamilyMember>& out);
 
+// Tile rectangles on the wire (land claims, M2): "x,y,w,h;x,y,w,h" (whole tiles, w and h >= 1,
+// inside a kMaxMapDim square, at most kMaxRects rectangles).
+struct TileRect { int x = 0, y = 0, w = 0, h = 0; };
+constexpr int kMaxMapDim = 1024;
+constexpr int kMaxRects  = 64;
+std::string EncodeRects(const std::vector<TileRect>& rects);
+bool DecodeRects(const std::string& text, std::vector<TileRect>& out);
+
 // A parcel: goods or a family, with an id unique to its sender (the relay and the receiver use it
 // to never deliver one twice). `body` is EncodeGoods / EncodeMembers text.
 struct Parcel {

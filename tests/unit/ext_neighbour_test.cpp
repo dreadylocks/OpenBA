@@ -426,3 +426,20 @@ UNIT_TEST(ext_neighbour_lobby_list_and_join) {
     CHECK(!Neighbour::ListRooms(&MakeFake, "ws://fake", rooms, why, 300));
     g_net = nullptr;
 }
+
+UNIT_TEST(ext_neighbour_tile_rects) {
+    std::vector<Neighbour::TileRect> r;
+    CHECK(Neighbour::DecodeRects("10,10,3,3;50,51,1,2", r));
+    CHECK_EQ(static_cast<int>(r.size()), 2);
+    if (r.size() == 2) {
+        CHECK_EQ(r[1].x, 50);
+        CHECK_EQ(r[1].y, 51);
+        CHECK_EQ(r[1].h, 2);
+    }
+    CHECK_STREQ(Neighbour::EncodeRects(r).c_str(), "10,10,3,3;50,51,1,2");
+    const char* bad[] = {"", "1,2,3", "1,2,0,4", "-1,2,3,4", "1020,0,10,1", "1,2,3,4;", "a,b,c,d"};
+    for (const char* b : bad) CHECK(!Neighbour::DecodeRects(b, r));
+    std::string many;
+    for (int i = 0; i < Neighbour::kMaxRects + 1; ++i) many += (i ? ";" : "") + std::string("1,1,1,1");
+    CHECK(!Neighbour::DecodeRects(many, r));
+}

@@ -25,6 +25,7 @@
 // its float-march pointer-aliased body is too risky to port faithfully in this
 // wave; a wrong port is silent corruption). See reg_player_path.cpp.
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include <new>
 #include "Entity/exe_bodies.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
@@ -104,6 +105,10 @@ bool Map::TestPlacement(int param_2, int param_3, uint32_t param_4,
     const float kHalf = 0.5f;  // DAT_140172114
 
     if (!((-1 < param_2) && (param_2 < size) && (-1 < param_3) && (param_3 < size)))
+        return false;
+    // EXT SEAM (NOT RETAIL, ext.neighbour M2): on a lobby room's shared map the neighbour's land
+    // is not this town's to place on. Never true otherwise.
+    if (Neighbour::SharedMap::PeerHolds(param_2, param_3))
         return false;
 
     int iVar2 = size * param_3 + param_2;

@@ -22,6 +22,7 @@
 //
 // Decompiled from Application-x64.exe.
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "Player/DragPlacementTool.h"
 #include "Player/dragtool.h"   // Tool + DragTool (ENDGAME B.3.8 TOOL)
 #include "Component/CreateDragDescription.h"
@@ -506,6 +507,7 @@ bool DragPlacementTool::CalcPath(int startCell, int endCell) {
     int categoryId = static_cast<int>(descriptionPtr->_category);
 
     entityList->RegisterEntity(&entityIBP, categoryId);
+    Neighbour::SharedMap::NoteStructure(entityIBP.Get());   // EXT SEAM (NOT RETAIL): claim + mirror (ext.neighbour M2)
 
     return true;
 }

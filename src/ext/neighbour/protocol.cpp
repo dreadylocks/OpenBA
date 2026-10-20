@@ -406,6 +406,34 @@ std::vector<std::string> Split(const std::string& s, char sep) {
 
 }  // namespace
 
+std::string EncodeRects(const std::vector<TileRect>& rects) {
+    std::string out;
+    for (const TileRect& r : rects) {
+        if (!out.empty()) out += ';';
+        out += std::to_string(r.x) + "," + std::to_string(r.y) + "," + std::to_string(r.w) + "," + std::to_string(r.h);
+    }
+    return out;
+}
+
+bool DecodeRects(const std::string& text, std::vector<TileRect>& out) {
+    std::vector<TileRect> rects;
+    if (text.empty()) return false;
+    const std::vector<std::string> parts = Split(text, ';');
+    if (static_cast<int>(parts.size()) > kMaxRects) return false;
+    for (const std::string& part : parts) {
+        const std::vector<std::string> f = Split(part, ',');
+        if (f.size() != 4) return false;
+        TileRect r;
+        if (!ParseIntIn(f[0], 0, kMaxMapDim, r.x) || !ParseIntIn(f[1], 0, kMaxMapDim, r.y) ||
+            !ParseIntIn(f[2], 1, kMaxMapDim, r.w) || !ParseIntIn(f[3], 1, kMaxMapDim, r.h))
+            return false;
+        if (r.x + r.w > kMaxMapDim || r.y + r.h > kMaxMapDim) return false;
+        rects.push_back(r);
+    }
+    out = std::move(rects);
+    return true;
+}
+
 std::string EncodeGoods(const std::vector<std::pair<std::string, int>>& goods) {
     std::string out;
     for (const auto& g : goods) {
