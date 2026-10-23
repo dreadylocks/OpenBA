@@ -13,12 +13,16 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status (2026-10-20): M0 to M3 done, except a colour tint on the neighbour's buildings. A
+Status (2026-10-23): M0 to M3 done, except a colour tint on the neighbour's buildings. A
 Multiplayer lobby on the main menu creates and joins rooms; both towns build the same map with the
 same forests; the neighbour's land is claimed, their buildings are drawn in your game and are solid,
 their roads are real roads, and a tree felled or planted in one town is felled or planted in the
-other. In game, N opens the Neighbour panel (chat, goods, a family). What was built and how it was
-tested: §7 (M0), §8 (M1), §9 (M2), §10 (M2 leftovers and M3). Next steps: §6.
+other. In game, N opens the Neighbour panel (chat, goods, a family). On 2026-10-23 the branch took in
+upstream (the native macOS port among it), moved its save state onto upstream's save tail v2, and
+speaks protocol 2: seats by token, the layer-1 handshake, no built-in relay, a WebSocket client on the
+Mac (§11). What was built and how it was tested: §7 (M0), §8 (M1), §9 (M2), §10 (M2 leftovers and
+M3), §11 (protocol 2, the Mac). Every message: `NEIGHBOUR_PROTOCOL.md`. Playing the Mac against the
+PC: `MAC_VS_PC.md`. Next steps: §6.
 
 ---------------------------------------------------------------------------------------------
 
@@ -34,8 +38,13 @@ tested: §7 (M0), §8 (M1), §9 (M2), §10 (M2 leftovers and M3). Next steps: §
 - **No islands needed for it.** `island_maps` is a separate, optional feature for later.
 - **Machines**: the user's Windows PC (their normal Banished PC) is where the game is built,
   tested and played; development moves there (clone of this fork, Claude Code on the PC). The
-  user's Apple Silicon Mac can cross-build the Windows exe (`tools/build.sh build --cross`) and
-  will host / test the relay server work if convenient.
+  user's Apple Silicon Mac can cross-build the Windows exe (`tools/build.sh build --cross`) and,
+  since upstream's Metal port (merged 2026-10-23), builds and runs the game natively too
+  (`tools/macos/make_app.sh`). Next goal: the Mac against the PC (`MAC_VS_PC.md`).
+- **Upstream** (2026-10-23, the user): merged into `neighbour-towns` (merge commit `e52d19590`), not
+  rebased, so commit `69fc77c` (linked from the interop spec's comparison) stays valid.
+- **Interop spec** (fran-cap/Banished-Interop-Spec): the user is the one maintainer implementing layer
+  3b, the separate-town profile. Shared-town co-op is not part of this branch's work.
 - **Server: Cloudflare Workers + Durable Objects** (the user, 2026-10-19), not a Python relay
   behind Tailscale: always on, free tier, TLS included, no port on anyone's PC. See §3.
 - **Fork**: `dreadylocks/OpenBA`, public (also covers the GPL when the exe is shared with the
@@ -182,10 +191,12 @@ town plus a mirror of the neighbour's buildings, roads and resource changes.
   the `placeStructure` lambda (`starttown.cpp:1425-1790`).
 - **Time**: each town keeps its own clock and speed; optional "speed lock" (both at the slower
   player's speed, pause pauses both).
-- **Saves**: still single-player saves, plus a class C tail record (room, cached claims, the neighbour mirror, undelivered
-  parcels, last neighbour snapshot). `ExtSave_WriteTail` / `ExtSave_ReadTail`
-  (`Game/gameupdateloop_serialize.cpp:777, 794`) write and read the tail, but **no extension fills
-  a payload yet** (`src/ext/savetail.*` leaves it empty): that plumbing comes first.
+- **Saves**: still single-player saves, plus a class C record in the save tail (upstream's save tail
+  v2, spec PR #2): `src/ext/neighbour/save_state.{h,cpp}` is ext.neighbour's `StateCodec`, registered
+  in `src/ext/state_codecs.cpp` beside restricted_foods'. The payload is `protocol.h` `SavedState`
+  (v4: room, how to get back in, the seat token, parcels in flight). A payload that cannot be read
+  refuses the save, as the spec's reader rules say. (Until 2026-10-23 this was the fork's own
+  `SaveTail::RegisterPayload`, commit `e962d2aa1`; gone with the merge.)
 - **Hooks**: per frame `Neighbour::BeginFrame()` in `GameUpdateLoop::Update` beside
   PerfX/WalkBatch (`gameupdateloop.cpp:576`); per-game setup next to `Ext::LockForGame` /
   `SelectForGame` (`gameupdateloop_load.cpp:735, 739`). The network runs on its own thread; the
@@ -212,12 +223,18 @@ limits before relying on them). The earlier plan (plain TCP to a Python asyncio 
 Tailscale) is the fallback.
 - **Transport**: WebSocket over TLS (`wss://`), because Workers accept HTTP/WebSocket only, not
   raw TCP. One network thread in `src/ext/neighbour/`, behind a small `src/platform` seam: on
-  Windows the OS's own WinHTTP WebSocket client (`WinHttpWebSocketCompleteUpgrade`, Windows 8+),
-  so still no third-party library; the Linux build gets a stub (or a later client).
+  Windows the OS's own WinHTTP WebSocket client (`WinHttpWebSocketCompleteUpgrade`, Windows 8+), on
+  macOS the OS's Network.framework (`src/platform/darwin/websocket_darwin.cpp`), so still no
+  third-party library; the Linux build has a stub.
   Keep the message format separate from the transport, so the Tailscale/TCP fallback is a swap.
 - **Server**: a small Worker (plain JavaScript, `tools/neighbour_server/src/index.js`) plus one Durable Object per room. A room = two seats
   + a shared password; forwards messages; **keeps parcels for an offline player** in the
   object's storage; remembers each town's last snapshot. Lives in `tools/neighbour_server/`.
+- **No built-in relay** (2026-10-23, interop spec layer 0): the game used to default to the user's own
+  Worker; now the relay is `neighbour.server` in `settings.cfg` or the lobby's Relay box. Whoever plays
+  deploys a relay (or runs one locally) and both towns point at it. The working group's proposed
+  reference relay (`unbanished-server`) is not used yet: its spec is not written.
+- **Messages and rules**: `NEIGHBOUR_PROTOCOL.md` (protocol 2), defined once.
 - **Safety**: TLS from Cloudflare + the room password. The game validates every incoming
   message (sizes, counts, names, positions): bad data must never crash a town.
 - **Later, if walkers are streamed**: ENet (MIT, ~6 C files in `third_party/`).
@@ -247,12 +264,17 @@ user PATH. Debug build: 0 errors, 156 warnings; `tools/build.sh unit` 1174 tests
 5 skipped (ToolKit, fonts); the gate passes after `4c9b37a99` (boot load ~25 s before frame 1
 there, which the old 20 s watchdog budget killed). The upstream v1.0.0 exe also starts a new game.
 
-**Mac (secondary).** `brew install mingw-w64 cmake ninja`, then
-`tools/build.sh build [flavour] --cross` -> `build/cross-<flavour>/OpenBA.exe`
-(`tools/toolchains/mingw-w64-x86_64.cmake`; Homebrew mingw-w64 14.0.0 / GCC 16.2, UCRT). Debug
-and release both build (2026-10-19); ~235 extra warnings from GCC 16 (mostly unused variables, 2
-`-Warray-bounds` on zero-length arrays in `Work/work_act_consume.cpp:264,298`). A Mac-built exe
-had not been run yet at the time of writing. Native macOS is not an option (no D3D11; weeks).
+**Mac.** Two builds, both from the same checkout:
+- **Native** (upstream's Metal port, `docs/macos/README_MAC.md`): full Xcode with its Metal toolchain
+  (`xcodebuild -downloadComponent MetalToolchain`, ~690 MB), `brew install cmake ninja meson`, the SDL
+  and FreeType submodules, then `tools/macos/make_app.sh` -> `dist/OpenBA.app`. The first run clones
+  DXMT and builds part of LLVM 15 into `third_party/` (1.7 GB on disk; the slow part, done once). Unit tests:
+  `tools/build.sh unit` (`build/mac-arm64`). Game data: the Mac needs Banished 1.0.7's `WinData`
+  (copy it from the PC; the app's folder picker or `--game-dir` points at it).
+- **Windows exe, cross-built**: `brew install mingw-w64 cmake ninja`, then
+  `tools/build.sh build [flavour] --cross` -> `build/cross-<flavour>/OpenBA.exe`
+  (`tools/toolchains/mingw-w64-x86_64.cmake`; Homebrew mingw-w64 14.0.0 / GCC 16.2, UCRT).
+  ~235 extra warnings from GCC 16 (mostly unused variables). It runs on the PC, not on the Mac.
 
 ---------------------------------------------------------------------------------------------
 
@@ -262,8 +284,10 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 2. Extension settings are `ext.<id>=0|1` only; server address / room / password need string keys.
    DECIDED (2026-10-19, the user said not to wait on them): `neighbour.server`, `neighbour.room`,
    `neighbour.password`, `neighbour.name` in `settings.cfg`, read-only, when a game starts
-   (`src/ext/neighbour/neighbour.cpp` ReadConfig). A Join dialog can come later. Env flags stay
-   banned (`Opt()`).
+   (`src/ext/neighbour/neighbour.cpp` ReadConfig). Since 2026-10-23 `neighbour.server` has no
+   default, and the lobby has a Relay box that starts from it (the engine writes only int / bool
+   settings, so a typed relay is remembered for the session and in the game's save, not in
+   `settings.cfg`). Env flags stay banned (`Opt()`).
 3. Class B/C are off by default and locked per game: fine, the user switches them on.
 4. CLAUDE.md's goal is a faithful port: kept; CLAUDE.md now points here.
 5. No game content in the tree: no conflict (the mirrored, tinted neighbour buildings use the user's own install; the server
@@ -284,7 +308,16 @@ had not been run yet at the time of writing. Native macOS is not an option (no D
 5. M1 follow-ups, when wanted: barter through a merchant boat at the trading post (the plan's
    original trade), an accept / refuse window for an arriving family, families walking in from
    the map edge rather than appearing among the townspeople.
-6. Still ask the user before: pushing, opening a network port beyond 127.0.0.1, deploying.
+6. Still ask the user before: pushing, force-pushing, opening a network port beyond 127.0.0.1,
+   deploying the Worker. Do not post to the interop spec's threads or touch that repository.
+7. DONE (2026-10-23, §11): upstream merged; save state on save tail v2; relay address a setting;
+   protocol 2 (handshake, refuse / warn, seat tokens, one message list); the Mac's WebSocket client.
+8. NEXT: the first Mac-against-PC game (`MAC_VS_PC.md`). The big unknown is whether the Mac and the
+   PC build the same land from one seed (worldgen uses the platform's `powf`; see §11). The relay
+   now refuses a town whose land differs, so the first join answers it.
+9. LATER, only after 8 works and after checking the plan with the user: the two layer-3b additions
+   the user agreed to in issue #1: a harvest lease (two towns cannot fell the same tree) and a
+   periodic repair snapshot (drift is put right).
 
 ---------------------------------------------------------------------------------------------
 
@@ -484,3 +517,44 @@ follow-ups (§6).
   - Citizens walking round a solid mirror was not watched in game.
   - Both towns felling the same tree at the same moment can give its wood twice.
   - Saplings grow on each copy's own clock, so a tree can be ripe in one town and not the other.
+
+---------------------------------------------------------------------------------------------
+
+## 11. Protocol 2 and the Mac (2026-10-23)
+
+From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1, PRs #2 and #4):
+- **Upstream merged** (`e52d19590`): 134 commits, incl. the native macOS Metal port, CI on
+  Windows / Linux / Mac and save tail v2 with class C codecs. 16 files clashed; resolutions are in the
+  merge commit's message. The native Mac unit tests pass and the Windows cross-build links.
+- **Save tail v2**: ext.neighbour is a `StateCodec` (`save_state.{h,cpp}`); our own
+  `RegisterPayload` is gone. Payload v4 adds the seat token. Registry formatVersion 4.
+- **No built-in relay**: `lobby.cpp`'s hard-coded `wss://openba-neighbour.spellpress.workers.dev` is
+  gone; `neighbour.server` or the lobby's Relay box (`ExtensionsLobby.rsc` `editRelay`).
+- **Handshake (layer 1)**: `handshake.{h,cpp}` (standard C++, unit tested) adds engine, engineVer,
+  simBuild, dataHash, mods, exts and maxPlayers to every hello and create; `local_info.cpp` fills them
+  from the running game once per process (the retail packages hashed with xxHash64, about a second).
+  The mod list follows fran-cap's open proposal (name + size + optional xxHash64, load order) and is
+  spelled in one place on each side, so it is easy to change. The relay applies the settled
+  separate-town rules: protocol version and retail data hash refuse; sim build, engine and mod list
+  warn (`compat`, to both towns). A different land (world hash) now refuses the second town instead
+  of warning. Every refusal is `fatal`: the game stops retrying and says why.
+- **Seats by token (layer 0)**: the relay hands a town a random token on its first join and seats it
+  by that token from then on, never by name (it keeps a SHA-256 only). Pre-token rooms hand each named
+  seat its token once.
+- **One message list**: `NEIGHBOUR_PROTOCOL.md`. JSON for every control message; no binary frames
+  (nothing is bulk yet).
+- **The Mac's WebSocket**: `src/platform/darwin/websocket_darwin.cpp` (Network.framework; replaces the
+  POSIX stub on Apple). Checked against the local relay: connect, hello, welcome with a token, ping /
+  pong, a blocked receive released by Cancel, a refused port failing fast. `wss://` not checked yet
+  (no internet relay was used).
+- **Tested**: native Mac unit tests 1307, 0 failures (3 new: xxHash64 against python-xxhash's values,
+  the mod list, the save codec; the lobby and saved-state tests extended); relay selftest 47 checks
+  against `wrangler dev` (seat tokens, a v1 game refused, other retail data refused, another build and
+  other mods warned on both sides, other land refused); the Mac app and the Windows exe build. Not
+  run in game on either machine yet (the Mac has no game data yet).
+- **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. Worldgen
+  calls the platform's `powf` (`worldgen_cells.cpp:56`, `worldgen_f390_erosion.cpp:84`,
+  `worldgen_f390_rivers.cpp:95`): Apple's libm and the PC's may differ in the last bit for some inputs,
+  and then the land hashes differ and the relay refuses the join. If so, the fix is a portable `powf`
+  for lobby games only (e.g. the ported MSVC one, `src/engine/crt/msvc_libm.h` `MsvcLibm::Powf`),
+  behind the extension so the faithful game is untouched. Ask the user before doing it.
