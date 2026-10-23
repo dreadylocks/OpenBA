@@ -136,7 +136,7 @@
 #include "io/Modification.h"
 #include "system/Compression.h"
 #include <new>
-#include <vector>   // the EXT SEAM's record buffer (SaveMetaData, NOT RETAIL)
+#include <vector>   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): the pseudo-mods' record buffer (SaveMetaData)
 
 using RtSave::ModInfo;
 using RtSave::SaveLoad;
@@ -441,8 +441,8 @@ void Save::SaveLoad::SaveMetaData(void* pixels, int width, int height,
             // <- ~ModInfo(tmp): ReleaseStringSlot(path), then (name).
         }
 
-        // EXT SEAM (NOT RETAIL; SaveLoad.h `_extExtraMods`, docs/extensions/
-        // handins/EXTSAVE.md): the active class B / C extensions as pseudo-mods,
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): SaveLoad.h `_extExtraMods` --
+        // the active class B / C extensions as pseudo-mods,
         // appended after the real ones through the same grow. Null under the
         // faithful profile, and 0 records while no B / C extension is active:
         // the record below is then retail's byte for byte.
@@ -529,6 +529,6 @@ void Save::SaveLoad::SaveMetaData(void* pixels, int width, int height,
     name->System::String::~String();
 }
 
-// EXT SEAM (NOT RETAIL; SaveLoad.h): null by default, set by the game side at
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): SaveLoad.h's `_extExtraMods`, null by default, set by the game side at
 // boot (Ext::InitFromSettings). Null = retail's mod list exactly.
 Save::SaveLoad::ExtraModsProvider Save::SaveLoad::_extExtraMods = nullptr;

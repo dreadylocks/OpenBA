@@ -28,6 +28,7 @@
 // ============================================================================
 #pragma once
 
+namespace Ext {
 namespace EyeCamera {
 
 struct Vec3 {
@@ -164,3 +165,4 @@ FollowDecision DecideFollow(bool haveDialog, const T* front, const T* latched,
 }
 
 }  // namespace EyeCamera
+}  // namespace Ext

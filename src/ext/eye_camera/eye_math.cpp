@@ -8,6 +8,7 @@
 
 #include <cmath>
 
+namespace Ext {
 namespace EyeCamera {
 
 namespace {
@@ -104,3 +105,4 @@ const char* FollowReasonName(FollowReason reason) {
 }
 
 }  // namespace EyeCamera
+}  // namespace Ext

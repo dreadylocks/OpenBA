@@ -26,7 +26,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(banished_reimpl VERSION 1.0.0 LANGUAGES CXX)
 # OpenBA version shown beside the retail version in the main / pause menu's BuildId
-# overlay (src/game/Dialog/mainmenudialog.cpp). Fixed at 1.0.0 until the repo is public.
+# overlay (src/game/Dialog/mainmenudialog.cpp). Bump here to cut a release (README "Versioning").
 add_compile_definitions(OPENBA_VERSION="${PROJECT_VERSION}")
 if(WIN32)
   enable_language(RC)   # src/app/icon.rc
@@ -60,10 +60,23 @@ endif()
 
 # The three flags that are NOT tuning knobs (explained here):
 #   -fno-strict-aliasing : ported bodies pun raw offsets through two lvalue types
-#   -fno-lifetime-dse    : retail dtors null the fields they free and callers rely on it
+#   -fno-lifetime-dse    : GCC treats an object as dead once its destructor starts and deletes
+#                          "dead" stores to it; retail dtors null the fields they free and callers
+#                          rely on it (a double free that showed only at -O2). Clang has no such
+#                          dead-store rule and rejects the flag, so it is added only where the
+#                          compiler knows it (check_cxx_compiler_flag), never blindly.
 #   -fexceptions         : spelled out (ENDGAME B.1 decision 7); no object may be built without it
+# And one for portability: -ffp-contract=off. Retail is MSVC x64 without FMA contraction; GCC in
+# gnu++17 mode defaults to -ffp-contract=fast and emits fmadd on aarch64 (and on x86 with
+# -march=native / FMA), which would change worldgen rounding ([WorldHash] byte-identical worlds).
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-fno-lifetime-dse BANISHED_HAVE_NO_LIFETIME_DSE)
+set(BANISHED_LIFETIME_DSE_FLAG)
+if(BANISHED_HAVE_NO_LIFETIME_DSE)
+  set(BANISHED_LIFETIME_DSE_FLAG -fno-lifetime-dse)
+endif()
 set(BANISHED_CXX_FLAGS
-  -fexceptions -fno-strict-aliasing -fno-lifetime-dse
+  -fexceptions -fno-strict-aliasing ${BANISHED_LIFETIME_DSE_FLAG} -ffp-contract=off
   -Wall -Wextra -Wno-cast-function-type -Wno-invalid-offsetof)
 # Off Windows, two flags pin what MinGW gives for free (plans/ABI.md C.7): `char` is signed
 # (abi.h asserts it; ARM64 Linux defaults to unsigned) and bit-fields lay out MSVC-style
@@ -114,6 +127,8 @@ set(EXT_RSC_SOURCES
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/Extensions.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/EnhancedOptions.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsStringTable.rsc
+  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsWindow.rsc
+  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/RestrictedFoodsPage.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsNeighbour.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsLobby.rsc)
 set(EXT_RSC_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
@@ -127,6 +142,14 @@ add_custom_command(OUTPUT ${EXT_RSC_GEN}
   DEPENDS ${CMAKE_SOURCE_DIR}/tools/ext_rsc_embed.py ${EXT_RSC_SOURCES}
   COMMENT "ext_rsc_embed: src/ext/ui/*.rsc -> gen/ext_rsc_text.h")
 add_custom_target(ext-rsc-text DEPENDS ${EXT_RSC_GEN})
+# gen/openba_build_info.h: the git commit + build date shown beside OPENBA_VERSION in the
+# main menu's build line (README "Versioning"). Regenerated on every build, relinks only
+# when the commit changes (cmake/build_info.cmake).
+add_custom_target(openba-build-info
+  COMMAND ${CMAKE_COMMAND} -DOUT=${EXT_RSC_GEN_DIR}/openba_build_info.h -DSRC=${CMAKE_SOURCE_DIR}
+          -P ${CMAKE_SOURCE_DIR}/cmake/build_info.cmake
+  BYPRODUCTS ${EXT_RSC_GEN_DIR}/openba_build_info.h
+  COMMENT "build_info: git commit -> gen/openba_build_info.h")
 if(WIN32)
   file(GLOB_RECURSE PLATFORM_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/platform/win/*.cpp
                                                     ${CMAKE_SOURCE_DIR}/src/platform/common/*.cpp
@@ -138,8 +161,36 @@ else()
   file(GLOB_RECURSE PLATFORM_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/platform/posix/*.cpp
                                                     ${CMAKE_SOURCE_DIR}/src/platform/common/*.cpp
                                                     ${CMAKE_SOURCE_DIR}/src/platform/sdl/*.cpp)
+  if(APPLE)
+    # src/platform/darwin/README.md: a darwin/<name>_darwin.cpp replaces posix/<name>_posix.cpp
+    # whole-file; a darwin file with no posix twin is simply added.
+    file(GLOB PLATFORM_DARWIN_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/platform/darwin/*.cpp)
+    foreach(darwin_src ${PLATFORM_DARWIN_SRCS})
+      get_filename_component(darwin_name ${darwin_src} NAME)
+      string(REGEX REPLACE "_darwin\\.cpp$" "_posix.cpp" posix_name ${darwin_name})
+      list(REMOVE_ITEM PLATFORM_SRCS ${CMAKE_SOURCE_DIR}/src/platform/posix/${posix_name})
+    endforeach()
+    list(APPEND PLATFORM_SRCS ${PLATFORM_DARWIN_SRCS})
+  endif()
 endif()
-file(GLOB_RECURSE RENDER_SRCS   CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/render/dx11/*.cpp)
+# The renderer backend: src/render/${BANISHED_RENDER_BACKEND}/backend.cmake sets RENDER_SRCS (its own
+# sources), RENDER_BACKEND_INCLUDES and RENDER_BACKEND_READY, and its per-source properties
+# (src/render/common/README.md). dx11 by default, metal on APPLE.
+# src/render/common is globbed here, not in the fragment: every backend links it, and the unit
+# tests and the extensions include it whichever backend is picked.
+if(APPLE)
+  set(BANISHED_RENDER_BACKEND_DEFAULT metal)
+else()
+  set(BANISHED_RENDER_BACKEND_DEFAULT dx11)
+endif()
+set(BANISHED_RENDER_BACKEND ${BANISHED_RENDER_BACKEND_DEFAULT} CACHE STRING "Renderer backend: src/render/<name>/backend.cmake")
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/src/render/${BANISHED_RENDER_BACKEND}/backend.cmake)
+  message(FATAL_ERROR "BANISHED_RENDER_BACKEND=${BANISHED_RENDER_BACKEND}: no src/render/${BANISHED_RENDER_BACKEND}/backend.cmake")
+endif()
+include(${CMAKE_SOURCE_DIR}/src/render/${BANISHED_RENDER_BACKEND}/backend.cmake)
+message(STATUS "OpenBA render backend: ${BANISHED_RENDER_BACKEND} (ready: ${RENDER_BACKEND_READY})")
+file(GLOB_RECURSE RENDER_COMMON_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/render/common/*.cpp)
+list(APPEND RENDER_SRCS ${RENDER_COMMON_SRCS})
 file(GLOB         APP_SRCS      CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/app/*.cpp)
 file(GLOB         DIAG_SRCS     CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/diag/*.cpp)
 # src/diag/win: the Windows-only diagnostics (crash / hang handlers, watchdog, sampler,
@@ -159,7 +210,8 @@ list(REMOVE_ITEM GAME_SRCS ${TWEAK_SRCS})
 set(BANISHED_INCLUDES
   ${CMAKE_SOURCE_DIR}/src/game
   ${CMAKE_SOURCE_DIR}/src/engine
-  ${CMAKE_SOURCE_DIR}/src/render/dx11
+  ${CMAKE_SOURCE_DIR}/src/render/common
+  ${RENDER_BACKEND_INCLUDES}  # src/render/<backend>/backend.cmake (dx11: src/render/dx11)
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_SOURCE_DIR}/src/diag
   ${CMAKE_SOURCE_DIR}/src/platform/common
@@ -221,13 +273,8 @@ add_executable(OpenBA WIN32
 set_target_properties(OpenBA PROPERTIES OUTPUT_NAME OpenBA RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(OpenBA PRIVATE ${BANISHED_INCLUDES})
 target_compile_options(OpenBA PRIVATE ${BANISHED_CXX_FLAGS} ${BANISHED_ONE_WRITE_STDIO} ${FLAVOUR_FLAGS})
-# The verbatim upstream ASSAO copy (GameTechDev/ASSAO, MIT; src/render/dx11/ao/assao/README.md) is not
-# ours to tidy: its standing -Wsign-compare / unused warnings are silenced per file so the warning
-# gate measures only our code (gate FAA, 2026-10-16: five perf-build warnings, all in this file).
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/render/dx11/ao/assao/ASSAODX11.cpp PROPERTIES
-                            COMPILE_OPTIONS "-Wno-sign-compare;-Wno-unused-function;-Wno-unused-variable")
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/render/dx11/ao/assao/ASSAODX11.cpp PROPERTIES
-                            COMPILE_DEFINITIONS BANISHED_THIRD_PARTY_SOURCE)
+# The backend's per-source properties (dx11: the verbatim ASSAO copy's silenced warnings) are set
+# by src/render/${BANISHED_RENDER_BACKEND}/backend.cmake.
 # the flavour flags are on the link line too (as the old Makefile did: -flto reaches the linker)
 target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -static -static-libgcc -static-libstdc++ -mwindows)
 # shell32: SHGetFolderPathW (Platform::DocumentsDir). No ole32 of ours since Phase D.4 SDL-5 D2;
@@ -273,15 +320,23 @@ else()
 # app, diag (+ src/diag/posix, the twins of src/diag/win), the dx11 renderer -- over
 # src/platform/posix + sdl + common. `cmake --build <dir> -t OpenBA` -> <dir>/OpenBA.
 # The renderer is the same dx11 code over dxvk-native 3.1.1 (tools/fetch_dxvk_native.sh;
-# third_party/dxvk-native/README.md). It links no graphics library:
-# src/platform/posix/gfx_posix.cpp dlopens libdxvk_dxgi / libdxvk_d3d11 at run time, so only
-# the headers are used, and only by src/render/dx11 (as -isystem: they are MinGW's and
-# dxvk's, not ours). DXVK_WSI_DRIVER=SDL3 is set by the run script (tools/linux_run.sh),
-# never read by our code (D4_RULES C11). Skipped, with a message, until the fetch has run.
+# third_party/dxvk-native/README.md); src/render/dx11/backend.cmake checks for its headers, gives
+# them to src/render/dx11 as -isystem and clears RENDER_BACKEND_READY (with the message) until
+# the fetch has run. DXVK_WSI_DRIVER=SDL3 is set by the run script (tools/linux_run.sh),
+# never read by our code (D4_RULES C11).
 # ---------------------------------------------------------------------------------------
-set(BANISHED_DXVK_NATIVE ${CMAKE_SOURCE_DIR}/third_party/dxvk-native/3.1.1/usr)
-if(EXISTS ${BANISHED_DXVK_NATIVE}/include/dxvk/d3d11.h)
+if(RENDER_BACKEND_READY)
   file(GLOB DIAG_POSIX_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/diag/posix/*.cpp)
+  if(APPLE)
+    # Diagnostics follow the same whole-file twin rule as src/platform.
+    file(GLOB DIAG_DARWIN_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/diag/darwin/*.cpp)
+    foreach(darwin_src ${DIAG_DARWIN_SRCS})
+      get_filename_component(darwin_name ${darwin_src} NAME)
+      string(REGEX REPLACE "_darwin\\.cpp$" "_posix.cpp" posix_name ${darwin_name})
+      list(REMOVE_ITEM DIAG_POSIX_SRCS ${CMAKE_SOURCE_DIR}/src/diag/posix/${posix_name})
+    endforeach()
+    list(APPEND DIAG_POSIX_SRCS ${DIAG_DARWIN_SRCS})
+  endif()
   add_executable(OpenBA
     ${GAME_SRCS} ${ENGINE_SRCS} ${PLATFORM_SRCS} ${RENDER_SRCS} ${APP_SRCS} ${DIAG_SRCS}
     ${DIAG_POSIX_SRCS})
@@ -289,21 +344,28 @@ if(EXISTS ${BANISHED_DXVK_NATIVE}/include/dxvk/d3d11.h)
   set_target_properties(OpenBA PROPERTIES OUTPUT_NAME OpenBA RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
                                               BUILD_RPATH "$ORIGIN")
   target_include_directories(OpenBA PRIVATE ${BANISHED_INCLUDES})
-  set_source_files_properties(${RENDER_SRCS} PROPERTIES
-                              COMPILE_OPTIONS "-isystem;${BANISHED_DXVK_NATIVE}/include/dxvk")
   target_compile_options(OpenBA PRIVATE ${BANISHED_CXX_FLAGS} ${FLAVOUR_FLAGS})
   # -rdynamic: the exe's own functions in the dynamic symbol table, so the crash and hang
   # dumps (backtrace + dladdr, src/diag/posix) name them.
-  target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -rdynamic)
+  if(APPLE)
+    target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -Wl,-export_dynamic)
+  else()
+    target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -rdynamic)
+  endif()
   find_package(Threads REQUIRED)
   # SDL3 SHARED here, not static: dxvk-native's SDL3 WSI dlopens libSDL3.so.0 and resolves
   # every SDL call through that handle, so it must reach the SAME SDL instance that owns
   # our SDL_Window (a static copy in the exe would be a second SDL with no window). It is
   # built from the same pinned submodule; glibc's dlopen returns the copy the exe already
   # loaded (matched by SONAME).
-  target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
-else()
-  message(STATUS "OpenBA (Linux) not configured: run tools/fetch_dxvk_native.sh for the dxvk-native headers")
+  if(APPLE)
+    # Metal needs no dlopened SDL: SDL3 is static, and libairconv.dylib is found beside the exe.
+    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+  else()
+    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+  endif()
+  # The backend's own link libraries (metal: the Metal and QuartzCore frameworks; dx11: none).
+  target_link_libraries(OpenBA PRIVATE ${RENDER_BACKEND_LINK_LIBRARIES})
 endif()
 endif()
 
@@ -321,15 +383,33 @@ if(NOT WIN32)
   list(APPEND UNIT_TREE_SRCS ${CMAKE_SOURCE_DIR}/src/platform/posix/os_posix.cpp)
   # os_posix.cpp's ReleaseModule / ExecutableImageBase (dlclose, dl_iterate_phdr).
   set(UNIT_POSIX_LIBS ${CMAKE_DL_LIBS})
+  if(APPLE)
+    # On Apple a src/platform/darwin twin, when one exists, replaces its posix twin (the
+    # same whole-file rule as PLATFORM_SRCS above; src/platform/darwin/README.md).
+    set(UNIT_TREE_SRCS_DARWIN)
+    foreach(unit_src ${UNIT_TREE_SRCS})
+      if(unit_src MATCHES "/src/(platform|diag)/posix/([a-z_]+)_posix\\.cpp$")
+        set(darwin_twin ${CMAKE_SOURCE_DIR}/src/${CMAKE_MATCH_1}/darwin/${CMAKE_MATCH_2}_darwin.cpp)
+        if(EXISTS ${darwin_twin})
+          set(unit_src ${darwin_twin})
+        endif()
+      endif()
+      list(APPEND UNIT_TREE_SRCS_DARWIN ${unit_src})
+    endforeach()
+    set(UNIT_TREE_SRCS ${UNIT_TREE_SRCS_DARWIN})
+  endif()
 endif()
 file(GLOB UNIT_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/unit/*.cpp)
+if(NOT APPLE)
+  list(FILTER UNIT_SRCS EXCLUDE REGEX "/platform_mac_data_test\\.cpp$")
+endif()
 add_executable(unit EXCLUDE_FROM_ALL ${UNIT_SRCS} ${UNIT_TREE_SRCS})
 set_target_properties(unit PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-add_dependencies(OpenBA ext-rsc-text)
+add_dependencies(OpenBA ext-rsc-text openba-build-info)
 add_dependencies(unit ext-rsc-text)
 target_include_directories(unit PRIVATE ${BANISHED_INCLUDES} ${CMAKE_SOURCE_DIR}/tests/unit)
 target_compile_options(unit PRIVATE
-  -fexceptions -fno-strict-aliasing -fno-lifetime-dse -Wall -Wextra -Wno-invalid-offsetof
+  -fexceptions -fno-strict-aliasing ${BANISHED_LIFETIME_DSE_FLAG} -ffp-contract=off -Wall -Wextra -Wno-invalid-offsetof
   -g -O0 -D_DEBUG -DBANISHED_UNIT_TEST ${BANISHED_PORTABLE_FLAGS} ${BANISHED_ONE_WRITE_STDIO})
 if(WIN32)
   target_link_options(unit PRIVATE -static -static-libgcc -static-libstdc++)

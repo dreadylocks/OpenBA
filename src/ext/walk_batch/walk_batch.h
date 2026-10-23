@@ -3,7 +3,8 @@
 // src/ext/walk_batch/walk_batch.h -- NOT RETAIL. Two extension rows share this body:
 //   ext.walk_batch       class A, a live toggle, no save impact (WALKBATCH.md)
 //   ext.walk_batch_grid  class B, locked for the game, pseudo-mod ext:walk_batch_grid
-//                        (WALKGRID.md)
+//                        (WALKGRID.md); its own header, src/ext/walk_batch_grid/walk_batch_grid.h,
+//                        is the seam's view of the TickGrid / TickCharacterGrid bodies below
 // OFFSCREEN design D2, the walk batch at speed N.
 // docs/extensions/handins/WALKBATCH.md is the design and the proof; WALKGRID.md the class B row.
 //
@@ -37,6 +38,7 @@
 class CharacterComponent;                // Component/CharacterComponent.h
 namespace System { class Time; }         // src/engine/system/Value.h
 
+namespace Ext {
 namespace WalkBatch {
 
 // The walk an EntityList update runs (EntityList::UpdateImpl's template argument).
@@ -54,7 +56,7 @@ extern long long g_batchedTicks;
 extern long long g_profTicks;
 extern long long g_profCalls;
 
-// GameUpdateLoop::Update, once per frame beside PerfX::BeginFrame: g_frameWalk = the walk the
+// GameUpdateLoop::Update, once per frame beside Ext::RenderCulling::BeginFrame: g_frameWalk = the walk the
 // frame's intermediate iterations take. kWalkNoPlace when ext.walk_batch_grid is on (its
 // per-game value under the class B lock; it implies the batch whether or not ext.walk_batch is
 // on), else kWalkPlace when ext.walk_batch is on (live, class A), else kWalkFaithful; always
@@ -86,3 +88,4 @@ void TickCharacter(CharacterComponent* self, const System::Time* time);
 void TickCharacterGrid(CharacterComponent* self, const System::Time* time);
 
 }  // namespace WalkBatch
+}  // namespace Ext

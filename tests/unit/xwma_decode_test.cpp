@@ -22,6 +22,8 @@
 // ============================================================================
 #include "unit.h"
 #include "audio/xwma_decode.h"
+#include "audio/load_decode_batch.h"   // block SNDPAR: the batch test at the end
+#include "system/parallel_for.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,7 +38,7 @@ namespace {
 
 // --------------------------------------------------------------- the install
 constexpr const char* kPackage      = "/WinData/data0.pkg";
-constexpr long        kKnownOffset  = 0x2d802;
+constexpr int32_t     kKnownOffset  = 0x2d802;
 constexpr size_t      kRunBytes     = 13452;
 constexpr const char* kRunSha256    = "30da65356d18a1e0c9c0c92a208da2bfd03fc60c61946003de3d8980496fea4c";
 
@@ -91,7 +93,7 @@ std::string Sha256Hex(const uint8_t* data, size_t len) {
     return std::string(hex, 64);
 }
 
-std::vector<uint8_t> ReadRange(FILE* f, long offset, size_t bytes) {
+std::vector<uint8_t> ReadRange(FILE* f, int32_t offset, size_t bytes) {
     std::vector<uint8_t> out;
     if (std::fseek(f, offset, SEEK_SET) != 0) return out;
     out.resize(bytes);
@@ -126,13 +128,13 @@ bool LooksLikeTheSound(const uint8_t* d, size_t n) {
 
 // The scan data/README.md describes: a 0x0161 format window whose two counts sit in
 // front of a strictly rising table. Returns the run's offset or -1.
-long ScanForTheSound(const std::vector<uint8_t>& pkg) {
+std::ptrdiff_t ScanForTheSound(const std::vector<uint8_t>& pkg) {
     const uint8_t* d = pkg.data();
     const size_t n = pkg.size();
     for (size_t i = 32; i + 0x28 <= n; ++i) {
         if (d[i] != 0x61 || d[i + 1] != 0x01) continue;
         const size_t start = i - 32;   // 8 bytes of counts + a 24-byte table
-        if (LooksLikeTheSound(d + start, n - start)) return long(start);
+        if (LooksLikeTheSound(d + start, n - start)) return std::ptrdiff_t(start);
     }
     return -1;
 }
@@ -176,11 +178,11 @@ private:
         } else {
             raw.clear();
             const std::vector<uint8_t> pkg = ReadWhole(f);
-            const long at = ScanForTheSound(pkg);
+            const std::ptrdiff_t at = ScanForTheSound(pkg);
             if (at >= 0) {
                 raw.assign(pkg.begin() + at, pkg.begin() + at + std::ptrdiff_t(kRunBytes));
                 char where[64];
-                std::snprintf(where, sizeof(where), " @0x%lx (found by scan)", at);
+                std::snprintf(where, sizeof(where), " @0x%tx (found by scan)", at);
                 source = path + where;
             }
         }
@@ -418,4 +420,58 @@ UNIT_TEST(xwma_open_refuses_what_it_cannot_decode) {
     dec.Close();
     CHECK(!dec.IsOpen());
     CHECK_EQ(dec.TotalSamples(), uint64_t(0));
+}
+
+// Block SNDPAR: the real WMA v2 decode through Audio::LoadDecode's batch (the path a load's
+// SoundBuffers take, src/engine/audio/load_decode_batch.h) on 4 pool threads, 24 jobs over
+// the fixture at once: every job's PCM is the inline decode's, byte for byte, and the
+// finishes run in Defer order. tests/unit/load_decode_batch_test.cpp pins the batch itself
+// without an install.
+namespace {
+struct BatchJob {
+    const Fixture* fx = nullptr;
+    std::vector<int16_t> pcm;      // decode's output
+    std::vector<int16_t> published;
+    int order = -1;
+};
+int g_batchFinishes = 0;           // finishes run on the scope's thread only
+void BatchDecode(void* item, void*) {
+    BatchJob* j = static_cast<BatchJob*>(item);
+    Audio::XwmaDecoder dec;
+    if (j->fx->Open(dec)) j->pcm = DecodeWhole(dec);
+}
+void BatchFinish(void* item, void*) {
+    BatchJob* j = static_cast<BatchJob*>(item);
+    j->published.swap(j->pcm);
+    j->order = g_batchFinishes++;
+}
+}  // namespace
+
+UNIT_TEST(xwma_decode_through_the_load_batch_is_byte_identical) {
+    XWMA_FIXTURE_OR_SKIP(fx);
+    Audio::XwmaDecoder dec;
+    CHECK(fx.Open(dec));
+    const std::vector<int16_t> one = DecodeWhole(dec);
+    CHECK_EQ(one.size(), kTotal);
+
+    System::Parallel::SetWorkers(4);
+    std::vector<BatchJob> jobs(24);
+    g_batchFinishes = 0;
+    {
+        Audio::LoadDecode::Scope batch;
+        for (BatchJob& j : jobs) {
+            j.fx = &fx;
+            CHECK(Audio::LoadDecode::Defer(&j, nullptr, fx.bytes, &BatchDecode, &BatchFinish));
+        }
+    }
+    int same = 0, inOrder = 0;
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        if (jobs[i].published == one) ++same;
+        if (jobs[i].order == int(i)) ++inOrder;
+    }
+    std::printf("  load batch: %d/24 byte-identical to the inline decode, %d in Defer order\n",
+                same, inOrder);
+    CHECK_EQ(same, 24);
+    CHECK_EQ(inOrder, 24);
+    System::Parallel::Shutdown();
 }

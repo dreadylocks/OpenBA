@@ -13,13 +13,13 @@
 // PlayerToolManager::Serialize 0x140102920).
 //
 // The three seams, each selected at the caller with the toggle read once:
-//   GameUpdateLoop::Update step 6   if (Ext::Ext().eye_camera && EyeCamera::Active())
-//                                       EyeCamera::Apply(*playerCtrl);
+//   GameUpdateLoop::Update step 6   if (Ext::Ext().eye_camera && Ext::EyeCamera::Active())
+//                                       Ext::EyeCamera::Apply(*playerCtrl);
 //                                   else retail's CalcTransform / AsTransform3 /
 //                                       SetCameraToWorld
-//   GameUpdateLoop::Draw step 4     ... EyeCamera::ApplyFrame(pc, alpha, fovY, far)
+//   GameUpdateLoop::Draw step 4     ... Ext::EyeCamera::ApplyFrame(pc, alpha, fovY, far)
 //                                   else retail's UpdateCamera(40, 2, 512)
-//   PlayerToolManager::UpdateCamera ... zoomDir = EyeCamera::Zoom(zoomDir)
+//   PlayerToolManager::UpdateCamera ... zoomDir = Ext::EyeCamera::Zoom(zoomDir)
 //
 // Active() is the whole engagement test (EYECAM.md §10): the frontmost open
 // FollowDialog in the UI's dialog list, and its citizen's entity -- the
@@ -30,7 +30,7 @@
 // nothing else does while a FollowDialog targets it: an idle citizen keeps its
 // last heading, a hidden one (model out of the scene: inside a building) keeps
 // the last eye transform (or, engaged while inside, the door it went in by).
-// Every engage and hand-back prints one "[EyeCam] ..." line on stderr.
+// Every engage and hand-back prints one "[EyeCamera] ..." line on stderr.
 // ============================================================================
 #pragma once
 
@@ -39,6 +39,7 @@ class ComponentEntity;    // Entity/ComponentEntity.h
 namespace Graphics { class Renderer; class Scene; }   // graphics/Camera.h, graphics/Scene.h
 namespace Video { class Context; }                    // video/Context.h
 
+namespace Ext {
 namespace EyeCamera {
 
 // True while the extension should own the camera (see the banner). Cheap: one
@@ -79,3 +80,4 @@ void DrawScene(Graphics::Renderer& renderer, Video::Context& context, float alph
                const Graphics::Scene& scene, PlayerController& pc);
 
 }  // namespace EyeCamera
+}  // namespace Ext

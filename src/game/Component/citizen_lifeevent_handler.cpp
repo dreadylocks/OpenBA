@@ -73,6 +73,7 @@
 #include "Game/Map.h"                        // size / cells / pathfinder / regionGraph
 #include "Game/PathfinderThread.h"           // SetCellTerrain (0x1400a6fe0)
 #include "Game/terrain_sidecar.h"            // [terrain sidecar] NoteWrite after the +0x29 store
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // Row 310 G1 (B7 RES): 4800 / 6c60 / 9740's inner component scans are
 // ComponentEntity::FindComponent<T>()'s shape (`[[slot]+0x10]` with no null-slot test,
@@ -229,11 +230,13 @@ extern "C" void Cemetery_SpawnTombstone_6a90(CemeteryComponent* cem, int cell,
     map->field_0xA2 |= static_cast<uint8_t>(stateWasWalk);   // SETNZ AL; OR byte [map+0xa2],AL (0x140046afd)
     cellRec[cell].terrainType = 2;
     TerrainSidecar::NoteWrite(&cellRec[cell]);   // [terrain sidecar] mirror (missing until PERFXEXT)
+    CellStamp::NoteWrite(&cellRec[cell]);   // [AMBMEMO] cell write clock
     int size = map->size;
     if (stateWasWalk)
         map->regionGraph->MarkCellDirty(cell % size, cell / size);   // +0x70, 0x1400a8c90
     map->pathfinder->SetCellTerrain(cell, 2);                        // +0x68, 0x1400a6fe0
     cellRec[cell].occupant = nullIBP;  // = null (+0x08)
+    CellStamp::NoteWrite(&cellRec[cell]);   // [AMBMEMO] cell write clock
     // Tombstone yaw = the cemetery's own placed rotation (position component +0x30).
     MapComponent* resIBP = cem->_entity->FindComponent<MapComponent>();   // 0x140004680
     int rot = resIBP->extraField;

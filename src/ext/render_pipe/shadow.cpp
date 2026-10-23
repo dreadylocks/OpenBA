@@ -35,6 +35,7 @@
 #include "graphics/ParticleInstance.h"
 #include "graphics/SunLight.h"
 
+namespace Ext {
 namespace RenderPipe {
 namespace {
 
@@ -180,3 +181,4 @@ uint64_t HashFrame(const Graphics::Renderer& r, const Graphics::SunLight* sun) {
 }
 
 }  // namespace RenderPipe
+}  // namespace Ext

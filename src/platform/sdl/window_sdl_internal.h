@@ -12,6 +12,14 @@ struct SDL_Window;
 
 namespace Platform {
 namespace Window {
+
+// The window's pixel density: back-buffer pixels per SDL point (display_sdl.cpp). The ONE
+// place src/platform/sdl asks for it. 1.0 on every host today: no window is created with
+// SDL_WINDOW_HIGH_PIXEL_DENSITY, so SDL points are pixels. A Darwin build that opts a
+// window into high density fills the body in; every coordinate crossing the seam is then
+// scaled by it.
+float PixelDensity(SDL_Window* window);
+
 namespace Sdl {
 
 // The one game window window_sdl.cpp's Create made; nullptr before / after.

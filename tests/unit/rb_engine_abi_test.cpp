@@ -284,7 +284,13 @@ UNIT_TEST(b39_eng_loop_bases_deletingdtor_runs_the_whole_chain) {
     RbMenuLoop* m = ::new (static_cast<void*>(buf)) RbMenuLoop(name);
     Clear();
     // The BASE's destructor (qualified: RbMenuLoop has its own), retail flags 0.
+#if defined(__clang__) && !defined(_MSC_VER)
+    // Clang with the Itanium ABI traps in abstract-base D1; test the base D2 body.
+    extern void ClangDialogBaseDtor(Engine::DialogLoopT*) RT_ASM_LABEL("_ZN6Engine11DialogLoopTD2Ev");
+    ClangDialogBaseDtor(m);
+#else
     m->Engine::DialogLoopT::~DialogLoopT();
+#endif
     CHECK_EQ(g_n, 2);
     CHECK_EQ(g_log[0].ev, (int)kDlRel);   CHECK(g_log[0].vptr == DlVt());
     CHECK_EQ(g_log[1].ev, (int)kUlRel);   CHECK(g_log[1].vptr == UlVt());
@@ -293,7 +299,13 @@ UNIT_TEST(b39_eng_loop_bases_deletingdtor_runs_the_whole_chain) {
     alignas(8) unsigned char buf2[sizeof(RbSplashLoop)];
     RbSplashLoop* s = ::new (static_cast<void*>(buf2)) RbSplashLoop(name, nullptr, TimeOf(delay));
     Clear();
+#if defined(__clang__) && !defined(_MSC_VER)
+    // Clang with the Itanium ABI traps in abstract-base D1; test the base D2 body.
+    extern void ClangLoaderBaseDtor(Engine::DialogLoaderLoopT*) RT_ASM_LABEL("_ZN6Engine17DialogLoaderLoopTD2Ev");
+    ClangLoaderBaseDtor(s);
+#else
     s->Engine::DialogLoaderLoopT::~DialogLoaderLoopT();
+#endif
     CHECK_EQ(g_n, 2);
     CHECK_EQ(g_log[0].ev, (int)kDllRel);  CHECK(g_log[0].vptr == DllVt());
     CHECK_EQ(g_log[1].ev, (int)kUlRel);   CHECK(g_log[1].vptr == UlVt());
@@ -301,7 +313,13 @@ UNIT_TEST(b39_eng_loop_bases_deletingdtor_runs_the_whole_chain) {
     alignas(8) unsigned char buf3[sizeof(RbGameLoop)];
     RbGameLoop* g = ::new (static_cast<void*>(buf3)) RbGameLoop;
     Clear();
+#if defined(__clang__) && !defined(_MSC_VER)
+    // Clang with the Itanium ABI traps in abstract-base D1; test the base D2 body.
+    extern void ClangUpdateBaseDtor(Engine::UpdateLoop*) RT_ASM_LABEL("_ZN6Engine10UpdateLoopD2Ev");
+    ClangUpdateBaseDtor(g);
+#else
     g->Engine::UpdateLoop::~UpdateLoop();
+#endif
     CHECK_EQ(g_n, 1);
     CHECK_EQ(g_log[0].ev, (int)kUlRel);
 }

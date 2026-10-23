@@ -934,3 +934,49 @@ the hand-ins; the sentences are not evidence.
 | 1329 | After a forced device loss (`BANISHED_FORCE_DEVICE_LOST=12000`, the `runs/DEVLOST1` route) private bytes climb in steps of +60..+110 MB about every 75 s, +246..+378 MB over 4-4.5 min, where a run with no loss grows ~+20 MB per step (+51 MB over 4 min); GPU dedicated memory +25..+32 MB. Measured 2026-10-16 (AOTUNE part 1, `docs/extensions/handins/AOTUNE.md` §2.3) with `ext.ambient_occlusion` on, off, and with `ext.render_pipe` off: the same climb each time, so it is the device-lost route's, not AO's | the post-trip path (`GameUpdateLoop::OnVideoRestart` and the periodic re-uploads after it: the minimap / terrain repaint after `Minimap::OnVideoRestart`'s `ImageBuffer::Recreate` is the candidate) | retail's one round trip is not measured; DEVLOST1 (2026-10-11) read 296-323 MB flat for 220 s on a smaller profile, before render_pipe and the other rows | CLOSED, NOT A PORT DEFECT (DEVLOSTMEM, 2026-10-16, `docs/extensions/handins/DEVLOSTMEM.md`): the growth is the NVIDIA D3D11 user-mode driver's own hash-keyed state objects (`nvwgf2umx.dll` vtable in every growing process-heap block) allocated as new draw states are first drawn, and a seeded control run with NO loss climbs the same way (+197 MB). The engine arena stays flat, we create 0 buffers / textures after the trip, and no device-0 resource is used on device 1. The climb comes and goes between identical runs (4 of 11 climbed). No fix in our tree |
 | 1330 | Opening a save that carries an `ext:` pseudo-mod (a class B / C extension was on when it was written) with the exe launched `/profile:faithful` (the `tools/stress_run.sh` / gate launch) crashed in the load dialog: ACCESS_VIOLATION reading 0x40 in `UI::DialogInstance::InitFields` (`src/engine/ui/dialog_create.cpp`, `_flags = dlg->_defaultFlags`) <- `MessageDialog::MessageDialog` <- `SaveLoadDialog::DoLoad`'s mods warning. Found 2026-10-18 by the hitch hunt (the user's 19-citizen Auto.sav) | the entry's notice, `Dialog/Extensions.rsc:extension*` (block EXTNOTICE, `src/ext/load_notice.h`), is built in the exe by the embedded-text provider (KITFREE), and the ext boot (`src/ext/registry_boot.cpp`) registers that provider under every profile EXCEPT faithful: the factory's load-miss seam stayed null, FindOrLoad returned null, and the MessageDialog was built on it. The per-entry profile with the extension off took the same notice path and worked (the provider was registered) | retail never meets it: its warnings (`Dialog/SaveLoad.rsc:modsMissing` & co.) are always in the packages, and retail shows modsMissing for an `ext:` entry (Yes loads, No aborts, SAVETAIL §3); our notice keeps that shape | **FIXED 2026-10-18 (`779f7b088`, branch modnotice)**: DoLoad's notice seam calls `Ext::Resources::InitText` (now idempotent) before it loads an `ext:` entry's notice, under any profile; should the notice still not resolve, the entry gets retail's modsMissing (logged `[ExtSave]`). Route (`ModNotice.sav`, written `/profile:all`, six B extensions): faithful + Yes shows `extensionTurnedOff` per entry, the manifest locks the save's six extensions and the game runs; faithful + No refuses the load; per-entry (spread_warmth / drain_split off) + Yes as before. Unit test `ext_rsc_text_load_notices_are_embedded`; resave gate PASS (4127020a2ae682eb). Side effects: such a save's reference table also names sharp_ui's font / sprite objects, which miss harmlessly under faithful (`[PreloadRefs] MISS`, 22), and a faithful run that opens it plays WITH the save's B extensions (DESIGN.md: a save keeps its extensions), so it is not a faithful measurement |
 | 1331 | Loading the user's `Save3.sav` (Documents/Banished/Save, written 2025-04-08 by retail Banished on the neighbour-towns fork's Windows PC, whose Steam install also holds `.pkm` mods) crashes in post-load: ACCESS_VIOLATION reading 0 in `Object::Base::IsDerivedFrom` <- `DecalComponent::OnAdded` <- `DecalComponent::Slot11` <- `EntityList_PostLoad_c4730` <- `GameUpdateLoop::SerializeAllBody`, on the loader thread. The same with `/profile:faithful` (every fix and extension off), so it is not an extension. `Save0.sav` from the same install loads and plays | retail presumably loads it (the user played it) | not read: the decal's description or its owner is null at OnAdded; whether the save names a mod's template that is absent here (a missing-mod path) or the port's DecalComponent misreads a field is open. Find the upstream null, not a guard (CLAUDE.md) | SUSPECTED (2026-10-19) |
+
+## macOS Metal port
+
+- **Resolved: retained terrain-buffer copies.** Loading repeatedly cloned the
+  full terrain buffer for chunk SetData calls. About 6609 MB of the 6795 MB
+  graphics allocation was attributed to those copies. Loading lacked a local
+  autorelease pool, extending their lifetime. The fix scopes autoreleases and
+  writes in place unless encoded or in-flight draws still use the allocation;
+  completion tickets track that use. The recorded normal-game graphics sample
+  fell from 6779 to 167 MB, total footprint from 7285 to 668 MB. Separate
+  60-second validation runs passed; the earlier 25-minute soak was not repeated
+  after the fix. See [measurements](reference/macos_perf.md).
+- **Depth precision:** Metal uses D32F+S8 rather than retail D24S8. Depth bias
+  differs; the acceptance target is “visually identical to the best Metal can do”,
+  not numerical depth parity. Same-scene retail equivalence remains unverified.
+- **Retina text:** crisp text requires the separately obtained FrancophilSans.ttf.
+  Without it, the fallback scales retail glyphs. The font is not shipped here.
+- **Better Trees mode 2:** Metal now uses the ruled shared values (strength 0.15,
+  floor 0.15). The earlier Metal-only tuning (0.08 / 0.40, meant to reduce pale
+  blue-grey haze from low-alpha twig texels promoted by distance fill) is gone. Whether
+  that haze returns with the shared values has not been compared. See
+  [pass reference](reference/macos_metal_passes.md).
+
+## 15. `ResourceLimitUI` accepted a config's resource index only below 11 — FIXED
+
+**Where.** `src/game/Dialog/resourcelimitui.cpp`, `resourcelimitui_sa::IdxFor`, used by
+`ResourceLimitUI::OnCreated` / `OnUpdateLayout` / `OnElementEvent` (retail Slot4 / Slot7 / Slot9,
+`0x140077970` / `0x1400778d0` / `0x1400777e0`).
+
+**What the code did.** It used the bound config's resource index only when it was `< 11`, and otherwise
+fell back to the dispatch order. The vanilla Town Hall shows only the 11 built-in limits, entries 0..10.
+Retail's ledger has ten more, the custom limits `Custom0` .. `Custom9` (entries 11..20), and a mod that
+adds rows for them names those entries: those rows read and wrote the Log, Stone, ... limits instead of
+their own (changing the Custom0 limit changed the Log limit).
+
+**What retail does.** Slot4 / 7 / 9 index the ledger (`CitizenBehavior::professionResources`, 21 entries
+of 0x20 bytes) with `*(int*)(config + 0x20) * 0x20 + 8`, where `config` is `IsDerivedFrom(config) ? config :
+null`, and no bound.
+
+**Fix.** `IdxFor` returns the config's index directly and `ConfigOf` does retail's `IsDerivedFrom` check.
+The dispatch-order fallback (`IdxForFallback` and its 11-entry registry) is removed:
+`DialogInstance::AddController` (`src/engine/ui/dialog_create.cpp`) always stores the config before
+`OnCreated`, so the premise behind the fallback (standalone never binds the config) no longer holds, and a
+row with no config would crash retail too. Seen in a run before and after the change: the Custom rows are
+separate from Log and survive a save and reload. No serialized state is touched; the resave gate was not
+run by the author.

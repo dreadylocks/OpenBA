@@ -16,7 +16,7 @@
 // ============================================================================
 #include "system/parallel_for.h"
 
-#include "ext/cpu/topology.h"   // Cpu::Get().physical, Cpu::ParallelWorkers (roster.h)
+#include "platform/common/cpu/topology.h"   // Cpu::Get().physical, Cpu::ParallelWorkers (roster.h)
 #include "diag/diag_threads.h"  // DiagThreads::Register (role 'J')
 #include "platform/common/platform_thread.h"
 
@@ -41,6 +41,10 @@ thread_local bool tl_inParallel = false;   // inside a job (worker) or inside a 
 inline uint32_t ReadFpState() {
 #ifdef PARALLEL_HAVE_MXCSR
     return _mm_getcsr();
+#elif defined(__aarch64__)
+    uint64_t fpcr;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+    return static_cast<uint32_t>(fpcr);
 #else
     return 0;
 #endif
@@ -49,6 +53,9 @@ inline uint32_t ReadFpState() {
 inline void WriteFpState(uint32_t csr) {
 #ifdef PARALLEL_HAVE_MXCSR
     _mm_setcsr(csr);
+#elif defined(__aarch64__)
+    const uint64_t fpcr = csr;
+    __asm__ volatile("msr fpcr, %0" : : "r"(fpcr));
 #else
     (void)csr;
 #endif

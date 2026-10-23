@@ -460,7 +460,7 @@ public:
     // the class static, defined in mesh.cpp and REDIRECTED onto the mint's
     // storage row by RtGraphicsPortInit, so the name / address doors the
     // foreign readers use (citizenai_executor.cpp, address_registry.cpp,
-    // perfx.cpp) and this member are ONE byte. Public because its
+    // render_culling.cpp) and this member are ONE byte. Public because its
     // reader in this block is a free-function body (wave29_lane_slots.cpp).
     static bool _rootOnlyUpdates;
 

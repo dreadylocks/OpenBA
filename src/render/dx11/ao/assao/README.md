@@ -33,7 +33,7 @@ Each edit is marked in the source with `GCC PORT (AOSPIKE)` or `AOCORE`.
 ## The shaders
 
 `tools/ao_shaders.py` (fxc 10.0.19041, `python -I`) compiles `ASSAO.hlsl` into
-`../shaders/<entry>.h` with exactly the defines and flags `ASSAODX11.cpp` passes to D3DCompile:
+`src/render/common/ao/shaders/<entry>.h` with exactly the defines and flags `ASSAODX11.cpp` passes to D3DCompile:
 `VSMain` as vs_5_0 and 16 ps_5_0 entries. ps_5_0 needs feature level 11_0, so the extension row is
 gated on it. Rerun the tool after any `.hlsl` change. It also removes headers that no entry writes
 any more.

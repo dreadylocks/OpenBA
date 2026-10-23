@@ -36,6 +36,16 @@ StringTable resource
 		{ String _name = "ExtensionsStateLockedOn";			String _text = "Disabled for this game, enabled from the next"; }
 		{ String _name = "ExtensionsStateLockedOff";		String _text = "Enabled for this game, disabled from the next"; }
 
+		// the in-game extension window (ExtensionsWindow.rsc) and ext.restricted_foods's page in it (RestrictedFoodsPage.rsc)
+		{ String _name = "ExtensionsWindowTitle";	String _text = "Game extensions"; }
+		{ String _name = "ExtensionsWindowTip";		String _text = "Game extensions: the pages of the extensions active in this town."; }
+		{ String _name = "RestrictedFoodsTab";			String _text = "Foods"; }
+		{ String _name = "RestrictedFoodsHint";			String _text = "Check a food to stop citizens eating it. It can still be stored, sold and cooked."; }
+		{ String _name = "RestrictedFoodsParam";			String _text = "@0"; }
+		{ String _name = "RestrictedFoodsCheckTip";		String _text = "Check to stop citizens eating this food."; }
+		{ String _name = "RestrictedFoodsShowAll";		String _text = "Show all foods"; }
+		{ String _name = "RestrictedFoodsShowAllTip";	String _text = "Unchecked: only foods your town has made or stored."; }
+
 		// the load notices (Extensions.rsc:extension*, shown by SaveLoadDialog::DoLoad in place of
 		// retail's ModMissing): @0 name, @1 the save's `ext:<id>`, @2 the saved format version
 		{ String _name = "ExtensionNotInBuild";		String _text = "The following extension is not part of this version of the game.~n~n@0 [@1]~nSaved with extension version @2~n~nA save keeps the extensions it was made with, so this one cannot be played here: loading it will stop the game with an error. Do you still want to load the save game?"; }

@@ -1,5 +1,7 @@
 # LOADSTAMP -- `[LoadTime]` stage stamps and a multi-thread sampler (hand-in)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/draw_gather/gather_threads.{h,cpp}` moved to `src/ext/gather_threads/` (namespace `Ext::GatherThreads`).)
+
 Block 1 of the loading-speed session. Branch `worktree-agent-ad4b51da84f2ce11d`, base main
 `b0ccc82bc`. Static gate only: the game was NOT run (the coordinator runs it). Boundary list taken
 from `LOADRESEARCH.md` §3 (all 14 rows covered) plus the package remounts and the save-read steps.

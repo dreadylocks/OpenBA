@@ -163,7 +163,7 @@ outputs, so a constant swap alone cannot split them. A rewrite is needed:
 
 - **Where:** at `VertexProgramData::PlatformCreate` (`src/render/dx11/shaderprograms.cpp:127`),
   with the replacement bound in `VertexProgramData::Bind` (`:173`). It mirrors FAA's
-  `PixelProgramData` seam and reuses `src/render/dx11/foliage_aa/dxbc.{h,cpp}` (container parse,
+  `PixelProgramData` seam and reuses `src/render/dx11/better_trees/dxbc.{h,cpp}` (container parse,
   SM4 token walk, emit, checksum).
 - **Match:** a VS with an output register written by `dp4` against `cb2[10..13]`
   (`shadowProjection[0]`) whose input slice contains reads of `cb0[4..6]` (`worldToCamera`) in the
@@ -203,7 +203,7 @@ outputs, so a constant swap alone cannot split them. A rewrite is needed:
   - `src/ext/billboard_shadow/`: `Sync()`, the seam set and clear, and `enhanced_entry.cpp` for
     the Enhanced graphics tab (`src/ext/enhanced_tab/`), as `src/ext/foliage_aa/enhanced_entry.cpp`
     does.
-  - `src/render/dx11/billboard_shadow/` (or a sibling file in `foliage_aa/`): the slice-clone
+  - `src/render/dx11/better_trees/` (beside the foliage files): the slice-clone
     rewriter and its stage.
   - Unit tests on **synthetic** SM4 blobs built in the test, with no retail bytes (the FAA-CORE
     rule).

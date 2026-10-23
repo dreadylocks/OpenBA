@@ -519,7 +519,7 @@ bool CreateColorBuffer(DeviceData* self) {
                             D3D11_BIND_RENDER_TARGET);
 }
 bool CreateDepthBuffer(DeviceData* self) {
-    // NOT RETAIL -- EXT ARM (ext.ambient_occlusion, docs/extensions/AO.md §6.1): while
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOCORE.md): ext.ambient_occlusion (AO.md §6.1): while
     // the extension asks for it, the main depth is created typeless and
     // shader-readable (AttachDepthBuffer gives it explicit views). The format is
     // fixed per build: a toggle reaches here through the rebuild path
@@ -779,6 +779,7 @@ int DeviceData_Resize(DeviceData* self) {
     // died. Deliberate deviation from the shipped DLL; see the note above
     // Dx11InvalidateConstantBufferBindings in buffers.cpp.
     Dx11InvalidateConstantBufferBindings();
+    Dx11NoteClearState();   // topology cache in ContextData, same reason
 
     dev->ReleaseDynamic();
 

@@ -48,9 +48,10 @@
 //
 // B.4 R-IO: the member; the fields are the class's own, typed (Stream.h).
 void IO::CompressedStream::Release() {
-    // NOT RETAIL: ext.async_save_compress -- a stream destroyed without a Commit detaches
-    // (the worker must be done with the Compression object freed below).
-    if (_extAsyncOwner == this) ExtAsyncEnd();
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress -- a
+    // stream destroyed without a Commit detaches (the worker must be done with the Compression
+    // object freed below).
+    if (_extAsyncCompress != nullptr) _extAsyncCompress(*this, kExtAsyncEnd, 0, nullptr);
 
     // 1. the Array<void*> of compressed block buffers, +0x50 / +0x58
     {

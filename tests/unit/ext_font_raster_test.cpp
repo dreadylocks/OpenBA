@@ -99,7 +99,9 @@ UNIT_TEST(ext_font_variant_path_grammar) {
     CHECK(KitSheetSize(32, w, h) && w == 256 && h == 256);    // 64 * 32^2 = 65536
     CHECK(KitSheetSize(9, w, h) && w == 128 && h == 128);
     CHECK(KitSheetSize(64, w, h) && w == 512 && h == 512);
-    CHECK(!KitSheetSize(100, w, h));
+    CHECK(KitSheetSize(96, w, h) && w == 1024 && h == 1024);   // FontLarge at 2x
+    CHECK(KitSheetSize(65, w, h) && w == 1024 && h == 512);
+    CHECK(!KitSheetSize(129, w, h));
 }
 
 // One compiled font against the rasteriser: same codepoints, glyph count,
@@ -114,10 +116,10 @@ static void CompareVariant(const std::string& dir, const std::string& kitName, i
                            int32_t& rows, int32_t& rowsOff) {
     const std::string crs = dir + "/" + kitName + "_resource.crs";
     if (!Exists(crs)) return;
-    KitFont::Font oracle;
-    CHECK(KitFont::Load(crs.c_str(), kGameFace, oracle));
+    ::KitFont::Font oracle;
+    CHECK(::KitFont::Load(crs.c_str(), kGameFace, oracle));
     if (oracle.glyphs.empty()) return;
-    const std::vector<int32_t> cps = KitFont::GlyphCodepoints(oracle);
+    const std::vector<int32_t> cps = ::KitFont::GlyphCodepoints(oracle);
     if (px <= 0) px = oracle.height;
     RasterFont ours;
     std::string why;
@@ -130,7 +132,7 @@ static void CompareVariant(const std::string& dir, const std::string& kitName, i
     CHECK_EQ(static_cast<int32_t>(ours.glyphs.size()), static_cast<int32_t>(oracle.glyphs.size()));
     GlyphRow dot{0, 0, 0, 0}, sp{0, 0, 0, 0};
     for (size_t i = 0; i < cps.size(); ++i) {
-        const KitFont::GlyphRow& k = oracle.glyphs[i];
+        const ::KitFont::GlyphRow& k = oracle.glyphs[i];
         const RasterGlyph& g = ours.glyphs[i];
         CHECK_EQ(g.codepoint, cps[i]);
         CHECK_EQ(static_cast<int32_t>(g.alpha.size()), g.width * g.height);
@@ -388,15 +390,15 @@ UNIT_TEST(ext_font_raster_freetype_vs_kit_variant) {
     for (const Case& c : cases) {
         const std::string crs = dir + "/" + c.kitName + "_resource.crs";
         if (!Exists(crs)) continue;
-        KitFont::Font oracle;
-        if (!KitFont::Load(crs.c_str(), kGameFace, oracle) || oracle.glyphs.empty()) continue;
-        const std::vector<int32_t> cps = KitFont::GlyphCodepoints(oracle);
+        ::KitFont::Font oracle;
+        if (!::KitFont::Load(crs.c_str(), kGameFace, oracle) || oracle.glyphs.empty()) continue;
+        const std::vector<int32_t> cps = ::KitFont::GlyphCodepoints(oracle);
         RasterFont ours;
         CHECK(RasterizeFile(file.c_str(), kGameFace, c.px, cps.data(), static_cast<int32_t>(cps.size()), DefaultOptions(), ours, &why));
         if (ours.glyphs.size() != cps.size()) continue;
         int32_t rowsExact = 0, advExact = 0, offExact = 0, withinOne = 0;
         for (size_t i = 0; i < cps.size(); ++i) {
-            const KitFont::GlyphRow& k = oracle.glyphs[i];
+            const ::KitFont::GlyphRow& k = oracle.glyphs[i];
             const RasterGlyph& g = ours.glyphs[i];
             const bool adv = g.preAdvance + g.postKern + g.postAdvance == k.preAdvance + k.postKern + k.postAdvance;
             if (adv) ++advExact;

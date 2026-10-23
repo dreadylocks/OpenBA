@@ -68,7 +68,7 @@
 #include "Component/CitizenDescription.h"   // X::TypeId() (B.3.9 CG2)
 #include "Component/SelectDescription.h"   // X::TypeId() (B.3.9 CG2)
 #include "Component/ComponentDescription.h"   // X::TypeId() (B.3.9 CG2)
-#include "Component/StateMachineComponent.h"   // X::TypeId() (B.3.9 CG2)
+#include "Component/ResidenceComponent.h"   // X::TypeId() (B.3.9 CG2)
 #include "Component/TradeComponent.h"   // X::TypeId() (B.3.9 CG2)
 #include "Component/StorageComponent.h"   // X::TypeId() (B.3.9 CG2)
 #include "Component/WorkPlaceComponent.h"   // X::TypeId() (B.3.9 CG2)
@@ -1522,19 +1522,19 @@ void TownHallUI::UpdateAll() {
         // Find StorageComponent (DAT_1401c7e78)
         StorageComponent* storage = entity->FindComponent<StorageComponent>();
 
-        // Find StateMachineComponent (DAT_1401c7d98)
-        StateMachineComponent* buildState = entity->FindComponent<StateMachineComponent>();
+        // Find ResidenceComponent (DAT_1401c7cf0)
+        ResidenceComponent* home = entity->FindComponent<ResidenceComponent>();
 
         int counterIndex; // which of the 3 counters to increment
-        if (buildState != nullptr) {
-            counterIndex = 2; // under construction
+        if (home != nullptr) {
+            counterIndex = 2; // a home (the "Items in Homes" column)
         } else {
             // Check for TradeComponent (DAT_1401c4b80)
             TradeComponent* building = entity->FindComponent<TradeComponent>();
             if (building != nullptr)
-                counterIndex = 1; // has building component
+                counterIndex = 1; // a trading post
             else
-                counterIndex = 0; // basic entity
+                counterIndex = 0; // storage
         }
 
         // Iterate StorageComponent resource entries

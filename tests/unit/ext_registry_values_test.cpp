@@ -42,7 +42,7 @@ const Ext::ValueKey& K(const char* id) {
 }  // namespace
 
 UNIT_TEST(ext_values_table_shape) {
-    CHECK_EQ(Ext::ValueKeyCount(), 4);   // ao_quality, ao_opacity, foliage_aa_mode (ext_foliage_aa_test.cpp), max_shadow_size (below)
+    CHECK_EQ(Ext::ValueKeyCount(), 5);   // ao_quality, ao_opacity, foliage_aa_mode (ext_better_trees_test.cpp), max_shadow_size (below), rock_seat_mode (ext_rock_seat_test.cpp)
     const Ext::ValueKey& q = K("ao_quality");
     const Ext::ValueKey& o = K("ao_opacity");
     CHECK_EQ(q.minValue, 1); CHECK_EQ(q.maxValue, 3); CHECK_EQ(q.defaultValue, 2);
@@ -58,9 +58,9 @@ UNIT_TEST(ext_values_table_shape) {
         CHECK(Ext::FindValueKey(k.id) == &k);
         // The settings key space is shared with the bool rows: no id in both.
         CHECK(Ext::FindEntry(k.id) == nullptr);
-        // Every key belongs to a registered extension row.
+        // Every key belongs to a registered row: an extension's, or a fix's (rock_seat_mode).
         const Ext::Entry* owner = Ext::FindEntry(k.owner);
-        CHECK(owner != nullptr && owner->tier == Ext::Tier::Extension);
+        CHECK(owner != nullptr);
         CHECK(k.minValue <= k.defaultValue && k.defaultValue <= k.maxValue);
         Ext::State s = boot;
         CHECK_EQ(k.slot(s), k.defaultValue);   // initialiser == table default

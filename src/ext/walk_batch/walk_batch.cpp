@@ -26,6 +26,7 @@
 #include "options.h"                           // Opt().movetickTrace (read once)
 #include "stress_harness.h"                    // g_verifyOn / StressHarness_Verify (the shadows)
 
+namespace Ext {
 namespace WalkBatch {
 
 long long g_batchedTicks = 0;
@@ -309,3 +310,4 @@ void TickCharacterGrid(CharacterComponent* self, const System::Time* time) {
 }
 
 }  // namespace WalkBatch
+}  // namespace Ext

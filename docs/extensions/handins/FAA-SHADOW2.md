@@ -1,5 +1,7 @@
 # FAA-SHADOW2 -- "Max shadow resolution" Off / 4096 / 8192 (`ext.max_shadow_size`)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/enhanced_tab/shadow_res_entry.cpp` moved to `src/ext/max_shadow_res/enhanced_entry.cpp`; `EnhancedTab::FindIn` is now `Ext::FindElement` (`src/ext/ui/find_element.h`).)
+
 The user, 2026-10-16: "Max shadow resolution" should offer 4096 AND 8192, "a similar slider / combo". Block of
 `docs/extensions/FOLIAGE_AA.md` §7, on FAA-SHADOW (`handins/FAA-SHADOW.md`) and FAA-MENU (`handins/FAA-MENU.md`).
 Branch `worktree-agent-a4dd4ab9a1445f330` (from main `627330510`, main `3fb108562` merged before the final build);

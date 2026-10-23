@@ -16,7 +16,7 @@
 // pathfinder's own array, shared read-only: only commands 2 / 3 write it, and
 // they wait for the pool to be idle first. The parameter fields are copied from
 // the job's snapshot before each search. With ext.fast_paths also selected,
-// each worker has its own FastPaths::Searcher too.
+// each worker has its own Ext::FastPaths::Searcher too.
 //
 // THE PUBLISH (RunJob) is the extension's own, under the pathfinder's lock:
 // size the slot's path, copy the cells, store `ready` (release), unlock. Retail's
@@ -31,8 +31,8 @@
 #include "ext/fast_paths/fast_paths.h"
 #include "ext/fast_paths/fast_search.h"
 #include "ext/registry.h"
-#include "ext/cpu/roster.h"     // Cpu::PathWorkers (block CPULIMIT)
-#include "ext/cpu/topology.h"   // Cpu::Get().physical
+#include "platform/common/cpu/roster.h"     // Cpu::PathWorkers (block CPULIMIT)
+#include "platform/common/cpu/topology.h"   // Cpu::Get().physical
 
 #include "Game/PathfinderThread.h"
 #include "Action/PathSearch.h"
@@ -46,6 +46,7 @@
 #include <memory>
 #include <vector>
 
+namespace Ext {
 namespace PathWorkers {
 
 static_assert(Cpu::kMaxPathWorkers == kMaxWorkers, "the roster's cap is the pool's");
@@ -62,7 +63,7 @@ constexpr int kPathCap = 0x4000;   // ApplyCommand's 0x10000-byte path buffer (0
 // One pool worker's search state.
 struct Scratch {
     GridPathSearch       grid;   // retail's search record, this worker's own
-    FastPaths::Searcher  fast;   // ext.fast_paths' scratch, this worker's own
+    Ext::FastPaths::Searcher  fast;   // ext.fast_paths' scratch, this worker's own
     std::vector<int32_t> path;   // the 0x4000-cell result buffer
 
     Scratch(const GridPathSearch& shared) : grid(), path(kPathCap) {
@@ -106,7 +107,7 @@ public:
         int count;
         int expanded;
         if (job.params.fast) {
-            count = FastPaths::RunWith(s.fast, g, job.start, job.goal, s.path.data(),
+            count = Ext::FastPaths::RunWith(s.fast, g, job.start, job.goal, s.path.data(),
                                        job.params.presentTypes, &expanded);
         } else {
             count = g.Run(job.start, job.goal, s.path.data());   // 0x14001ce00
@@ -216,8 +217,8 @@ struct GameHost {
         j.params.allowDiagonal = g.allowDiagonal;
         j.params.manhattan = g.manhattan;
         j.params.respectBlocked = g.respectBlocked;
-        j.params.fast = FastPaths::FastSelected() ? 1 : 0;
-        j.params.presentTypes = j.params.fast ? FastPaths::PresentTypesNow(g) : 0u;
+        j.params.fast = Ext::FastPaths::FastSelected() ? 1 : 0;
+        j.params.presentTypes = j.params.fast ? Ext::FastPaths::PresentTypesNow(g) : 0u;
         j.start = c.arg1;
         j.goal = c.arg2;
         j.slot = c.arg3;
@@ -284,3 +285,4 @@ void ReleaseFor(PathfinderThread* pf) {
 }
 
 }  // namespace PathWorkers
+}  // namespace Ext

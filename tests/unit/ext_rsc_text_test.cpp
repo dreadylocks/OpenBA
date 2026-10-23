@@ -37,10 +37,12 @@ bool ParseEmbedded(const char* path, File& f) {
 }  // namespace
 
 UNIT_TEST(ext_rsc_text_embedded_files) {
-    CHECK(kEmbeddedCount == 5);
+    CHECK(kEmbeddedCount == 7);
     CHECK(Embedded("Dialog/Extensions.rsc") != nullptr);
     CHECK(Embedded("Dialog/EnhancedOptions.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsStringTable.rsc") != nullptr);
+    CHECK(Embedded("Dialog/ExtensionsWindow.rsc") != nullptr);
+    CHECK(Embedded("Dialog/RestrictedFoodsPage.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsNeighbour.rsc") != nullptr);   // ext.neighbour's panel (this fork)
     CHECK(Embedded("Dialog/ExtensionsLobby.rsc") != nullptr);       // ext.neighbour's lobby (M2)
 }
@@ -116,11 +118,66 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
     CHECK(ParseEmbedded("Dialog/ExtensionsStringTable.rsc", s));
     CHECK(s.objects.size() == 1 && s.objects[0].type == "StringTable" && s.objects[0].name == "resource");
     const Field* strings = s.objects[0].body.Find("_strings");
-    CHECK(strings && strings->blocks.size() == 41);
-    if (strings && strings->blocks.size() == 41) {
-        const Field* t = strings->blocks[40].Find("_text");
-        CHECK(t && t->tokens[0].text.find("~n~n@0 [@1]") != std::string::npos);
+    CHECK(strings && strings->blocks.size() == 49);   // upstream's 31 + ext.neighbour's 18 (this fork)
+    if (strings && strings->blocks.size() == 49) {
+        // The load notice with two parameters (found by its text: the window and page keys sit before the
+        // notices, so an index into the list moves whenever one is added).
+        bool found = false;
+        for (const auto& b : strings->blocks) {
+            const Field* t = b.Find("_text");
+            if (t && !t->tokens.empty() && t->tokens[0].text.find("~n~n@0 [@1]") != std::string::npos)
+                found = true;
+        }
+        CHECK(found);
     }
+}
+
+namespace {
+// Every object is of a type Extensions.rsc already uses (so the exe's text reader has a schema for it; the
+// reader itself needs the live engine and is checked in the exe, not here).
+void CheckKnownTypes(const File& f, const char* file) {
+    CHECK(!f.objects.empty());
+    for (const Object& o : f.objects) {
+        const bool known = o.type == "Dialog" || o.type == "GroupDescription" ||
+                           o.type == "RibbonDescription" || o.type == "LabelDescription" ||
+                           o.type == "TextDescription" || o.type == "TabDescription" ||
+                           o.type == "ButtonDescription" || o.type == "TableDescription" ||
+                           o.type == "ContainerDescription" || o.type == "CheckDescription";
+        CHECK(known);
+        if (!known) std::printf("  %s:%s has type %s\n", file, o.name.c_str(), o.type.c_str());
+    }
+}
+}  // namespace
+
+UNIT_TEST(ext_rsc_text_parse_extensions_window) {
+    File f;
+    CHECK(ParseEmbedded("Dialog/ExtensionsWindow.rsc", f));
+    const Object* dlg = f.Find("resource");
+    CHECK(dlg != nullptr && dlg->type == "Dialog" && dlg->base.empty());
+    // no flags: a utility-style window (FirstDraw would hide the toolbar)
+    if (dlg) CHECK(dlg->body.Find("_flags") == nullptr);
+    // One tab control with no tabs of its own (the controller adds one per active page), and
+    // the shared tab button.
+    const Object* tabs = f.Find("tabPages");
+    CHECK(tabs && tabs->base == "Mod.rsc:tabMod" && tabs->type == "TabDescription");
+    if (tabs) {
+        const Field* list = tabs->body.Find("_tabs");
+        CHECK(list && list->isArray && list->blocks.empty());
+    }
+    CHECK(f.Find("tabButtonPage") && f.Find("dialogRoot") && f.Find("dialogBody"));
+    CheckKnownTypes(f, "ExtensionsWindow.rsc");
+}
+
+UNIT_TEST(ext_rsc_text_parse_restricted_foods_page) {
+    File f;
+    CHECK(ParseEmbedded("Dialog/RestrictedFoodsPage.rsc", f));
+    CHECK(f.Find("resource") == nullptr);   // a page, not a dialog: the root object is pageRestrictedFoods
+    const Object* page = f.Find("pageRestrictedFoods");
+    CHECK(page && page->type == "RibbonDescription");
+    CHECK(f.Find("tableRestrictedFoods") && f.Find("ribbonRestrictedFoodsCell") &&
+          f.Find("labelRestrictedFoodsRow") && f.Find("checkRestrictedFoodsRow") &&
+          f.Find("checkRestrictedFoodsShowAll") && f.Find("textRestrictedFoodsHint"));
+    CheckKnownTypes(f, "RestrictedFoodsPage.rsc");
 }
 
 UNIT_TEST(ext_rsc_text_syntax_errors) {

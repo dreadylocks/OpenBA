@@ -57,6 +57,7 @@
 #include "ext/resources/text_reader.h"
 
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -143,7 +144,7 @@ const FieldDesc kLayoutItem[] = {
 };
 const FieldDesc kLayout[] = { FR("_elements", kLayoutItem) };
 const FieldDesc kTableItem[] = { F("_x", Int), F("_y", Int), F("_element", Ext) };
-const FieldDesc kTable[] = { F("_width", Int), F("_height", Int), F("", Int), FR("_items", kTableItem) };
+const FieldDesc kTable[] = { F("_width", Int), F("_height", Int), F("_spacing", Int), FR("_items", kTableItem) };
 const FieldDesc kImage[] = { F("_spriteSheet", Ext), F("_spriteName", String), F("", Int), F("", Int) };
 const FieldDesc kSlider[] = {
     F("_number", Ext), F("", Ext), F("", String), F("", String), F("", String), F("", String), F("", String),
@@ -471,7 +472,9 @@ private:
                 const Field* o = Override(f, d);
                 if (const Token* t = Scalar(o, d, false)) {
                     char* end = nullptr;
-                    const long n = std::strtol(t->text.c_str(), &end, 0);
+                    // strtoll clamped to int32: what strtol gives on Win64 (32-bit long), on every host.
+                    long long n = std::strtoll(t->text.c_str(), &end, 0);
+                    n = n < INT32_MIN ? INT32_MIN : (n > INT32_MAX ? INT32_MAX : n);
                     if (end == nullptr || *end != '\0') { Fail("line %d: '%s': bad int %s", o->line, d.name, t->text.c_str()); return; }
                     if (!_clearArrays) *static_cast<int32_t*>(v) = static_cast<int32_t>(n);
                 }

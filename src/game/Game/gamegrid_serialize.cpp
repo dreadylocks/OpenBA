@@ -59,6 +59,7 @@
 #include "Action/exe_bodies.h"      // ActCNR_CheckTerrain_cb00, Pf_RoadMeshRebuild_f370
 #include "Component/exe_bodies.h"   // CreateNaturalResource_helper_e2c0
 #include "Component/ComponentDescription.h"   // B8 RT2: ::Object::SerializeExternal<ComponentDescription> (the downcast needs it complete)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // ============================================================
 // Functions ported elsewhere, called by name through their declaring headers:
@@ -169,12 +170,14 @@ static void GameGrid_SerializeCellArray_ac10(IO::Serializer* serializer, int32_t
         ComponentEntity* refA = elem->blocker.Get();
         if (refA != nullptr && !::Object::IsDerivedFromNullSafe(refA, ComponentEntity::TypeId())) {
             elem->blocker = nullptr;
+            CellStamp::NoteWrite(elem);   // [AMBMEMO] cell write clock
         }
 
         elem->occupant.Object::InternalBasePtr::Serialize(*serializer);
         ComponentEntity* refB = elem->occupant.Get();
         if (refB != nullptr && !::Object::IsDerivedFromNullSafe(refB, ComponentEntity::TypeId())) {
             elem->occupant = nullptr;
+            CellStamp::NoteWrite(elem);   // [AMBMEMO] cell write clock
         }
 
         ::Object::SerializeExternal<ComponentDescription>(*serializer, elem->field_0x10);
@@ -289,6 +292,7 @@ void Map::Serialize(IO::Stream& stream) {
         }
 
         TerrainSidecar::Invalidate();   // [terrain sidecar] the whole array was just streamed in
+        CellStamp::Invalidate();          // [AMBMEMO] the whole array was just streamed in
         // 0x14009c480 zone refresh. Retail's call (0x14009f29e) sets only RCX = this;
         // the body reads no other argument register: RDX / R8D are written before any
         // read (0x14009c4bd, 0x14009c520/524) and R9 never, and the flood fill it calls

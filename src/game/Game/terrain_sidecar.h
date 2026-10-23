@@ -15,9 +15,10 @@
 //   * Every store to a cell's +0x29 calls NoteWrite(cellPtr) right after -- the six
 //     single-cell writers: action_pf_roots_road.cpp, cemeterycomponent.cpp,
 //     citizen_lifeevent_handler.cpp (Cemetery_SpawnTombstone_6a90),
-//     pasturecomponent_states.cpp, quarrycomponent_deform.cpp,
-//     keystone_a_removalcalcpath.cpp (the tombstone and the pasture writer were missing
-//     until PERFXEXT). Bulk rewrites (worldgen classify maptilegrid.cpp, the stream load
+//     pasturecomponent_states.cpp, pasturecomponent.cpp (PastureComponent::OnEvent's
+//     pointer-alias store), quarrycomponent_deform.cpp, keystone_a_removalcalcpath.cpp
+//     (the tombstone and the pasture-state writer were missing until PERFXEXT, the
+//     pasture OnEvent writer until AMBMEMO). Bulk rewrites (worldgen classify maptilegrid.cpp, the stream load
 //     gamegrid_serialize.cpp) call Invalidate(); CopyMapCell / ZeroMapCell only run inside
 //     the array's own resize, which moves the base or the count.
 //   * BANISHED_STRESS_COMPPROF=4 (g_verifyOn, src/diag/stress_harness.h) makes every hot

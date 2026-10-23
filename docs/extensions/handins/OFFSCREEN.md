@@ -1,5 +1,7 @@
 # OFFSCREEN -- can off-screen citizens skip their walk and their work wait?
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/perfx/` (perfx.{h,cpp}, perfx_rules.h, perfx_table.h) moved to `src/ext/render_culling/` (render_culling.{h,cpp}, render_culling_rules.h, side_table.h; namespaces `PerfX` / `PerfXTbl` -> `Ext::RenderCulling` / `Ext::RenderCulling::SideTable`), ext.anim_batch's seam helpers to `src/ext/anim_batch/anim_batch.h`.)
+
 Block OFFSCREEN, 2026-10-12. The user asked whether, like the culling, off-screen agents could
 skip animation and pathfinding "and skip to their destinations or next node", e.g. a woodcutter's
 take wood -> cutting animation -> finish -> place firewood, "but this should be measured".

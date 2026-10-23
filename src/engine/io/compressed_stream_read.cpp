@@ -370,9 +370,10 @@ bool IO::CompressedStream::SetWindow(int pos) {
     aw->start = b << 15;                                // 1800a9e6a/6d
     aw->end   = aw->start + h->uncompressedSize;        // 1800a9e71/79
 
-    // NOT RETAIL: ext.async_save_compress -- a block still queued for the worker is decoded
-    // from the job's copy of its bytes (what the decode below returns once the job lands).
-    if (_extAsyncOwner == this && ExtAsyncCopyQueued(b, aw->buffer))
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress -- a
+    // block still queued for the worker is decoded from the job's copy of its bytes (what the
+    // decode below returns once the job lands).
+    if (_extAsyncCompress != nullptr && _extAsyncCompress(*this, kExtAsyncCopyQueued, b, aw->buffer))
         return true;
 
     if (h->compressedSize != 0) {                       // 1800a9e83  TEST AX,AX

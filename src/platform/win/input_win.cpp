@@ -24,6 +24,7 @@
 #include <windows.h>
 
 #include "platform_input.h"
+#include "platform_input_hooks.h"
 
 namespace Platform {
 namespace Input {
@@ -31,6 +32,22 @@ namespace Input {
 bool ShiftHeld() {
     return (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0
         || (GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0;
+}
+
+// The hooks of platform_input_hooks.h: nothing to change on this host.
+const bool* ApplyKeyLayer(const bool* raw, int* /*count*/, bool* /*scratch*/) {
+    return raw;
+}
+
+uint32_t PolledMouseButtons(uint32_t physical) {
+    return physical;
+}
+
+void PreprocessPumpEvent(SDL_Event* /*event*/) {
+}
+
+bool ConsumePumpEvent(const SDL_Event& /*event*/) {
+    return false;
 }
 
 }  // namespace Input

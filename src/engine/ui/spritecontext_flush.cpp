@@ -381,10 +381,10 @@ void SpriteContext::Flush() {
         current->m_field30
             ->Setup(*ctx, 0);
     else
-        swap->twin->m_field30->Setup(*ctx, 0);   // EXT SEAM (ext.sharp_ui): the twin's material
+        swap->twin->m_field30->Setup(*ctx, 0);   // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, the twin's material
 
     if (sharp != nullptr && sharp->point) {
-        // EXT SEAM (ext.sharp_ui): this batch's sampler, chosen before the
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, this batch's sampler, chosen before the
         // first EndVertices binds it (ui/SharpDraw.h). POINT only when every
         // axis-aligned quad is pixel-exact; a rotated quad keeps filtering.
         bool point = true;
@@ -443,7 +443,7 @@ void SpriteContext::Flush() {
                 u0 = info.u0; v0 = info.v0; u1 = info.u1; v1 = info.v1;
             }
             if (swap != nullptr && idx >= 0) {
-                // EXT SEAM (ext.sharp_ui, NOT RETAIL): the UVs of the twin's
+                // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, the UVs of the twin's
                 // sprite; one with no twin draws nothing (zero UVs).
                 const int32_t t = idx < swap->count ? swap->twinSprite[idx] : -1;
                 u0 = v0 = u1 = v1 = kZero;
@@ -486,7 +486,7 @@ void SpriteContext::Flush() {
                 cx = static_cast<float>(d->x2) - halfPixel;
                 bx = ax;  cy = by;  dx = cx;  dy = ay;
                 if (sharp != nullptr) {
-                    // EXT SEAM (ext.sharp_ui, NOT RETAIL): the corners on whole
+                    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, the corners on whole
                     // device pixels, rounded against the dialog's origin (ui/SharpDraw.h). `sharp` is read once per
                     // flush; null = retail's four lines above, untouched.
                     ax = SnapToPixel(static_cast<float>(d->x1), sharp->pxPerUnitX, sharp->unitsPerPxX, sharp->originX) - halfPixel;

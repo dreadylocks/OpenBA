@@ -1,5 +1,7 @@
 # AOCORE -- `ext.ambient_occlusion` (class A): the depth, the pass, the seam (hand-in, 2026-10-14)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/ambient_occlusion/ao.{h,cpp}` moved to `ambient_occlusion.{h,cpp}` (namespaces `AmbientOcclusion` / `Ext::AO` / `AoMath` -> `Ext::AmbientOcclusion` / `Ext::AmbientOcclusion::AoMath`), `tests/unit/ext_ao_test.cpp` to `ext_ambient_occlusion_test.cpp`; the `[AO]` stderr prefix is `[AmbientOcclusion]`.)
+
 Block AOCORE of `docs/extensions/AO.md` §4. Branch `worktree-agent-a5e8b4a1bb43292ab`. Main is merged
 in, including AOMENU (f333a092d): the row, the valued keys, and `Ext::AO::Current()` are main's.
 Nothing is pushed or merged. The coordinator runs the gate.
@@ -30,7 +32,7 @@ Nothing is pushed or merged. The coordinator runs the gate.
 | `src/render/dx11/ao/ao_depth_resolve.{h,cpp,hlsl}` | `Texture2DMS<float>` sample 0 (or the 1x texture) into a 1x **R32F raw depth** (§3.1). |
 | `src/render/dx11/ao/ao_pass.cpp` | `ExtAoAfterOpaque`: save all state, resolve, rebind colour + depth, ASSAO, restore. It also holds the readable-depth state (`ao_backend.h`, `ao_depth_views.h`) and rebuilds the pass objects when the device changes. |
 | `src/render/dx11/ao/assao/` | Intel's three files plus `LICENSE` (MIT header kept), the GCC compat file, and a `README.md` that records upstream c21d57a95 and every edit, including the `memset` size/value swap GCC found. |
-| `src/render/dx11/ao/shaders/*.h` | 20 DXBC headers from `tools/ao_shaders.py`: `VSMain`, 16 ps_5_0 ASSAO entries, and 3 resolve entries. The 5 Adaptive-only entries are gone because `INTEL_SSAO_ENABLE_ADAPTIVE_QUALITY` is now off. |
+| `src/render/common/ao/shaders/*.h` | 20 DXBC headers from `tools/ao_shaders.py`: `VSMain`, 16 ps_5_0 ASSAO entries, and 3 resolve entries. The 5 Adaptive-only entries are gone because `INTEL_SSAO_ENABLE_ADAPTIVE_QUALITY` is now off. |
 | `src/render/dx11/devicedata.cpp` `CreateDepthBuffer`, `imagebufferdata.cpp` `AttachDepthBuffer` | The readable-depth arms (§3.2). The faithful arm is the literal retail call. |
 | `src/ext/ambient_occlusion/ao.{h,cpp}` | `Sync()`, `Enabled()` (an inline bool load), `BuildFrame` / `Arm` / `Disarm`. |
 | `src/ext/ambient_occlusion/ao_math.{h,cpp}` | The pure parts: the tier table, the zoom curve, the row swap, the linearisation constants, and the frame record. |

@@ -44,7 +44,7 @@ const Ext::Entry& E(const char* id) {
 UNIT_TEST(ext_registry_table_shape) {
     // The three fixes block FIXPILOT wires, default ON, no class.
     for (const char* id : {"icon_slide", "residence_goto", "tavern_counter", "start_barn_height",
-                           "ui_scale_layout"}) {
+                           "ui_scale_layout", "rock_seat"}) {
         const Ext::Entry& e = E(id);
         CHECK(e.tier == Ext::Tier::Fix);
         CHECK(e.cls == Ext::Class::None);
@@ -64,8 +64,10 @@ UNIT_TEST(ext_registry_table_shape) {
         // Class A ships ON, class B / C OFF (DESIGN.md section 2, ruled 2026-10-18).
         // The unit_* test rows keep OFF: the lock tests below start from nothing on.
         // eye_camera is class A but changes how the game is played: the player's call, OFF.
+        // no_fog is class A but changes how the map looks: the player's call, OFF.
         if (e.tier == Ext::Tier::Extension && std::strncmp(e.id, "unit_", 5) != 0)
-            CHECK(e.defaultOn == (e.cls == Ext::Class::A && std::strcmp(e.id, "eye_camera") != 0));
+            CHECK(e.defaultOn == (e.cls == Ext::Class::A && std::strcmp(e.id, "eye_camera") != 0 &&
+                                  std::strcmp(e.id, "no_fog") != 0));
     }
     CHECK(!Ext::ValidId("a.b"));
     CHECK(!Ext::ValidId("Abc"));
@@ -240,6 +242,43 @@ UNIT_TEST(ext_registry_class_b_c_locked_for_the_game) {
     CHECK(!Ext::Locked());
     CHECK(Ext::Ext().unit_b);
     CHECK(!Ext::Ext().unit_c);
+}
+
+UNIT_TEST(ext_registry_in_game_change_keeps_the_request) {
+    Ext::Install(ResolveText("ext.unit_b=1\n"), Ext::Profile::PerEntry, false);
+    int game1 = 0;
+    Ext::LockForGame(&game1);
+    CHECK(!Ext::LockKeepsRequest());                    // a plain load: the save's set decides
+
+    // The player turns unit_b off and unit_c on in game and confirms the reload.
+    CHECK(!Ext::SetRequested(E("unit_b"), false));
+    CHECK(!Ext::SetRequested(E("unit_c"), true));
+    Ext::KeepRequestOnNextLock();
+    CHECK(!Ext::LockKeepsRequest());                    // not until the reload locks
+
+    // The old game is destroyed, then the reloaded one locks with the request.
+    Ext::UnlockForGame(&game1);
+    int game2 = 0;
+    Ext::LockForGame(&game2);
+    CHECK(Ext::LockKeepsRequest());
+    CHECK(!Ext::Ext().unit_b);
+    CHECK(Ext::Ext().unit_c);
+
+    // One shot: the next game's lock is a plain one again.
+    Ext::UnlockForGame(&game2);
+    CHECK(!Ext::LockKeepsRequest());
+    int game3 = 0;
+    Ext::LockForGame(&game3);
+    CHECK(!Ext::LockKeepsRequest());
+    Ext::UnlockForGame(&game3);
+
+    // A lock from a save's set never keeps the request.
+    Ext::KeepRequestOnNextLock();
+    int game4 = 0;
+    Ext::LockForGame(&game4);
+    CHECK(Ext::LockForGameWithSet(&game4, { "unit_b" }));
+    CHECK(!Ext::LockKeepsRequest());
+    Ext::UnlockForGame(&game4);
 }
 
 UNIT_TEST(ext_registry_pseudo_mods_for_save) {

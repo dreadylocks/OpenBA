@@ -220,7 +220,7 @@ namespace {
 
 // The axis selector picks the fields by pointer-to-member.
 using ElemField   = int32_t UI::Element::*;
-using DeviceField = int32_t ::Video::Device::*;
+using DeviceField = int32_t Video::Device::*;
 
 int32_t TablePaddedExtent(UI::Element* cell,
                           ElemField extent, ElemField nearPad, ElemField farPad,

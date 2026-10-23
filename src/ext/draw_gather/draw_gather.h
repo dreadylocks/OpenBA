@@ -22,6 +22,7 @@
 
 #include "ext/draw_gather/gather_side.h"
 
+namespace Ext {
 namespace DrawGather {
 
 // Installs or clears the engine seams to match Ext::Ext().draw_gather. Idempotent.
@@ -36,3 +37,4 @@ int ParallelHelpers();
 Counters TakeWindow();
 
 }  // namespace DrawGather
+}  // namespace Ext

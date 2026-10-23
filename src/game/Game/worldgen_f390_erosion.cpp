@@ -590,7 +590,7 @@ struct ErodeJob {
     // Replay a validated speculation's stores in order; its footprint recorded.
     void Apply(const ErodeSlot& s, int j) {
         for (int k = 0; k < s.nw; ++k) {
-            const ErodeWrite w = s.writes[k];
+            ErodeWrite w = s.writes[k];
             __atomic_store(hm + w.idx, &w.val, __ATOMIC_RELAXED);
         }
         ErodeFootprint& f = foot[j % kWgErosionRing];

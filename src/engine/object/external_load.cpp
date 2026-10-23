@@ -102,6 +102,7 @@
 #include "io/FileStream.h"
 #include "io/FileSystem.h"
 #include "../collection/array_internal.h"  // ENDGAME B.3.2 step 2: kSpec_ExtArrayElem bridge
+#include "audio/load_decode_batch.h"       // block SNDPAR: the load's sound decodes, in parallel
 
 namespace RtObject {
 
@@ -214,6 +215,11 @@ LoadCounters g_lc{};
 // Object::External::Load — the body.                     retail 0x1800bc620
 // ============================================================================
 extern "C" ::Object::External* RtObject_External_Load(const System::Filename* path, ::Object::External* existing) {
+    // Block SNDPAR (NOT RETAIL, src/engine/audio/load_decode_batch.h): the SoundBuffers
+    // this load and its dependency loads serialize queue their xWMA decode here; the
+    // OUTERMOST Load on this thread decodes them in parallel and publishes them, in queue
+    // order, when it returns (this object's destructor runs last, after the stream's).
+    ::Audio::LoadDecode::Scope soundDecodeBatch;
     ++g_lc.calls;
 
     ::Object::External* obj = existing;      // RDI, and it is REASSIGNED at 1800bc745

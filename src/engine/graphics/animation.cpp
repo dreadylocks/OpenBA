@@ -86,7 +86,7 @@
 // fully pin. Update is also the single largest blast-radius function in this
 // lane's whole scope: it runs on EVERY character's skeleton, EVERY frame
 // (gameupdateloop.cpp:1293), and already sits behind a default-on non-retail
-// batching path (src/ext/perfx/perfx.cpp, ANIM_BATCH_ALL) this
+// batching path (src/ext/render_culling/render_culling.cpp, ANIM_BATCH_ALL) this
 // lane's own brief said to read before touching it. A wrong argument-slot
 // mapping in the 9-argument `AnimationState::Update` call this function makes
 // would silently corrupt every animated model's pose with no oracle cheaper

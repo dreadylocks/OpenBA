@@ -1,5 +1,7 @@
 # EYECAM hand-in (2026-10-11)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: namespace `EyeCamera` -> `Ext::EyeCamera`; the `[EyeCam]` stderr prefix is `[EyeCamera]`.)
+
 The first extension: `ext.eye_camera`, class A (no serialized state, no sim effect), default OFF,
 display name "Eye-level camera", description "Follow a citizen at eye level, looking where they
 look." Spec: `INVENTORY.md` §5.1. Static gate only: the game was NOT run by this block

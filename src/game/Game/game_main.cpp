@@ -89,7 +89,7 @@ extern "C" void BootState_MarkQuitting();
 // Update frames (driven from splash_loop_stubs.cpp Stub_Update). Boot is
 // non-rendering, so the synchronous A1 cost is invisible.
 #include "chunked_scene_loader.h"
-#include "ext/registry.h"   // EXT SEAM: Ext::InitFromSettings (NOT RETAIL)
+#include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): Ext::InitFromSettings
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 
 // ============================================================
@@ -346,7 +346,7 @@ int RunGameMain(void* platformHandle, const char* cmdLine) {
     // Boot got past the point where the launcher dialog would have blocked it.
     BootState::MarkStartupComplete();
 
-    // EXT SEAM (docs/extensions/DESIGN.md §3; NOT RETAIL): the fixes and
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): the fixes and
     // extensions toggles, read ONCE from settings.cfg (Persistence::ReadSettings
     // ran inside Startup) and the command line's /profile:<name>.
     if (ok != 0) Ext::InitFromSettings();

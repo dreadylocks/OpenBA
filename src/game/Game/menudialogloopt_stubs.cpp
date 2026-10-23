@@ -68,8 +68,8 @@
 #include <new>
 #include <cstring>
 #include <initializer_list>   // ENDGAME B.3.7: MenuDLT::Shutdown field list
-#include "ext/registry.h"            // EXT SEAM: Ext::Ext().sharp_ui (NOT RETAIL)
-#include "ext/sharp_ui/sharp_ui.h"   // EXT SEAM: ext.sharp_ui, Draw (NOT RETAIL)
+#include "ext/registry.h"            // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): Ext::Ext().sharp_ui
+#include "ext/sharp_ui/sharp_ui.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, Draw
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 
 // ============================================================================
@@ -481,9 +481,9 @@ void MenuDialogLoopT::Draw(float alpha) {
     }
 
     if (context) {
-        // EXT SEAM (ext.sharp_ui, NOT RETAIL): as GameUpdateLoop::Draw step 12.
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, as GameUpdateLoop::Draw step 12.
         if (Ext::Ext().sharp_ui)
-            SharpUI::Draw(_ui, *context);
+            Ext::SharpUI::Draw(_ui, *context);
         else
             _ui.Draw(*context);
     } else if (trace) {

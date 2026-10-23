@@ -26,6 +26,19 @@ class-scope operators (retail's `MemAlloc(size, 4)` / `MemFree`). The status boa
 addresses and slot roles are still the reference; `src/README.md` has the current
 file map. Rule sheet: `docs/history/endgame_b/B5_RULES.md`.
 
+**The backend seam (2026-10-20).** This directory is ONE renderer backend, picked by CMake's
+`BANISHED_RENDER_BACKEND=dx11` (the default): `backend.cmake` here sets `RENDER_SRCS`, the include
+directory, the ASSAO per-file warning properties and, off Windows, the dxvk-native check and its
+`-isystem`. The code outside the backend reaches it only through the backend-neutral headers in
+`../common/` (`render_backend.h`, `ao/ao_backend.h`, `better_trees/foliage_aa_backend.h`,
+`better_trees/billboard_shadow_backend.h`); `render_backend_dx11.cpp` forwards
+`Render::DeviceName` / `CreateDeviceData` / the placeholder pair to `VideoDX11Plugin.h`'s four. The
+pure DXBC tooling (`dxbc`, `cutout_rewrite`, `receiver_rewrite`, `edge_dither`) moved to
+`../common/better_trees/` with them; the D3D stages that use it (`better_trees/*_stage.*`,
+`ao/*`) stay here. `../common/README.md` has the contract a second backend fills. The one
+`VideoDX11::` name still used outside: `Dx11SwapChain()` in `src/app/main.cpp`'s Windows-only
+swap-chain probes.
+
 ---
 
 ## Why this is a tractable target

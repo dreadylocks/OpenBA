@@ -18,12 +18,13 @@ RIM = (42, 42, 42, 255)
 FILL = (232, 232, 232, 255)
 
 
-def icon():
-    """A cog with a plus cut into its hub, white with antialiased alpha and NO outline, like the
+def icon(size=W):
+    """A cog (size x size; 16 by default, 32 for the toolbar button) with a plus cut into its hub, white with antialiased alpha and NO outline, like the
     kit's 16 x 16 ButtonIcons (Scenario / Achievement / Options are pure white silhouettes with
     27-79 alpha levels; the dark-rimmed version this replaces was the only outlined icon on the
     main menu, the user 2026-10-17). Drawn at 8x and box-filtered down for the soft edges."""
     S = 8
+    W = H = size
     big = Image.new("L", (W * S, H * S), 0)
     px = big.load()
     cx, cy, s = (W * S - 1) * 0.5, (H * S - 1) * 0.5, W * S * 0.5
@@ -152,6 +153,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     icon().save(os.path.join(OUT, "ExtensionsIcon.png"))
     options_enhanced().save(os.path.join(OUT, "OptionsEnhanced.png"))
+    icon(32).save(os.path.join(OUT, "Toolbar_extensions.png"))   # the toolbar's one extension button: the cog at the toolbar icons' 32 px
     glyph("F", TIER_COLOUR["fix"]).save(os.path.join(OUT, "TierFix.png"))
     glyph("A", TIER_COLOUR["A"]).save(os.path.join(OUT, "TierA.png"))
     glyph("B", TIER_COLOUR["B"]).save(os.path.join(OUT, "TierB.png"))
@@ -162,7 +164,7 @@ def main():
         draw(img.load())
         img = img.resize((W * ICON_SCALE, H * ICON_SCALE), Image.NEAREST)
         img.save(os.path.join(OUT, "Entry_%s.png" % entry_id))
-    print("wrote %d sprites to %s" % (6 + len(icons), OUT))
+    print("wrote %d sprites to %s" % (7 + len(icons), OUT))
 
 
 if __name__ == "__main__":

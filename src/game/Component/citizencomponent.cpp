@@ -17,6 +17,9 @@
 // been seen through resolve.h.  ENDGAME B.3.5 caller batch I2.
 #include "graphics/Scene.h"
 #include "Component/StorageComponent.h"   // B.3.8 CB1a (TypeId)
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): ext.restricted_foods
+// (class C), Ext::RestrictedFoods::g_on, Ext::RestrictedFoods::IsBlocked
+#include "ext/restricted_foods/restricted_foods.h"
 #include "graphics/Mesh.h"
 #include "err_line.h"   // HITCH_POSTDRAIN: one write per diagnostic line
 #include "Component/InteractComponent.h"       // ENDGAME B.3.9 C1: 0x1401c7900 cell class
@@ -1792,6 +1795,9 @@ ComponentDescription** CitizenComp_Entity_impl_ef40(const void* param_1, Compone
     };
 
     // Pass 1: count eligible slots; remember the last eligible index in `chosen`.
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): ext.restricted_foods (class C):
+    // tested once here, above both passes; only the eating category.
+    const bool restrictFoods = param_4 == 0 && Ext::RestrictedFoods::g_on;
     uint32_t eligible = 0;
     for (int64_t row = 0; row < taskCount; row++) {
         StorageComponent::Item* listBase = store->storageSlots._data;
@@ -1802,6 +1808,11 @@ ComponentDescription** CitizenComp_Entity_impl_ef40(const void* param_1, Compone
         // 0x14008f019 MOV ECX,[RAX+0x5c]).
         bool bitSet = shift >= 0 &&
             ((mat->_flags >> shift) & 1);
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): a blocked food is not eligible
+        // for the eating category.
+        if (restrictFoods && bitSet && Ext::RestrictedFoods::IsBlocked(mat)) {
+            bitSet = false;
+        }
         int demand = listBase[row]._count -
                      listBase[row]._reserve;
         if (bitSet && demand > 0) {
@@ -1822,6 +1833,11 @@ ComponentDescription** CitizenComp_Entity_impl_ef40(const void* param_1, Compone
         RawMaterialDescription* mat = findMat(entryP->_resource);
         bool bitSet = shift >= 0 &&
             ((mat->_flags >> shift) & 1);   // 0x14008f144..0x14008f1a8, no test
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the same test as pass 1,
+        // so both passes agree.
+        if (restrictFoods && bitSet && Ext::RestrictedFoods::IsBlocked(mat)) {
+            bitSet = false;
+        }
         int demand = entryP->_count - entryP->_reserve;
         if (bitSet && demand > 0) {
             if (chosen == cur) { *param_2 = entryP->_resource; return param_2; }

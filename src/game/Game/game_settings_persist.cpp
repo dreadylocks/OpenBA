@@ -27,6 +27,7 @@
 //   byte 0x15 ShowCelcius        byte 0x16 ShowWeather  byte 0x17 AutoSlow
 
 #include "options.h"
+#include "platform/common/display_density.h"
 #include "io/Persistence.h"   // ENDGAME B.3.4a closing: Persistence::Get/Set members
 #include <cstdint>
 #include <cstdio>
@@ -86,8 +87,15 @@ void GameSettings::Load() {
     // ENDGAME B.3.4a closing: onto IO::Persistence::Get. The DOOR names the
     // overload (int& / bool&), as §7.3 requires — the bool keys are one byte at
     // settings+0xC/+0x14/+0x18 and must not pick the int& overload.
-    for (const auto& k : kIntKeys)
-        p->Get("Game", k.key, this->*k.field);
+    bool haveUiScale = false;
+    for (const auto& k : kIntKeys) {
+        const bool found = p->Get("Game", k.key, this->*k.field);
+        if (k.field == &GameSettings::uiScale) haveUiScale = found;
+    }
+    // NOT RETAIL: first run on a high-density window with no saved UIScale gets the
+    // scale that keeps the UI its 1x physical size (docs/macos/UI_SCALE.md). Identity at 1x.
+    if (!haveUiScale)
+        uiScale = Platform::Display::FirstRunUiScalePercent(uiScale);
     for (const auto& k : kBoolKeys)
         p->Get("Game", k.key, this->*k.field);   // 0x140098bc7 LEA R9,[RBX+0xc] -> [0x1401522f0] Get(bool&), likewise +0x14..+0x18
 

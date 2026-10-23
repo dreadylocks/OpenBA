@@ -3,8 +3,8 @@
 
 The exe has no runtime shader compiler (docs/extensions/AO.md §2 "Shaders"), so every entry point
 ASSAODX11.cpp asks D3DCompile for is compiled here, once, with exactly the defines and flags
-ASSAODX11.cpp passes, and written as `src/render/dx11/ao/shaders/<entry>.h` (`/Fh`, one
-`const BYTE g_<entry>[]` per header).
+ASSAODX11.cpp passes, and written as `src/render/common/ao/shaders/<entry>.h` (`/Fh`, one
+`const uint8_t g_<entry>[]` per header, fxc's BYTE rewritten so shared code needs no Win32 typedef).
 
     python -I tools/ao_shaders.py [--fxc PATH] [--check]
 
@@ -21,7 +21,8 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-AO_DIR = os.path.join(REPO, "src", "render", "dx11", "ao")
+AO_DIR = os.path.join(REPO, "src", "render", "common", "ao", "shaders")
+AO_SOURCE_DIR = os.path.join(REPO, "src", "render", "dx11", "ao")
 def find_fxc():
     """fxc on PATH first, else the newest Windows 10 SDK's x64 fxc.exe; None when neither exists."""
     on_path = shutil.which("fxc")
@@ -69,9 +70,18 @@ OWN = [
 
 
 def blob_size(header_text):
-    # fxc /Fh writes "const BYTE g_x[] = { 68, 88, ... };" -- count the numbers in the braces
+    # the header holds "const uint8_t g_x[] = { 68, 88, ... };" -- count the numbers in the braces
     body = header_text[header_text.index("{") + 1:header_text.rindex("}")]
     return len(re.findall(r"\b\d+\b", body))
+
+
+def retype_header(path):
+    # fxc /Fh declares `const BYTE g_x[]` (a Win32 typedef); shared code uses <cstdint>.
+    with open(path, "r", encoding="ascii", errors="replace") as f:
+        text = f.read()
+    text = text.replace("const BYTE g_", "const uint8_t g_")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write("#include <cstdint>\n" + text)
 
 
 def compile_one(fxc, src, entry, profile, defines, flags, out_h):
@@ -81,6 +91,8 @@ def compile_one(fxc, src, entry, profile, defines, flags, out_h):
         cmd += ["/D", "%s=%s" % (k, v)]
     cmd.append(src)
     r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode == 0:
+        retype_header(out_h)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
@@ -93,16 +105,16 @@ def main():
         a.fxc = find_fxc()
         if a.fxc is None:
             sys.exit("fxc.exe not found: put it on PATH, install a Windows 10 SDK, or pass --fxc PATH")
-    out_dir = tempfile.mkdtemp() if a.check else os.path.join(AO_DIR, "shaders")
+    out_dir = tempfile.mkdtemp() if a.check else AO_DIR
     os.makedirs(out_dir, exist_ok=True)
     jobs = [(s, e, p, ASSAO_DEFINES, ASSAO_FLAGS) for (s, e, p) in SHADERS]
     jobs += [(s, e, p, d, ["/O3", "/WX"]) for (s, e, p, d) in OWN
-             if os.path.exists(os.path.join(AO_DIR, s))]
+             if os.path.exists(os.path.join(AO_SOURCE_DIR, s))]
     fails = 0
     total = 0
     for src, entry, profile, defines, flags in jobs:
         out_h = os.path.join(out_dir, entry + ".h")
-        rc, log = compile_one(a.fxc, os.path.join(AO_DIR, src), entry, profile, defines, flags, out_h)
+        rc, log = compile_one(a.fxc, os.path.join(AO_SOURCE_DIR, src), entry, profile, defines, flags, out_h)
         if rc != 0:
             fails += 1
             print("FAIL %-32s %s %s\n%s" % (entry, profile, src, log))

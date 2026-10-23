@@ -40,7 +40,16 @@ struct Register { Register(Test* t) { t->next = Head(); Head() = t; } };
     std::printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++unit::Failures(); } } while (0)
 #define CHECK_EQ(a, b) do { auto _a = (a); auto _b = (b); if (!(_a == _b)) { \
     std::printf("  FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b); ++unit::Failures(); } } while (0)
-#define CHECK_STREQ(a, b) do { const char* _a = (a); const char* _b = (b); \
-    if (!((_a == nullptr && _b == nullptr) || (_a && _b && std::strcmp(_a, _b) == 0))) { \
-    std::printf("  FAIL %s:%d: %s == %s (\"%s\" vs \"%s\")\n", __FILE__, __LINE__, #a, #b, \
-        _a ? _a : "(null)", _b ? _b : "(null)"); ++unit::Failures(); } } while (0)
+// Compare within one function call so temporary strings keep their c_str() alive
+// until both arguments have been compared on every compiler.
+namespace unit {
+inline void CheckStrings(const char* a, const char* b, const char* file, int line,
+                         const char* exprA, const char* exprB) {
+    if (!((a == nullptr && b == nullptr) || (a && b && std::strcmp(a, b) == 0))) {
+        std::printf("  FAIL %s:%d: %s == %s (\"%s\" vs \"%s\")\n", file, line,
+                    exprA, exprB, a ? a : "(null)", b ? b : "(null)");
+        ++Failures();
+    }
+}
+}  // namespace unit
+#define CHECK_STREQ(a, b) ::unit::CheckStrings((a), (b), __FILE__, __LINE__, #a, #b)

@@ -6,6 +6,7 @@
 // ============================================================================
 #include "ext/sharp_ui/sharp_ui.h"
 #include "ext/sharp_ui/sharp_math.h"
+#include "platform/common/platform_window_hooks.h"   // GamePixelDensity
 #include "ext/resources/Resources.h"   // HasProvider: the in-exe font variants (KITFREE)
 
 #include <cstdint>
@@ -28,6 +29,7 @@
 #include "video/Context.h"
 #include "video/Device.h"
 
+namespace Ext {
 namespace SharpUI {
 
 namespace {
@@ -130,7 +132,8 @@ void SelectFont(int k, float pxPerUnit) {
     if (!SameFace(base)) { std::snprintf(text, 32, "%s->retail(face)", kFontNames[k]); return; }
 
     const int height = base->_lineHeight;
-    const int pick = PickVariantHeight(height, pxPerUnit);
+    bool keepRetail = false;
+    const int pick = PickFontHeight(height, pxPerUnit, Platform::Window::GamePixelDensity(), &keepRetail);
 
     // The native pick (the wanted height within half a pixel of the font's
     // own) is the font swapped for ITSELF: its glyphs still go one texel per
@@ -138,6 +141,15 @@ void SelectFont(int k, float pxPerUnit) {
     // corners snapped, which at 99 % stretched a 13-texel glyph into 13 or 14
     // pixels (SHARP-SPACING.md).
     UI::Font* variant = base;
+    if (keepRetail) {
+        // Ratio beyond even the Retina range: swapping the font for itself
+        // would draw base-size glyphs one texel per device pixel, too small and
+        // letter-spaced. Keep retail's scaled quads. (A Retina 2x frame picks a
+        // provider-built variant above; with no typeface that load fails and
+        // lands in "retail(bad)" -- the same soft scaled quads.)
+        std::snprintf(text, 32, "%s->retail(range)", kFontNames[k]);
+        return;
+    }
     if (pick != height) {
         // A variant exists when it is deployed loose OR a resource provider
         // builds it in the exe (KITFREE: Ext::Resources::InitFonts).
@@ -323,3 +335,4 @@ void Draw(UI::UserInterface& ui, Video::Context& context) {
 }
 
 }  // namespace SharpUI
+}  // namespace Ext

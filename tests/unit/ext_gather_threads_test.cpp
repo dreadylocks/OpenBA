@@ -2,7 +2,7 @@
 // tests/unit/ext_gather_threads_test.cpp -- CULLPAR: ext.gather_threads (class A)
 // ============================================================================
 // The parallel walk (src/ext/draw_gather/gather_walk.h) and its helper pool
-// (gather_threads.{h,cpp}), on the REAL walk code over random quadtrees:
+// (src/ext/gather_threads/gather_threads.{h,cpp}), on the REAL walk code over random quadtrees:
 //   * the pool: the count is clamped to Cpu::kMaxCullHelpers, every published task
 //     runs exactly once per pass whoever claims it, across wake / park cycles;
 //   * the walk: random grids (levels, cells, chains, pruned / stale cell counts,
@@ -28,8 +28,8 @@
 
 namespace {
 
-using DrawGather::SideArray;
-using DrawGather::HelperPool;
+using Ext::DrawGather::SideArray;
+using Ext::GatherThreads::HelperPool;
 
 // ---------------------------------------------------------------------------
 // The pool on its own.
@@ -198,7 +198,7 @@ void RandomFrustum(::Frustum& fr, std::mt19937& rng) {
     }
 }
 
-void RandomFrame(DrawGather::Frame& f, std::mt19937& rng) {
+void RandomFrame(Ext::DrawGather::Frame& f, std::mt19937& rng) {
     RandomFrustum(f.cull, rng);
     RandomFrustum(f.shadow, rng);
     if (rng() % 6 == 0) {                            // a frustum everything passes
@@ -235,7 +235,7 @@ bool SameSide(const SideArray& a, const SideArray& b, const World& w) {
         const void* g = w.nodes[i]._object;
         const int32_t id = static_cast<int32_t>(i);
         if (a.Valid(id, g) != b.Valid(id, g)) return false;
-        if (a.Valid(id, g) && std::memcmp(&a.At(id), &b.At(id), sizeof(DrawGather::SideRecord)) != 0) return false;
+        if (a.Valid(id, g) && std::memcmp(&a.At(id), &b.At(id), sizeof(Ext::DrawGather::SideRecord)) != 0) return false;
     }
     return true;
 }
@@ -246,15 +246,15 @@ UNIT_TEST(ext_gather_threads_parallel_walk_equals_sequential) {
         long long tasks = 0, helperTasks = 0, visible = 0;
         HelperPool pool(helpers);
         std::mt19937 rng(9100u + static_cast<unsigned>(helpers));
-        DrawGather::ParWalk par;
+        Ext::DrawGather::ParWalk par;
         par.pool = &pool;
         for (int c = 0; c < 250; ++c) {
             World w;
             BuildWorld(w, rng);
-            DrawGather::Frame fSeq;
+            Ext::DrawGather::Frame fSeq;
             RandomFrame(fSeq, rng);
-            DrawGather::Frame fPar = fSeq;
-            DrawGather::Frame fRef = fSeq;
+            Ext::DrawGather::Frame fPar = fSeq;
+            Ext::DrawGather::Frame fRef = fSeq;
 
             SideArray sideSeq, sidePar;
             RandomSide(sideSeq, w, rng);
@@ -262,16 +262,16 @@ UNIT_TEST(ext_gather_threads_parallel_walk_equals_sequential) {
 
             // The sequential walks: the extension's (side test) and retail's reads.
             std::vector<Graphics::Geometry*> seq, ref, got;
-            DrawGather::TaskStats seqStats;
-            DrawGather::TaskSideTest seqTest{ fSeq, sideSeq, true, seqStats };
-            DrawGather::Walk(w.scene(), fSeq, seq, seqTest);
-            DrawGather::RetailTest rt{ fRef };
-            DrawGather::Walk(w.scene(), fRef, ref, rt);
+            Ext::DrawGather::TaskStats seqStats;
+            Ext::DrawGather::TaskSideTest seqTest{ fSeq, sideSeq, true, seqStats };
+            Ext::DrawGather::Walk(w.scene(), fSeq, seq, seqTest);
+            Ext::DrawGather::RetailTest rt{ fRef };
+            Ext::DrawGather::Walk(w.scene(), fRef, ref, rt);
 
             // The parallel walk; a "frame" of 1-3 passes per wake, the pool parked
             // in between, and every fifth case run on a parked pool (the caller alone).
             if (c % 5 != 4) pool.Wake();
-            const DrawGather::ParPassResult r = DrawGather::ParGather(par, w.scene(), fPar, sidePar, true, got);
+            const Ext::DrawGather::ParPassResult r = Ext::DrawGather::ParGather(par, w.scene(), fPar, sidePar, true, got);
             if (c % 3 == 2) pool.Park();
 
             CHECK(got == seq);
@@ -298,19 +298,19 @@ UNIT_TEST(ext_gather_threads_parallel_walk_equals_sequential) {
                     pool.Helpers(), tasks, helperTasks, visible);
         if (pool.Helpers() == 0) CHECK(helperTasks == 0);
         // The plain caller-only path (no pool at all) on a few more.
-        DrawGather::ParWalk alone;
+        Ext::DrawGather::ParWalk alone;
         for (int c = 0; c < 20; ++c) {
             World w;
             BuildWorld(w, rng);
-            DrawGather::Frame f;
+            Ext::DrawGather::Frame f;
             RandomFrame(f, rng);
-            DrawGather::Frame f2 = f;
+            Ext::DrawGather::Frame f2 = f;
             SideArray s1, s2;
             std::vector<Graphics::Geometry*> a, b;
-            DrawGather::TaskStats st;
-            DrawGather::TaskSideTest t{ f, s1, false, st };
-            DrawGather::Walk(w.scene(), f, a, t);
-            DrawGather::ParGather(alone, w.scene(), f2, s2, false, b);
+            Ext::DrawGather::TaskStats st;
+            Ext::DrawGather::TaskSideTest t{ f, s1, false, st };
+            Ext::DrawGather::Walk(w.scene(), f, a, t);
+            Ext::DrawGather::ParGather(alone, w.scene(), f2, s2, false, b);
             CHECK(a == b);
             ++cases;
         }
@@ -323,13 +323,13 @@ UNIT_TEST(ext_gather_threads_parallel_walk_equals_sequential) {
 UNIT_TEST(ext_gather_threads_side_array_never_grows_during_a_parallel_walk) {
     std::mt19937 rng(4242);
     HelperPool pool(2);
-    DrawGather::ParWalk par;
+    Ext::DrawGather::ParWalk par;
     par.pool = &pool;
     pool.Wake();
     for (int c = 0; c < 100; ++c) {
         World w;
         BuildWorld(w, rng);
-        DrawGather::Frame f;
+        Ext::DrawGather::Frame f;
         RandomFrame(f, rng);
         const int32_t n = w.scene()->_grid._nodes.GetSize();
 
@@ -339,17 +339,17 @@ UNIT_TEST(ext_gather_threads_side_array_never_grows_during_a_parallel_walk) {
         const int32_t before = side.Size();
         CHECK(n == 0 || before >= n);
         std::vector<Graphics::Geometry*> out;
-        DrawGather::ParPassResult r = DrawGather::ParGather(par, w.scene(), f, side, false, out);
+        Ext::DrawGather::ParPassResult r = Ext::DrawGather::ParGather(par, w.scene(), f, side, false, out);
         CHECK(side.Size() == before);
         CHECK(!r.sideGrew);
 
         // Empty at first: the walk's own Reserve gives the size, nothing more.
         SideArray empty, sized;
         sized.Reserve(n);
-        DrawGather::Frame f2 = f;
+        Ext::DrawGather::Frame f2 = f;
         f2.boxes = 0;
         out.clear();
-        r = DrawGather::ParGather(par, w.scene(), f2, empty, false, out);
+        r = Ext::DrawGather::ParGather(par, w.scene(), f2, empty, false, out);
         CHECK(empty.Size() == sized.Size());
         CHECK(!r.sideGrew);
     }

@@ -33,7 +33,7 @@
 #include "boot_state_watchdog.h"
 
 #include "options.h"
-#include "ext/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
+#include "platform/common/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
 
 #include <dirent.h>
 #include <dlfcn.h>

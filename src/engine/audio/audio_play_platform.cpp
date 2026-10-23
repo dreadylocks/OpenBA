@@ -205,6 +205,7 @@
 
 #include "audio/Device.h"
 #include "audio/SoundBuffer.h"
+#include "audio/load_decode_batch.h"   // block SNDPAR: LoadDecode::Await
 #include "system/Value.h"          // System::Time
 #include "system/Timer.h"          // ENDGAME B.3.9 SS1: Timer::_secondsPerTick
 #include "rt_libm.h"                 // RtCrt_Powf
@@ -336,6 +337,10 @@ bool Device::PlayPlatform(int32_t slot, Object::ExternalPtr<SoundBuffer> buffer,
     ++g_calls;
 
     const SoundBuffer* const bufferRef = buffer.Get();
+    // Block SNDPAR (NOT RETAIL): the PCM, its length and its format below are the decode
+    // at load's; a buffer whose load batch has not published them yet is finished here.
+    // No dereference: a null buffer still faults where retail's does (FormatOf).
+    LoadDecode::Await(bufferRef);
 
     const Platform::AudioEngine engine = _xaudio2;                        // 1800de7b4
     if (!engine) {                                                        // 1800de7c4

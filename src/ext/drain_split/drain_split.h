@@ -42,12 +42,13 @@
 
 struct PathGraph;
 
+namespace Ext {
 namespace DrainSplit {
 
 extern bool g_on;        // this frame: ext.drain_split (the game's locked value)
 extern bool g_pending;   // an AssignCitizens is owed (only ever set while g_on)
 
-// GameUpdateLoop::Update, once per frame beside SpreadWarmth::BeginFrame: the frame count the
+// GameUpdateLoop::Update, once per frame beside Ext::SpreadWarmth::BeginFrame: the frame count the
 // debt is due against, and g_on.
 void BeginFrame();
 
@@ -96,3 +97,4 @@ Stats& MutableStats();   // the game side's gap counts
 void ResetStats();
 
 }  // namespace DrainSplit
+}  // namespace Ext

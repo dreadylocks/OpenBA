@@ -35,6 +35,7 @@
 #include "ui/DialogInstance.h"
 #include "ui/UserInterface.h"
 
+namespace Ext {
 namespace EyeCamera {
 
 namespace {
@@ -171,14 +172,14 @@ void PutOnCamera(PlayerController& pc) {
 // test that caused it. Unconditional: it fires a few times per session.
 void TraceEngage(const char* what, const ComponentEntity* entity, const FollowDialog* dialog,
                  const ComponentEntity* from) {
-    std::fprintf(stderr, "[EyeCam] %s entity=%p dialog=%p from=%p\n", what,
+    std::fprintf(stderr, "[EyeCamera] %s entity=%p dialog=%p from=%p\n", what,
                  static_cast<const void*>(entity), static_cast<const void*>(dialog),
                  static_cast<const void*>(from));
 }
 
 void HandBack(const char* reason, bool dialogOpen, bool followFlag) {
     if (g_engaged)
-        std::fprintf(stderr, "[EyeCam] disengage reason=%s entity=%p dialog=%p dialogOpen=%d followFlag=%d\n",
+        std::fprintf(stderr, "[EyeCamera] disengage reason=%s entity=%p dialog=%p dialogOpen=%d followFlag=%d\n",
                      reason, static_cast<const void*>(g_latched.entity),
                      static_cast<const void*>(g_latched.dialog), dialogOpen ? 1 : 0, followFlag ? 1 : 0);
     g_engaged = false;
@@ -232,7 +233,7 @@ bool Active() {
         if (!SampleCitizen(front, 1.0f, true, feet, heading, g_scale)) {
             // No ModelComponent: nothing to put an eye on (retail's follow has
             // no camera write for it either). Asked again next step.
-            std::fprintf(stderr, "[EyeCam] engage refused reason=no-model entity=%p dialog=%p\n",
+            std::fprintf(stderr, "[EyeCamera] engage refused reason=no-model entity=%p dialog=%p\n",
                          static_cast<const void*>(front), static_cast<const void*>(dialog));
             return false;
         }
@@ -258,7 +259,7 @@ bool Active() {
     if (!g_latched.tableMissNoted) {
         const int slot = FactorySlot(front, g_latched.hint);
         if (slot < 0) {
-            std::fprintf(stderr, "[EyeCam] note entity=%p not in InternalFactory (kept: its FollowDialog still targets it)\n",
+            std::fprintf(stderr, "[EyeCamera] note entity=%p not in InternalFactory (kept: its FollowDialog still targets it)\n",
                          static_cast<const void*>(front));
             g_latched.tableMissNoted = true;
         } else {
@@ -317,3 +318,4 @@ void DrawScene(Graphics::Renderer& renderer, Video::Context& context, float alph
 }
 
 }  // namespace EyeCamera
+}  // namespace Ext

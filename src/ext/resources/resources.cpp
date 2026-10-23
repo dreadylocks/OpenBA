@@ -66,6 +66,56 @@ bool HasProvider(const char* path) {
     return false;
 }
 
+namespace {
+
+// THE LIFETIME OF A PROVIDED OBJECT: the process. The factory evicts an entry
+// when every UpdateLoop whose usage bit it carries is gone (ExternalFactory::
+// Clean), and a cache hit re-stamps the current loop's bit only while a loader
+// runs (FindOrLoad, `_loadEnabled`). Retail's in-game dialogs are safe because
+// the loop that opens them preloaded their string tables and sprites; ours are
+// loaded lazily, so a dialog first opened in game carried the game's bit while
+// the ExtensionsStringTable / ExtensionsSprites it points at carried only the
+// boot menu's, and the in-game reload's Clean freed them under it (the
+// Extensions dialog reopened after an in-game B / C change read a freed sprite
+// sheet). Our objects are the exe's own data, not the install's: each is
+// stamped with a bit of the provider's own that no loop ever cleans, through
+// retail's own Add, whose first-touch reference visit (with loading enabled)
+// stamps everything the object points at too. Only the whole-cache flush
+// (`_cleanBitIndex < 0`) and ForceUnload still evict them.
+int32_t g_pinBit = -2;   // -2: not reserved yet; -1: no free bit (nothing pinned)
+
+void Pin(Object::External* obj, const char* expandedPath) {
+    Object::ExternalFactory* const f = Object::ExternalFactory::_singleton;
+    if (f == nullptr || obj == nullptr) return;
+    if (g_pinBit == -2) {
+        g_pinBit = -1;
+        for (int32_t bit = 0; bit < 32; ++bit) {
+            if ((f->_cleanBitMask & (1u << bit)) == 0) {
+                f->_cleanBitMask |= (1u << bit);   // reserved for good, as an UpdateLoop's for its life
+                g_pinBit = bit;
+                break;
+            }
+        }
+        std::fprintf(stderr, "[ExtRes] provided objects pinned with usage bit %d\n", g_pinBit);
+    }
+    if (g_pinBit < 0) return;
+
+    // The factory's own insert first (the key is the expanded path, as
+    // FindOrLoad sets it), then the pin as a second touch so the reference
+    // visit runs; FindOrLoad's own Add after this is a hit that changes nothing.
+    obj->_path = System::Filename(expandedPath);
+    f->Add(obj);
+    const int32_t savedBit = f->_cleanBitIndex;
+    const bool savedLoad = f->_loadEnabled;
+    f->_cleanBitIndex = g_pinBit;
+    f->_loadEnabled = true;
+    f->Add(obj);
+    f->_cleanBitIndex = savedBit;
+    f->_loadEnabled = savedLoad;
+}
+
+}  // namespace
+
 Object::External* Provide(const char* path) {
     if (g_count == 0 || path == nullptr || path[0] == '\0') return nullptr;
     std::string norm(path);
@@ -77,6 +127,7 @@ Object::External* Provide(const char* path) {
         if (obj != nullptr) {
             ++g_provided;
             std::fprintf(stderr, "[ExtRes] provided %s (%s)\n", norm.c_str(), obj->TypeName());
+            Pin(obj, path);
             return obj;
         }
     }
@@ -173,6 +224,8 @@ void InitText() {
     }
     Register("Dialog/Extensions", &ProvideText, nullptr);
     Register("Dialog/EnhancedOptions", &ProvideText, nullptr);
+    Register("Dialog/ExtensionsWindow", &ProvideText, nullptr);
+    Register("Dialog/RestrictedFoodsPage", &ProvideText, nullptr);
 }
 
 int TextObjectCount() {

@@ -59,7 +59,7 @@ struct FakeCache {   // the two fields ScanMeter reads (RegionPairCache::newest 
 }  // namespace
 
 UNIT_TEST(ext_spread_warmth_budget) {
-    using namespace SpreadWarmth;
+    using namespace Ext::SpreadWarmth;
     // Off: never defers, charges nothing, the meter is inert.
     Ext::Install(Ext::State{}, Ext::Profile::PerEntry, false);
     BeginFrame();

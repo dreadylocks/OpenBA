@@ -129,6 +129,11 @@ void Device::OnSoundBufferDeleted(const SoundBuffer* buffer) {
 // tail.
 // ############################################################################
 Audio::SoundBuffer::~SoundBuffer() {
+    // Block SNDPAR (NOT RETAIL): a buffer still queued in a load's decode batch is
+    // finished first, so no pool thread reads the packets freed below (and the
+    // [SoundDecode] counts stay those of a decode at Serialize).
+    EnsureDecodedAtLoad();
+
     // `?_singleton@Device@Audio@@` (0x1801fe760), dereferenced UNGUARDED
     // (`MOV RCX,[0x1801fe760]`), as retail does.
     Audio::Device::_singleton->OnSoundBufferDeleted(this);

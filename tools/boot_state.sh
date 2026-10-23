@@ -17,6 +17,7 @@
 #
 # USAGE
 #   tools/boot_state.sh              # print one status line
+#   tools/boot_state.sh --run-dir DIR # poll a launcher --run-dir DIR test run
 #   tools/boot_state.sh --wait 300   # block until RUNNING, or fail fast if blocked/hung
 #
 # EXIT CODES (so a script can branch without parsing)
@@ -56,7 +57,11 @@
 set -u
 
 GAME_DIR="${BANISHED_DIR:-C:/GOG Games/Banished}"
-STATE_FILE="$GAME_DIR/standalone_boot_state.txt"
+if [ "$(uname -s)" = Darwin ]; then
+    STATE_FILE="${HOME}/Library/Application Support/OpenBA/Run/standalone_boot_state.txt"
+else
+    STATE_FILE="$GAME_DIR/standalone_boot_state.txt"
+fi
 
 # ---------------------------------------------------------------------------
 # DERIVE the publish interval from the publisher, do not restate it.
@@ -117,7 +122,11 @@ STALE_SECS=$(( PUBLISH_SECS * STALE_FACTOR ))
 # Age of the state file in seconds, or "" if it cannot be determined.
 file_age() {
     local mtime now
-    mtime="$(stat -c %Y "$STATE_FILE" 2>/dev/null)" || return 1
+    if [ "$(uname -s)" = Darwin ]; then
+        mtime="$(stat -f %m "$STATE_FILE" 2>/dev/null)" || return 1
+    else
+        mtime="$(stat -c %Y "$STATE_FILE" 2>/dev/null)" || return 1
+    fi
     [ -n "$mtime" ] || return 1
     now="$(date +%s)"
     # Clock skew (or a file stamped in the future) must never manufacture a
@@ -126,14 +135,47 @@ file_age() {
 }
 
 WAIT_SECS=0
-if [ "${1:-}" = "--wait" ]; then
-    WAIT_SECS="${2:-300}"
+if [ -n "${BANISHED_STATE_DIR:-}" ]; then
+    STATE_FILE="$BANISHED_STATE_DIR/standalone_boot_state.txt"
 fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --wait)
+            WAIT_SECS="${2:-300}"
+            shift
+            [ $# -eq 0 ] || shift
+            ;;
+        --run-dir)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "--run-dir requires a directory" >&2
+                exit 2
+            fi
+            STATE_FILE="$2/support/Run/standalone_boot_state.txt"
+            shift 2
+            ;;
+        *)
+            echo "unknown argument $1" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Is an OpenBA.exe alive at all? tasklist is authoritative here; the state file is not,
 # because a killed process leaves its last line behind.
 proc_alive() {
-    tasklist 2>/dev/null | grep -qi 'OpenBA\.exe'
+    if [ "$(uname -s)" = Darwin ]; then
+        pgrep -x 'OpenBA(-engine)?' >/dev/null
+    else
+        tasklist 2>/dev/null | grep -qi 'OpenBA\.exe'
+    fi
+}
+
+state_pid_alive() {
+    if [ "$(uname -s)" = Darwin ]; then
+        kill -0 "$1" 2>/dev/null
+    else
+        tasklist 2>/dev/null | grep -q "[^0-9]$1[^0-9]"
+    fi
 }
 
 probe_once() {
@@ -160,7 +202,7 @@ probe_once() {
     stale="$(printf '%s' "$line" | sed -n 's/.* stale=\([0-9]*\).*/\1/p')"
 
     # A file whose pid is gone describes a previous run. Never report its state as live.
-    if [ -n "$pid" ] && ! tasklist 2>/dev/null | grep -q "[^0-9]$pid[^0-9]"; then
+    if [ -n "$pid" ] && ! state_pid_alive "$pid"; then
         echo "STALE  (state file says $state from pid $pid, which is no longer running)"
         return 4
     fi

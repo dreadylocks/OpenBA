@@ -352,7 +352,7 @@ public:
     SpriteCapture*         _spriteCapture;       // +0x80  Begin's 3rd; may be null
 
     // NOT RETAIL (ext.sharp_ui, docs/extensions/DESIGN.md §3 rule 5): null by
-    // default and in the faithful profile. The game side's SharpUI::Draw points
+    // default and in the faithful profile. The game side's Ext::SharpUI::Draw points
     // it at a SharpDraw (ui/SharpDraw.h) for the duration of one
     // UserInterface::Draw; Flush reads it once per flush and, when set, snaps
     // each axis-aligned quad's corners to whole device pixels and draws a

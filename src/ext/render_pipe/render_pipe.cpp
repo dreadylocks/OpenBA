@@ -37,6 +37,11 @@
 // A failed Present is only REPORTED by the render thread; the recovery
 // (finish_split.h) runs on the main thread at the next join.
 //
+// THE RELEASE (RENDERPIPE_FENCE.md): after the post-draw callbacks the emit
+// releases the fence (EngineOps::Released -> Handoff::Release), so the steps
+// overlap EndCommands, the frame index and Present. The command stream is the
+// same: only the main thread's wait moves.
+//
 // THE SIX FIXES (THREADRESEARCH section 1.5):
 //   1 two Renderer instances, ping-pong: slot 0 = GameUpdateLoop::m_renderer,
 //     slot 1 = g_second (allocated at install, freed at uninstall);
@@ -90,16 +95,17 @@
 #include "Component/EnvironmentDescription.h"
 #include "Player/Tool.h"
 #include "ext/registry.h"
-#include "ext/cpu/roster.h"      // Cpu::RenderThread (block CPULIMIT)
-#include "ext/cpu/topology.h"    // Cpu::Get().physical
+#include "platform/common/cpu/roster.h"      // Cpu::RenderThread (block CPULIMIT)
+#include "platform/common/cpu/topology.h"    // Cpu::Get().physical
 #include "ext/eye_camera/eye_camera.h"
 #include "ext/sharp_ui/sharp_ui.h"
-#include "ext/ambient_occlusion/ao.h"   // AOCORE: the AO arm, recorded into the packet
+#include "ext/ambient_occlusion/ambient_occlusion.h"   // AOCORE: the AO arm, recorded into the packet
 #include "options.h"
 #include "renderdoc_integration.h"
 #include "scene_watch.h"
 #include "stress_harness.h"   // g_verifyOn / StressHarness_Verify, the pipe draw brackets
 
+namespace Ext {
 namespace RenderPipe {
 namespace {
 
@@ -289,7 +295,7 @@ void MainHalf(::Engine::MainLoop& loop, GameUpdateLoop& g, Graphics::Renderer& r
     // Step 12: which UI draw.
     p.sharpUi = Ext::Ext().sharp_ui;
     // Step 7's ext.ambient_occlusion arm (GameUpdateLoop::Draw), as a value for pass 2.
-    p.aoOn = AmbientOcclusion::Enabled() && AmbientOcclusion::BuildFrame(*g.m_playerController, p.ao);
+    p.aoOn = Ext::AmbientOcclusion::Enabled() && Ext::AmbientOcclusion::BuildFrame(*g.m_playerController, p.ao);
 
     StressHarness_PipeMainEnd();   // [STRESS] draw main ms
 }
@@ -300,10 +306,12 @@ void MainHalf(::Engine::MainLoop& loop, GameUpdateLoop& g, Graphics::Renderer& r
 struct EngineOps {
     ::Engine::MainLoop& loop;
     Video::Context*     ctx;
-    bool                threaded;          // on the render thread: Finish is split (finish_split.h)
+    Handoff*            handoff;           // non-null: the render thread (Finish split, the fence released)
     int64_t             frameStartTicks;   // MainLoop::_frameStartTicks for FrameUpdateTime
+    bool                check  = false;    // COMPPROF=4: hash the frame at the release
     bool                failed = false;
     int32_t             hr     = 0;        // threaded: FinishPresent's result (0 = presented)
+    uint64_t            post   = 0;        // the RenderPipe shadow's hash at the release
 
     void FrameTailTime(const Packet& p) {
         ctx->_time.x = p.frameTime;
@@ -382,7 +390,7 @@ struct EngineOps {
                                  (static_cast<long long>(r._frameIndex) << 32) |
                                      static_cast<long long>(static_cast<uint32_t>(ctx->_frameIndex)));
         }
-        RenderPipe::Pass2(*p.renderer, *ctx, p.aoOn ? &p.ao : nullptr);
+        Ext::RenderPipe::Pass2(*p.renderer, *ctx, p.aoOn ? &p.ao : nullptr);
     }
     void SaveLoadDraw(const Packet& p) {
         if (p.saveLoad != nullptr)
@@ -402,7 +410,7 @@ struct EngineOps {
     }
     void UIDraw(const Packet& p) {
         if (p.sharpUi)
-            SharpUI::Draw(*p.game->m_userInterface, *ctx);
+            Ext::SharpUI::Draw(*p.game->m_userInterface, *ctx);
         else
             p.game->m_userInterface->Draw(*ctx);
     }
@@ -412,6 +420,13 @@ struct EngineOps {
             ::Engine::MainLoop::PostDrawCallback e = loop._postDraw._data[i];
             e._func(*loop._context, e._context);
         }
+    }
+    // RENDERPIPE_FENCE: the last read of the packet's Renderer and sun (the
+    // RenderPipe shadow's post hash), then the fence lets the steps run. Nothing
+    // below reads sim, scene, UI or Renderer state.
+    void Released(const Packet& p) {
+        if (check) post = HashFrame(*p.renderer, p.game->m_sunLight);
+        if (handoff != nullptr) handoff->Release();
     }
     void EndCommands() { loop._context->_contextData->EndCommands(); }
     void FrameUpdateTime() {
@@ -423,7 +438,7 @@ struct EngineOps {
     }
     void IncFrameIndex() { ++ctx->_frameIndex; }
     void Finish() {
-        if (threaded)
+        if (handoff != nullptr)
             hr = FinishPresent(*ctx);          // Present + Unlock; a loss is only reported
         else
             ctx->_contextData->Finish();       // the faithful slot: Present + the inline recovery
@@ -451,15 +466,16 @@ struct EngineHost {
         next.renderer        = r;
         next.frameTime       = time;
         next.frameStartTicks = loop->_frameStartTicks;   // this Frame's start (threaded FrameUpdateTime)
-        RenderPipe::MainHalf(*loop, g, *r, alpha, plan.renderIdle, verify, next);
+        Ext::RenderPipe::MainHalf(*loop, g, *r, alpha, plan.renderIdle, verify, next);
         if (verify) {
             next.hash   = HashFrame(*r, g.m_sunLight);
             next.hashed = true;
         }
     }
 
-    // The EMITTING thread: the render thread (threaded) or the main thread.
-    EmitResult Emit(const Packet& p, bool threaded) {
+    // The EMITTING thread: the render thread (handoff non-null) or the main thread.
+    EmitResult Emit(const Packet& p, Handoff* handoff) {
+        const bool threaded = handoff != nullptr;
         EmitResult res;
         Video::Context* const ctx = loop->_context;   // only the main thread's recovery replaces it, at a join
         const bool check = g_verifyOn != 0 && p.hashed;
@@ -470,8 +486,9 @@ struct EngineHost {
         const int64_t start = threaded ? p.frameStartTicks : loop->_frameStartTicks;
 
         StressHarness_PipeEmitBegin();
-        EngineOps ops{ *loop, ctx, threaded, start };
-        RenderPipe::Emit(ops, p);
+        EngineOps ops{ *loop, ctx, handoff, start };
+        ops.check = check;
+        Ext::RenderPipe::Emit(ops, p);
         StressHarness_PipeEmitEnd();
 
         res.failed = ops.failed;
@@ -484,7 +501,7 @@ struct EngineHost {
         }
         if (check) {
             const bool kept = !res.failed && !res.lost;
-            const uint64_t post = kept ? HashFrame(*p.renderer, p.game->m_sunLight) : p.hash;
+            const uint64_t post = kept ? ops.post : p.hash;   // hashed at the release (EngineOps::Released)
             const bool same = pre == p.hash && post == p.hash;
             StressHarness_Verify("RenderPipe", same, (pre != p.hash ? 1 : 0) | (post != p.hash ? 2 : 0));
         }
@@ -505,7 +522,7 @@ struct EngineHost {
         if (verify) IdemCamera(*next.game->m_playerController);
     }
 
-    void FaithfulTail() { RenderPipe::FaithfulTail(*loop, alpha, time); }
+    void FaithfulTail() { Ext::RenderPipe::FaithfulTail(*loop, alpha, time); }
 };
 
 EngineHost          g_host;
@@ -536,10 +553,10 @@ TailInputs Inputs(::Engine::MainLoop& loop, GameUpdateLoop* g) {
         in.paintTerrain = g->m_imageCapture->terrainImage == nullptr;
         in.screenshot   = g->m_quickSavePressed != 0 || g->m_quickLoadPressed != 0;
     }
-    // EyeCamera::Active() reads the game loop's tool manager and UI: only inside the built
+    // Ext::EyeCamera::Active() reads the game loop's tool manager and UI: only inside the built
     // game (2026-10-14: called from the menu loop at boot, it crashed every
     // eye_camera + render_pipe run; the menu loop is never pipelined anyway).
-    in.eyeCamera = in.gameLoop && Ext::Ext().eye_camera && EyeCamera::Active();
+    in.eyeCamera = in.gameLoop && Ext::Ext().eye_camera && Ext::EyeCamera::Active();
     const char* cap = Opt().captureIngame;   // BANISHED_CAPTURE_INGAME counts sequential frames
     in.diagnostic = cap != nullptr && cap[0] != '\0';
     return in;
@@ -618,3 +635,4 @@ bool Threaded() { return g_handoff != nullptr; }
 Counters TakeWindow() { return g_driver.TakeWindow(); }
 
 }  // namespace RenderPipe
+}  // namespace Ext

@@ -10,7 +10,7 @@
 D=build/erosion_bench
 B=tools/erosion_bench
 mkdir -p "$D"
-FL="-std=gnu++17 -fexceptions -fno-strict-aliasing -fno-lifetime-dse -O2 -DNDEBUG -w -Isrc/game -Isrc/engine -Isrc/render/dx11 -Isrc/app -Isrc/diag -Isrc/platform/common -Isrc"
+FL="-std=gnu++17 -fexceptions -fno-strict-aliasing -fno-lifetime-dse -O2 -DNDEBUG -w -Isrc/game -Isrc/engine -Isrc/render/common -Isrc/render/dx11 -Isrc/app -Isrc/diag -Isrc/platform/common -Isrc"
 g++ $FL -c -o "$D/erosion.o" src/game/Game/worldgen_f390_erosion.cpp || exit 1
 g++ $FL -c -o "$D/bench.o" "$B/bench.cpp" || exit 1
 g++ $FL -c -o "$D/pf.o" src/engine/system/parallel_for.cpp || exit 1

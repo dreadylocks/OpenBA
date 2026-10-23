@@ -1,24 +1,24 @@
 // GCC PORT (AOSPIKE): the DXBC table that replaces ASSAODX11.cpp's D3DCompile. The headers are
-// written by tools/ao_shaders.py (fxc /Fh, one `const BYTE g_ao_<entry>[]` each).
+// written by tools/ao_shaders.py (fxc /Fh, one `const uint8_t g_ao_<entry>[]` each).
 #include "assao_gcc_compat.h"
 
-#include "../shaders/VSMain.h"
-#include "../shaders/PSPrepareDepths.h"
-#include "../shaders/PSPrepareDepthsAndNormals.h"
-#include "../shaders/PSPrepareDepthsHalf.h"
-#include "../shaders/PSPrepareDepthsAndNormalsHalf.h"
-#include "../shaders/PSPrepareDepthMip1.h"
-#include "../shaders/PSPrepareDepthMip2.h"
-#include "../shaders/PSPrepareDepthMip3.h"
-#include "../shaders/PSGenerateQ0.h"
-#include "../shaders/PSGenerateQ1.h"
-#include "../shaders/PSGenerateQ2.h"
-#include "../shaders/PSSmartBlur.h"
-#include "../shaders/PSSmartBlurWide.h"
-#include "../shaders/PSNonSmartBlur.h"
-#include "../shaders/PSApply.h"
-#include "../shaders/PSNonSmartApply.h"
-#include "../shaders/PSNonSmartHalfApply.h"
+#include "ao/shaders/VSMain.h"
+#include "ao/shaders/PSPrepareDepths.h"
+#include "ao/shaders/PSPrepareDepthsAndNormals.h"
+#include "ao/shaders/PSPrepareDepthsHalf.h"
+#include "ao/shaders/PSPrepareDepthsAndNormalsHalf.h"
+#include "ao/shaders/PSPrepareDepthMip1.h"
+#include "ao/shaders/PSPrepareDepthMip2.h"
+#include "ao/shaders/PSPrepareDepthMip3.h"
+#include "ao/shaders/PSGenerateQ0.h"
+#include "ao/shaders/PSGenerateQ1.h"
+#include "ao/shaders/PSGenerateQ2.h"
+#include "ao/shaders/PSSmartBlur.h"
+#include "ao/shaders/PSSmartBlurWide.h"
+#include "ao/shaders/PSNonSmartBlur.h"
+#include "ao/shaders/PSApply.h"
+#include "ao/shaders/PSNonSmartApply.h"
+#include "ao/shaders/PSNonSmartHalfApply.h"
 
 #ifndef _MSC_VER
 // MinGW-w64's d3d11.h DECLARES these texture constructors but never defines them (link error

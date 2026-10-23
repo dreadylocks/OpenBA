@@ -61,6 +61,7 @@ struct Fixes {
     bool tavern_counter = true;   // docs/retail_bugs.md §3
     bool start_barn_height = true;   // docs/retail_bugs.md §4
     bool ui_scale_layout   = true;   // docs/retail_bugs.md §5 (engine seam UI::UserInterface::_extFixScaleLayout)
+    bool rock_seat         = true;   // docs/retail_bugs.md §7, src/ext/rock_seat/ (docs/extensions/handins/ROCKSEAT.md): render only
 };
 
 // One bool per registered extension (settings key `ext.<id>`). Each extension
@@ -69,25 +70,33 @@ struct Fixes {
 // whose defaultOn (class A ON) is what a fresh settings.cfg gets.
 struct Extensions {
     bool eye_camera = false;   // class A: src/ext/eye_camera/ (docs/extensions/handins/EYECAM.md)
+    bool no_fog = false;       // class A: src/ext/no_fog/ (docs/extensions/handins/NOFOG.md)
+    bool better_camera = false; // class B: src/ext/better_camera/ (docs/extensions/handins/BETTERCAM.md): zoom range 6 .. 200 + steady tilt
+    bool high_limits = false;   // class B: src/ext/high_limits/ (docs/extensions/handins/HIGHLIMITS.md)
     bool sharp_ui   = false;   // class A: src/ext/sharp_ui/ (docs/extensions/handins/SHARPUI.md)
     bool fast_paths = false;   // class B: src/ext/fast_paths/ (docs/extensions/handins/FASTPATHS.md)
     bool path_workers = false; // class B: src/ext/path_workers/ (docs/extensions/handins/PATHWORKERS.md)
-    bool render_culling = false; // class A: src/ext/perfx/ (docs/extensions/handins/PERFXEXT.md)
-    bool anim_batch     = false; // class B: src/ext/perfx/ (docs/extensions/handins/PERFXEXT.md)
+    bool render_culling = false; // class A: src/ext/render_culling/ (docs/extensions/handins/PERFXEXT.md)
+    bool anim_batch     = false; // class B: src/ext/anim_batch/ (docs/extensions/handins/PERFXEXT.md)
     bool draw_gather    = false; // class A: src/ext/draw_gather/ (docs/extensions/handins/DRAWGATHER.md)
+    bool draw_batch     = false; // class A: src/ext/draw_batch/ (docs/extensions/handins/DRAWBATCH.md)
     bool walk_batch     = false; // class A: src/ext/walk_batch/ (docs/extensions/handins/WALKBATCH.md)
-    bool walk_batch_grid = false; // class B: src/ext/walk_batch/ (docs/extensions/handins/WALKGRID.md)
+    bool walk_batch_grid = false; // class B: src/ext/walk_batch_grid/ (docs/extensions/handins/WALKGRID.md)
     bool render_pipe    = false; // class A: src/ext/render_pipe/ (docs/extensions/handins/RENDERPIPE0.md)
-    bool gather_threads = false; // class A: src/ext/draw_gather/ (docs/extensions/handins/CULLPAR.md); needs draw_gather
+    bool gather_threads = false; // class A: src/ext/gather_threads/ (docs/extensions/handins/CULLPAR.md); needs draw_gather
     bool quick_screens  = false; // class A: src/ext/quick_screens/ (docs/extensions/handins/SPLASH.md)
     bool ambient_occlusion = false; // class A: src/ext/ambient_occlusion/ (docs/extensions/AO.md)
-    bool max_shadow_res = false; // class A: the Graphics::SunLight seam (docs/extensions/handins/FAA-SHADOW.md)
+    bool max_shadow_res = false; // class A: src/ext/max_shadow_res/ (the Enhanced tab row) + the Graphics::SunLight seam (docs/extensions/handins/FAA-SHADOW.md)
     bool seamless_loops = false; // class A, next start: src/ext/seamless_loops/ (docs/extensions/handins/SEAMLESS.md)
     bool better_trees = false; // class A: src/ext/better_trees/ (docs/extensions/handins/BETTER-TREES.md): smooth leaf edges + stable tree shading + edge dapple
+    // class C: src/ext/restricted_foods/ (docs/extensions/handins/RESTRICTEDFOODS.md); the foods checked on the
+    // Foods page are not eaten
+    bool restricted_foods = false;
     bool spread_warmth = false; // class B: src/ext/spread_warmth/ (docs/extensions/handins/HITCH_PFBURST.md)
-    bool async_save_compress = false; // class A: the IO::CompressedStream seam (docs/extensions/handins/HITCH_SAVE.md)
+    bool async_save_compress = false; // class A: src/ext/async_save_compress/, seam IO::CompressedStream::_extAsyncCompress (docs/extensions/handins/HITCH_SAVE.md)
     bool drain_split = false; // class B: src/ext/drain_split/ (docs/extensions/handins/HITCH_DRAINSPLIT.md)
     bool background_save = false; // class A: src/ext/background_save/ (docs/extensions/handins/HITCH_SAVESNAP.md)
+    bool terrain_batch = false; // class A: src/ext/terrain_batch/, seam WorldGeometry::_extTerrainBatch (docs/extensions/handins/TERRAINBATCH.md)
     bool neighbour = false; // class C: src/ext/neighbour/ (docs/fork/NEIGHBOUR_TOWNS.md): two towns, one relay
 #ifdef BANISHED_UNIT_TEST
     // tests/unit/ext_registry_test.cpp only: one extension per class, so the
@@ -112,6 +121,7 @@ struct Values {
     int32_t ao_opacity = 20;    // ext.ao_opacity  0..30 percent (owner ambient_occlusion): the apply's strength; the user's look 2026-10-14: 20 is the max that reads well, 30 the ceiling
     int32_t foliage_aa_mode = 2; // ext.foliage_aa_mode 1..2 (owner better_trees): 1 smooth edges, 2 + distance fill (FOLIAGE_AA.md §1 ruling 4)
     int32_t max_shadow_size = 4096; // ext.max_shadow_size 4096 | 8192 (owner max_shadow_res): the sun map at High (FAA-SHADOW2)
+    int32_t rock_seat_mode = 2; // ext.rock_seat_mode 1..2 (owner fix rock_seat): 1 sink to the lowest ground under the rock, 2 tilt to the slope (the default, ROCKSEAT.md)
 };
 
 // All three together: what the tables' `slot` accessors index.
@@ -260,6 +270,14 @@ void LockForGame(const void* owner);
 // values are untouched (the next game starts from them again). Returns false
 // and changes nothing when an id is not a registered class B / C extension.
 bool LockForGameWithSet(const void* owner, const std::vector<std::string>& ids);
+// An in-game B / C change the player confirmed (ExtensionsDialog::ReloadGame). The reload's
+// save-restore writes the running game's set into the manifest, but the reloaded game must
+// start with the new request. KeepRequestOnNextLock marks the next LockForGame as that reload;
+// LockKeepsRequest() is true while the lock it took is held, and the load arm
+// (ExtSave_ReadTail) then keeps the request instead of locking to the save's set. Any other
+// lock, Install or the owner's unlock clears it.
+void KeepRequestOnNextLock();
+bool LockKeepsRequest();
 void UnlockForGame(const void* owner);
 bool Locked();
 // Advances on every Install, LockForGame, LockForGameWithSet (success) and UnlockForGame (by its
@@ -271,7 +289,7 @@ uint32_t LockEpoch();
 bool EntryLocked(const Entry& e);
 
 // ---------------------------------------------------------------------------
-// EXT SEAM (block SAVETAIL): the save's mod list
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/SAVETAIL.md, EXTSAVE.md): the save's mod list, every active class B / C extension as a pseudo-mod, at save write
 // ---------------------------------------------------------------------------
 // Every ACTIVE class B / C extension, as the pseudo-mod the save must carry
 // (DESIGN.md §2 as amended by SAVETAIL, main 1a180d42f): ModInfo name = the

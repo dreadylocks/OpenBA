@@ -443,6 +443,15 @@ bool ContextData::BeginCommands() {
 
     // DeviceData+0x28 (typed ID3D11DeviceContext* by B5 DEV-A, D4).
     d3dContext = OwnerDeviceData(ctx)->d3dContext;
+
+    // NOT RETAIL: a resize ran ClearState(), which reset the topology to
+    // UNDEFINED behind the `topology` cache; drop the cache so the next draw
+    // sets it again. `pad14` (unused in retail) holds the generation seen.
+    const unsigned gen = Dx11ClearStateGeneration();
+    if (static_cast<unsigned>(pad14) != gen) {
+        pad14    = static_cast<int32_t>(gen);
+        topology = 0;
+    }
     return true;
 }
 

@@ -8,6 +8,7 @@
 
 #include "ext/registry.h"
 
+#include <string>
 #include <utility>
 
 namespace Ext {
@@ -27,55 +28,7 @@ uint32_t GetU32(const uint8_t* p) {
            (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
 }
 
-// A bounds-checked cursor over the body.
-struct Reader {
-    const uint8_t* p;
-    size_t         left;
-    bool U32(uint32_t& v) {
-        if (left < 4) return false;
-        v = GetU32(p); p += 4; left -= 4;
-        return true;
-    }
-    bool Bytes(size_t n, const uint8_t*& at) {
-        if (left < n) return false;
-        at = p; p += n; left -= n;
-        return true;
-    }
-};
-
-// The payload hooks (RegisterPayload). A handful of class C extensions at most:
-// a linear scan, filled at boot, read when a save is written or read.
-struct PayloadHooks {
-    std::string   id;
-    PayloadWriter writer = nullptr;
-    PayloadReader reader = nullptr;
-};
-std::vector<PayloadHooks>& Hooks() {
-    static std::vector<PayloadHooks> hooks;
-    return hooks;
-}
-const PayloadHooks* FindHooks(const std::string& id) {
-    for (const PayloadHooks& h : Hooks())
-        if (h.id == id) return &h;
-    return nullptr;
-}
-
 }  // namespace
-
-void RegisterPayload(const char* id, PayloadWriter writer, PayloadReader reader) {
-    if (id == nullptr) return;
-    for (PayloadHooks& h : Hooks()) {
-        if (h.id == id) { h.writer = writer; h.reader = reader; return; }
-    }
-    Hooks().push_back(PayloadHooks{id, writer, reader});
-}
-
-void DeliverPayloads(const std::vector<Record>& records) {
-    for (const Record& r : records) {
-        const PayloadHooks* h = FindHooks(r.id);
-        if (h != nullptr && h->reader != nullptr) h->reader(r.formatVersion, r.payload);
-    }
-}
 
 const char* StatusName(Status s) {
     switch (s) {
@@ -89,6 +42,7 @@ const char* StatusName(Status s) {
     case Status::NotLockedClass:     return "not a class B / C extension";
     case Status::NewerFormatVersion: return "format version newer than this build";
     case Status::DuplicateId:        return "extension named twice";
+    case Status::UnknownKind:        return "record kind this build does not have";
     }
     return "?";
 }
@@ -110,6 +64,8 @@ std::vector<uint8_t> Encode(const std::vector<Record>& records) {
     PutU32(out, kVersion);
     PutU32(out, static_cast<uint32_t>(records.size()));
     for (const Record& r : records) {
+        out.push_back(r.kind);
+        out.push_back(r.flags);
         PutU32(out, static_cast<uint32_t>(r.id.size()));
         out.insert(out.end(), r.id.begin(), r.id.end());
         PutU32(out, static_cast<uint32_t>(r.formatVersion));
@@ -142,7 +98,7 @@ Status Decode(const uint8_t* data, size_t size, std::vector<Record>& out) {
     if (static_cast<size_t>(bodyLength) != size - kTrailerBytes) return Status::Truncated;
     if (Crc32(data, bodyLength) != crc) return Status::BadChecksum;
 
-    Reader r{data, bodyLength};
+    Reader r(data, bodyLength);
     uint32_t m = 0, version = 0, count = 0;
     r.U32(m);
     r.U32(version);
@@ -153,6 +109,15 @@ Status Decode(const uint8_t* data, size_t size, std::vector<Record>& out) {
     std::vector<Record> records;
     for (uint32_t i = 0; i < count; ++i) {
         Record rec;
+        if (version >= 2) {
+            // the kind and flags bytes (version 1 has none: every record an extension's, must-understand)
+            const uint8_t* kf = nullptr;
+            if (!r.Bytes(2, kf)) {
+                return Status::Malformed;
+            }
+            rec.kind = kf[0];
+            rec.flags = kf[1];
+        }
         uint32_t idLength = 0;
         const uint8_t* idBytes = nullptr;
         if (!r.U32(idLength) || idLength == 0 || idLength > kMaxIdLength ||
@@ -202,14 +167,99 @@ std::vector<Record> ActiveRecords() {
         Record r;
         r.id = e.id;
         r.formatVersion = e.formatVersion;
-        if (const PayloadHooks* h = FindHooks(r.id))
-            if (h->writer != nullptr) r.payload = h->writer();
+        if (const StateCodec* c = FindCodec(e.id)) c->encode(r.payload);   // class B: no codec, empty payload
         out.push_back(std::move(r));
     }
     return out;
 }
 
-std::vector<uint8_t> EncodeActive() { return Encode(ActiveRecords()); }
+std::vector<Record> HostRecords() {
+    std::vector<Record> out;
+    for (int i = 0;; ++i) {
+        const HostCodec* h = HostCodecAt(i);
+        if (h == nullptr) {
+            break;
+        }
+        Record r;
+        r.kind = kKindHost;
+        r.flags = 0;   // presentation only: a build without this host drops it
+        r.id = h->id;
+        r.formatVersion = h->formatVersion;
+        h->encode(r.payload);
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+std::vector<uint8_t> EncodeActive() {
+    std::vector<Record> records = ActiveRecords();
+    if (records.empty()) {
+        return std::vector<uint8_t>();   // zero bytes: no host record without an extension record
+    }
+    std::vector<Record> hosts = HostRecords();
+    for (Record& h : hosts) {
+        records.push_back(std::move(h));
+    }
+    return Encode(records);
+}
+
+Status SplitKinds(const std::vector<Record>& all, std::vector<Record>& extensions, std::vector<Record>& hosts,
+                  std::vector<std::string>* dropped, std::string* offending) {
+    extensions.clear();
+    hosts.clear();
+    for (const Record& r : all) {
+        if (r.kind == kKindExtension) {
+            extensions.push_back(r);
+        } else if (r.kind == kKindHost) {
+            hosts.push_back(r);
+        } else if ((r.flags & kFlagMustUnderstand) != 0) {
+            if (offending != nullptr) {
+                *offending = r.id;
+            }
+            extensions.clear();
+            hosts.clear();
+            return Status::UnknownKind;
+        } else if (dropped != nullptr) {
+            dropped->push_back(r.id);
+        }
+    }
+    return Status::Ok;
+}
+
+void ApplyHostState(const std::vector<Record>& hosts, std::vector<std::string>* notes) {
+    for (const Record& r : hosts) {
+        const HostCodec* h = FindHostCodec(r.id.c_str());
+        std::string why;
+        if (h == nullptr) {
+            why = "no such host in this build";
+        } else if (r.formatVersion > h->formatVersion) {
+            why = "saved by a newer version of the host";
+        } else if (!h->decode(r.payload.data(), r.payload.size(), r.formatVersion)) {
+            why = "its payload did not decode";
+        }
+        if (why.empty()) {
+            continue;
+        }
+        if (h != nullptr) {
+            h->reset();
+        }
+        if (notes != nullptr) {
+            notes->push_back("host " + r.id + " (v" + std::to_string(r.formatVersion) + ") dropped: " + why);
+        }
+    }
+}
+
+bool ApplyState(const std::vector<Record>& records, std::string* offending) {
+    for (const Record& r : records) {
+        const StateCodec* c = FindCodec(r.id.c_str());
+        if (c == nullptr) continue;   // a class B row: the payload is empty
+        if (!c->decode(r.payload.data(), r.payload.size(), r.formatVersion)) {
+            if (offending != nullptr) *offending = r.id;
+            return false;
+        }
+    }
+    return true;
+}
 
 }  // namespace SaveTail
 }  // namespace Ext

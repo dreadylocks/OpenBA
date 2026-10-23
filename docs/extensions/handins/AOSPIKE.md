@@ -51,7 +51,7 @@ it easier to port").
 
 **Evidence.** `python -I tools/ao_shaders.py` (output above; `--check` compiles into a temp dir and
 writes nothing). It also compiles our own `src/render/dx11/ao/ao_depth_resolve.hlsl` (4 entries,
-3,298 bytes). Headers land in `src/render/dx11/ao/shaders/<entry>.h` (`fxc /Fh`, array
+3,298 bytes). Headers land in `src/render/common/ao/shaders/<entry>.h` (`fxc /Fh`, array
 `g_ao_<entry>`).
 
 **Changed.** New `tools/ao_shaders.py` (the one place the matrix lives). Python with `subprocess`

@@ -136,7 +136,7 @@ struct EntityList {
     // batched snapshot walk, run by GameUpdateLoop::Update on an intermediate sim iteration
     // while the extension is on.
     void UpdateWalkBatch(const System::Time* time);
-    // NOT RETAIL, ext.walk_batch_grid (class B; walk_batch.h): the same with the batched tick
+    // NOT RETAIL, ext.walk_batch_grid (class B; src/ext/walk_batch_grid/walk_batch_grid.h): the same with the batched tick
     // that skips CharacterGrid::Place.
     void UpdateWalkBatchGrid(const System::Time* time);
     void PreUpdate();                                 // 0x1400c3bd0
@@ -150,7 +150,7 @@ struct EntityList {
     void Shutdown();                                  // 0x1400c3d30 (body in Game/gameupdateloop_teardown.cpp)
 
 private:
-    // Update's body; kWalk (a WalkBatch::Walk) picks the snapshot walk's per-character tick
+    // Update's body; kWalk (a Ext::WalkBatch::Walk) picks the snapshot walk's per-character tick
     // (entitylist.cpp).
     template <int kWalk> void UpdateImpl(const System::Time* time);
     // The retail step-5 tail of Update (0x1400c4090), relocated to the top of the
@@ -176,5 +176,5 @@ static_assert(sizeof(EntityList) == 0xE8, "EntityList is 0xE8 bytes (MemAlloc(0x
 // post-ctor writer of a component's flag low word reaches. No retail counterpart.
 void EntityList_TickListInvalidate(const ComponentEntity* entity);
 // [PerfX TREE_SNAPSHOT] the walk snapshot is rebuilt at the next walk (the two mutation
-// sites in entitylist.cpp; PerfX::BeginFrame when the PERFXTBL side table gains a user).
+// sites in entitylist.cpp; Ext::RenderCulling::BeginFrame when the PERFXTBL side table gains a user).
 extern "C" void EntityList_MarkUpdateTreeDirty();

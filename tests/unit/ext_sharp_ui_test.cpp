@@ -29,15 +29,15 @@ UNIT_TEST(ext_sharp_ui_layout_is_exact) {
         for (int k : {1, 2, 3, 4}) {
             if (s.w % k != 0 || s.h % k != 0) continue;
             const float scale = 1.0f / static_cast<float>(k);
-            CHECK(SharpUI::LayoutExtent(s.w, scale) == s.w / k);
-            CHECK(SharpUI::LayoutExtent(s.h, scale) == s.h / k);
+            CHECK(Ext::SharpUI::LayoutExtent(s.w, scale) == s.w / k);
+            CHECK(Ext::SharpUI::LayoutExtent(s.h, scale) == s.h / k);
         }
     }
 }
 
 UNIT_TEST(ext_sharp_ui_choose_draw) {
-    using SharpUI::ChooseDraw;
-    SharpUI::DrawChoice d = ChooseDraw(0.5f, 2560, 1440);
+    using Ext::SharpUI::ChooseDraw;
+    Ext::SharpUI::DrawChoice d = ChooseDraw(0.5f, 2560, 1440);
     CHECK(d.layoutWidth == 1280 && d.layoutHeight == 720);
     CHECK(d.integer && d.integerRatio == 2 && d.snap && d.point);
     CHECK(Near(d.ratio, 2.0f));
@@ -111,7 +111,7 @@ UNIT_TEST(ext_sharp_ui_pixel_exact) {
 }
 
 UNIT_TEST(ext_sharp_ui_variant_set) {
-    using namespace SharpUI;
+    using namespace Ext::SharpUI;
     // The game's four fonts (the kit's Font/*.rsc _fontHeight).
     CHECK(VariantLow(14) == 9 && VariantHigh(14) == 19 && VariantStep(14) == 1);
     CHECK(VariantLow(18) == 12 && VariantHigh(18) == 24 && VariantStep(18) == 1);
@@ -129,7 +129,7 @@ UNIT_TEST(ext_sharp_ui_variant_set) {
 }
 
 UNIT_TEST(ext_sharp_ui_variant_pick) {
-    using SharpUI::PickVariantHeight;
+    using Ext::SharpUI::PickVariantHeight;
     // Slider 75% at 1080p: 1080 / 810 = 1.3333 px per unit.
     const float r75 = 1080.0f / 810.0f;
     CHECK(PickVariantHeight(24, r75) == 32);
@@ -154,13 +154,57 @@ UNIT_TEST(ext_sharp_ui_variant_pick) {
     CHECK(PickVariantHeight(24, 2.0f) == 24);
     CHECK(PickVariantHeight(24, 0.5f) == 24);
     CHECK(PickVariantHeight(24, 0.0f) == 24);
+    // ...and the swap-for-itself is only for a ratio near 1.
+    CHECK(Ext::SharpUI::NativePickFitsRatio(24, 1.0f));
+    CHECK(Ext::SharpUI::NativePickFitsRatio(24, 1.015f));
+    CHECK(!Ext::SharpUI::NativePickFitsRatio(24, 2.0f));
+    CHECK(!Ext::SharpUI::NativePickFitsRatio(14, 0.5f));
+    CHECK(!Ext::SharpUI::NativePickFitsRatio(24, 0.0f));
+
+    // Retina (density 2): the 2x ratio gets a 2x-height variant; 1x is untouched.
+    using Ext::SharpUI::PickRetinaVariantHeight;
+    CHECK(Ext::SharpUI::RetinaHigh(24) == 64 && Ext::SharpUI::RetinaHigh(14) == 37 && Ext::SharpUI::RetinaHigh(48) == 128);
+    CHECK(PickRetinaVariantHeight(24, 2.0f) == 48);
+    CHECK(PickRetinaVariantHeight(14, 2.0f) == 28);
+    CHECK(PickRetinaVariantHeight(18, 2.0f) == 36);
+    CHECK(PickRetinaVariantHeight(48, 2.0f) == 96);
+    CHECK(PickRetinaVariantHeight(24, 2.0f / 0.75f) == 64);      // slider 75% on Retina
+    CHECK(PickRetinaVariantHeight(24, 2.0f / 1.5f) == 32);       // slider 150%: the 1x range
+    CHECK(PickRetinaVariantHeight(24, 4.0f) == 24);              // beyond RetinaHigh: retail
+    CHECK(Ext::SharpUI::IsRetinaVariantHeight(24, 48) && !Ext::SharpUI::IsRetinaVariantHeight(24, 32));
+    CHECK(!Ext::SharpUI::IsRetinaVariantHeight(48, 97) && Ext::SharpUI::IsRetinaVariantHeight(48, 96));
+    // 1x is identical to PickVariantHeight over the whole slider range.
+    for (int base : {14, 18, 24, 48})
+        for (float ppu = 0.5f; ppu <= 1.5f; ppu += 0.0125f)
+            CHECK(PickRetinaVariantHeight(base, ppu) == PickVariantHeight(base, ppu) ||
+                  ppu > 4.0f / 3.0f);
+    for (int base : {14, 18, 24, 48})
+        for (float ppu = 0.5f; ppu <= 4.0f / 3.0f; ppu += 0.0125f)
+            CHECK(PickRetinaVariantHeight(base, ppu) == PickVariantHeight(base, ppu));
+
+    // Density 1 follows upstream's selection exactly: reference copy of upstream's flow.
+    for (int base = 12; base <= 64; ++base) {
+        for (int i = 0; i <= 700; ++i) {
+            const float ppu = 0.6667f + static_cast<float>(i) * (1.3333f - 0.6667f) / 700.0f;
+            const int upstream = PickVariantHeight(base, ppu);   // upstream: pick = PickVariantHeight
+            bool keep = true;
+            const int now = Ext::SharpUI::PickFontHeight(base, ppu, 1.0f, &keep);
+            CHECK(now == upstream);
+            CHECK(!keep);
+        }
+    }
+    {
+        bool keep = false;
+        CHECK(Ext::SharpUI::PickFontHeight(24, 2.0f, 2.0f, &keep) == 48 && !keep);
+        CHECK(Ext::SharpUI::PickFontHeight(24, 4.0f, 2.0f, &keep) == 24 && keep);
+    }
 
     char path[64];
-    CHECK(SharpUI::VariantFontPath("FontSmall", 19, path, sizeof path));
+    CHECK(Ext::SharpUI::VariantFontPath("FontSmall", 19, path, sizeof path));
     CHECK(std::strcmp(path, "Font/SharpFontSmall_19.rsc") == 0);
-    CHECK(SharpUI::VariantFontPath("Font", 32, path, sizeof path));
+    CHECK(Ext::SharpUI::VariantFontPath("Font", 32, path, sizeof path));
     CHECK(std::strcmp(path, "Font/SharpFont_32.rsc") == 0);
-    CHECK(!SharpUI::VariantFontPath("FontMedium", 24, path, 8));
+    CHECK(!Ext::SharpUI::VariantFontPath("FontMedium", 24, path, 8));
 }
 
 UNIT_TEST(ext_sharp_ui_glyph_place) {
@@ -172,11 +216,11 @@ UNIT_TEST(ext_sharp_ui_glyph_place) {
     // Advances: the base row (1, kern 1, post 10) steps the pen 12 units, the
     // variant row (2, kern 1, post 13) 16 pixels.
     const UI::SharpGlyphPlace g =
-        SharpUI::MakeGlyphPlace({1, 1, 10, -5}, {2, 1, 13, -7}, 13, 27, false);
+        Ext::SharpUI::MakeGlyphPlace({1, 1, 10, -5}, {2, 1, 13, -7}, 13, 27, false);
     CHECK(g.originX == -1 && g.originY == -5 && g.devX == 2 && g.devY == 7);
     CHECK(g.devW == 13 && g.devH == 27);
     CHECK(g.baseAdvance == 12 && g.devAdvance == 16 && !g.wordBreak);
-    CHECK(SharpUI::MakeGlyphPlace({0, 0, 5, 0}, {0, 0, 6, 0}, 1, 1, true).wordBreak);
+    CHECK(Ext::SharpUI::MakeGlyphPlace({0, 0, 5, 0}, {0, 0, 6, 0}, 1, 1, true).wordBreak);
 
     // At 1.3333 px per unit (1080p, slider 75%): the pen at 133.33 device px
     // rounds to 133, the baseline 66.67 to 67.
@@ -192,7 +236,7 @@ UNIT_TEST(ext_sharp_ui_glyph_place) {
 
     // At ratio 1 with the base glyph's own metrics as the "variant", the quad is
     // retail's quad: x1 = 101, y1 = 35, x2 = 111, y2 = 55.
-    const UI::SharpGlyphPlace same = SharpUI::MakeGlyphPlace({1, 0, 10, -5}, {1, 0, 10, -5}, 10, 20, false);
+    const UI::SharpGlyphPlace same = Ext::SharpUI::MakeGlyphPlace({1, 0, 10, -5}, {1, 0, 10, -5}, 10, 20, false);
     const UI::SharpQuad r = UI::PlaceGlyph(same, 101, 55, 1.0f, 1.0f, 1.0f, 1.0f);
     CHECK(Near(r.x1, 101.0f) && Near(r.y1, 35.0f) && Near(r.x2, 111.0f) && Near(r.y2, 55.0f));
 }
@@ -201,13 +245,13 @@ UNIT_TEST(ext_sharp_ui_glyph_place) {
 // held within kSharpRunTolerance of retail's fractional pen; a space, a
 // baseline change or a pen the layout did not advance to starts a new run.
 UNIT_TEST(ext_sharp_ui_word_run) {
-    using SharpUI::GlyphMetrics;
+    using Ext::SharpUI::GlyphMetrics;
     // 'H' of the 24 px Font: (1, kern 1, post 11), 11 wide: the pen steps 13.
     // Its 26 px variant: (1, 1, 12), 12 wide: the pen steps 14 pixels, where
     // retail's scaled step is 13 * 26 / 24 = 14.083.
     const float px = 26.0f / 24.0f;
-    const UI::SharpGlyphPlace H = SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 12, 0}, 12, 15, false);
-    const UI::SharpGlyphPlace space = SharpUI::MakeGlyphPlace({0, 0, 5, 0}, {0, 0, 5, 0}, 1, 1, true);
+    const UI::SharpGlyphPlace H = Ext::SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 12, 0}, 12, 15, false);
+    const UI::SharpGlyphPlace space = Ext::SharpUI::MakeGlyphPlace({0, 0, 5, 0}, {0, 0, 5, 0}, 1, 1, true);
 
     // "HHHHHHHH": the layout's x1 = pen + 1, pens 0, 13, 26, ...
     UI::SharpRun run;
@@ -226,7 +270,7 @@ UNIT_TEST(ext_sharp_ui_word_run) {
 
     // An over-wide variant (steps 15 for 14.083) is nudged back a pixel as soon
     // as it is more than the tolerance ahead: 15, 30 -> 29 (1.83 ahead), ...
-    const UI::SharpGlyphPlace wide = SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 13, 0}, 12, 15, false);
+    const UI::SharpGlyphPlace wide = Ext::SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 13, 0}, 12, 15, false);
     UI::SharpRun w;
     CHECK(UI::SharpRunPen(w, wide, 1, 50, 0, px) == 0.0f);
     CHECK(UI::SharpRunPen(w, wide, 14, 50, 0, px) == 15.0f);
@@ -248,7 +292,7 @@ UNIT_TEST(ext_sharp_ui_word_run) {
     CHECK(UI::SharpRunPen(b, H, 213, 51, 0, px) == UI::SnapDevice(212, 0, px)); // run ended
 
     // At ratio 1 with the font as its own variant the pen is retail's, exactly.
-    const UI::SharpGlyphPlace self = SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 11, 0}, 11, 15, false);
+    const UI::SharpGlyphPlace self = Ext::SharpUI::MakeGlyphPlace({1, 1, 11, 0}, {1, 1, 11, 0}, 11, 15, false);
     UI::SharpRun one;
     for (int i = 0; i < 30; ++i)
         CHECK(UI::SharpRunPen(one, self, 13 * i + 1, 50, 0, 1.0f) == 13.0f * i);
@@ -277,7 +321,7 @@ UNIT_TEST(ext_sharp_ui_find_swap) {
 }
 
 UNIT_TEST(ext_sharp_ui_twin_path) {
-    using SharpUI::Twin2xPath;
+    using Ext::SharpUI::Twin2xPath;
     char out[128];
     CHECK(Twin2xPath("Dialog/SpriteSheet.rsc", out, sizeof out));
     CHECK(std::strcmp(out, "Dialog/SpriteSheet2x.rsc") == 0);
@@ -288,9 +332,9 @@ UNIT_TEST(ext_sharp_ui_twin_path) {
     CHECK(!Twin2xPath("Texture/x.png", out, sizeof out));
     CHECK(!Twin2xPath(nullptr, out, sizeof out));
     CHECK(!Twin2xPath("Dialog/SpriteSheet.rsc", out, 8));
-    CHECK(SharpUI::WantTwin2x(1.3333f, 1.3333f));
-    CHECK(!SharpUI::WantTwin2x(1.0f, 1.0f));
-    CHECK(!SharpUI::WantTwin2x(0.6667f, 0.6667f));
+    CHECK(Ext::SharpUI::WantTwin2x(1.3333f, 1.3333f));
+    CHECK(!Ext::SharpUI::WantTwin2x(1.0f, 1.0f));
+    CHECK(!Ext::SharpUI::WantTwin2x(0.6667f, 0.6667f));
 }
 
 // A dialog that moves (a panel following its entity while the camera turns)

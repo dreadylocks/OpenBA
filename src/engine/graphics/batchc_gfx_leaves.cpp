@@ -686,8 +686,17 @@ void SpotLight::CreateTargets() {
 // `_vertexProgram` / `_pixelProgram`) and each program's `_byteCode._size`
 // (+0x48) -- and the Context setters by name. The POD bridge is gone.
 // ---------------------------------------------------------------------------
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/DRAWBATCH.md): null unless ext.draw_batch is on.
+Renderer::ExtDrawItemListFn Renderer::_extDrawItemList = nullptr;
+
 void Renderer::DrawItemList(Video::Context& context, int groupIndex, int listIndex,
                             int shaderIndex) const {
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DRAWBATCH.md): ext.draw_batch replaces the whole
+    // list walk (consecutive decals / roads / smoke emitters merged into one draw); off, retail's body.
+    if (_extDrawItemList != nullptr) {
+        _extDrawItemList(*this, context, groupIndex, listIndex, shaderIndex);
+        return;
+    }
     const RendererDrawGroup& group = _drawGroups._data[groupIndex];
     const Camera& cam = group._cullCamera;
 

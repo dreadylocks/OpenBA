@@ -94,9 +94,11 @@
 #include "Game/WorldGeometry.h"   // WorldGeometry::Serialize (0x1400b04d0)
 #include "Game/PlayerController.h"   // PlayerController::Serialize (0x1400988c0)
 #include "rt_crt.h"   // rtcrt::StrICmp, retail's _stricmp (D.4 Q9)
-#include "system/Error.h"   // EXT SEAM: a bad B / C manifest is retail's fatal error box
-#include "ext/registry.h"   // EXT SEAM: the B / C lock from the save (NOT RETAIL)
-#include "ext/savetail.h"   // EXT SEAM: the block-1 tail manifest (NOT RETAIL)
+#include "system/Error.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): a bad B / C manifest is retail's fatal error box
+#include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): the B / C lock from the save
+#include "ext/savetail.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): the block-1 tail manifest
+#include "ext/async_save_compress/async_save_compress.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress, the save arm
+#include "ext/rock_seat/rock_seat.h"   // FIX rock_seat (NOT RETAIL, docs/extensions/handins/ROCKSEAT.md): the post-load seat
 #include <string>
 #include <vector>
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
@@ -731,6 +733,11 @@ void GameUpdateLoop::SerializeAllBody(IO::Stream& stream, SerializeScope& scope)
     LoadTime::Stamp("ser.postload", serDir);   // NOT RETAIL: print-only
     EntityList_PostLoad_c4730(m_entityList, &stream);
     m_citizenList->PostLoad();   // 0x14008f580 (0x140095d44: [RDI+0xf0], no test)
+    // FIX rock_seat (NOT RETAIL, docs/extensions/handins/ROCKSEAT.md): the entities were read before
+    // the terrain, so the rocks' meshes are seated now. Render only: nothing serialized changes.
+    if (!IsSaving(&stream) && Ext::Fix().rock_seat) {
+        Ext::RockSeat::SeatAll(m_entityList);
+    }
 
     intFactory->ClearPersistState();   // 0x140095d50-0x140095d5a: no test (row 1247)
     if (refIdMemo) {   // NOT RETAIL (HITCH_SAVE): close the memo window
@@ -758,7 +765,7 @@ void GameUpdateLoop::SerializeAllBody(IO::Stream& stream, SerializeScope& scope)
 // never reads (row 1247). The door's reader-less
 // RegisterExeAddr(0x1400959c0) row went with it.
 // ------------------------------------------------------------
-// EXT SEAM (NOT RETAIL): the class B / C manifest at block 1's tail
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md, SAVETAIL.md §1 / §4): the class B / C manifest at block 1's tail
 // ------------------------------------------------------------
 // docs/extensions/DESIGN.md §2, handins/SAVETAIL.md §1 / §4, handins/EXTSAVE.md.
 // SAVE: after the last faithful Serialize, the active B / C set as a small
@@ -769,6 +776,10 @@ void GameUpdateLoop::SerializeAllBody(IO::Stream& stream, SerializeScope& scope)
 // B / C set to exactly the saved one (Ext::LockForGameWithSet), replacing the
 // requested set GameUpdateLoop::Load locked at entry. No tail: that lock
 // stands. Bytes that are not a manifest (no magic): logged and ignored.
+// The reload of an in-game B / C change (Ext::LockKeepsRequest, set by
+// ExtensionsDialog::ReloadGame) keeps the request lock too: its manifest is the
+// set the player just changed. The records of extensions turned off are dropped
+// (the missing-mod paradigm); one turned on starts with empty state.
 // A manifest this build cannot honour -- an unknown id, a formatVersion newer
 // than ours, a damaged chunk -- is FATAL through retail's own error box
 // (System::Error::SetText(.., true) + Display: the box, then exit), because the
@@ -810,6 +821,17 @@ static void ExtSave_ReadTail(GameUpdateLoop* owner, IO::CompressedMemoryStream* 
         return;
     }
     std::string offending;
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTHOSTS.md): extension records are the lock set; host
+    // records (a shared surface's per-town state, presentation only) never reach Validate or the lock.
+    std::vector<Ext::SaveTail::Record> hosts;
+    std::vector<std::string> droppedKinds;
+    if (st == Ext::SaveTail::Status::Ok) {
+        const std::vector<Ext::SaveTail::Record> all = records;
+        st = Ext::SaveTail::SplitKinds(all, records, hosts, &droppedKinds, &offending);
+    }
+    for (const std::string& id : droppedKinds) {
+        fprintf(stderr, "[ExtSave] record %s of a kind this build does not have -- dropped\n", id.c_str());
+    }
     if (st == Ext::SaveTail::Status::Ok)
         st = Ext::SaveTail::Validate(records, &offending);
     if (st != Ext::SaveTail::Status::Ok) {
@@ -820,21 +842,54 @@ static void ExtSave_ReadTail(GameUpdateLoop* owner, IO::CompressedMemoryStream* 
         ExtSave_Fatal(text);
         return;
     }
-    std::vector<std::string> ids;
-    for (const Ext::SaveTail::Record& r : records) ids.push_back(r.id);
-    if (!Ext::LockForGameWithSet(owner, ids)) {   // Validate checked every id: unreachable
-        ExtSave_Fatal("This save was made with game extensions this version cannot load.");
-        return;
+    if (Ext::LockKeepsRequest()) {
+        // An in-game B / C change: the request lock from Load stands. Only the records of
+        // extensions still active for this game are kept.
+        const size_t saved = records.size();
+        size_t kept = 0;
+        for (size_t i = 0; i < saved; ++i) {
+            const Ext::Entry* e = Ext::FindEntry(records[i].id.c_str());
+            if (e != nullptr && Ext::Active(*e)) {
+                records[kept] = records[i];
+                ++kept;
+            }
+        }
+        records.resize(kept);
+        fprintf(stderr, "[ExtSave] manifest: an in-game B / C change, the request stands; %u of %u saved "
+                "record(s) kept:", static_cast<unsigned>(kept), static_cast<unsigned>(saved));
+    } else {
+        std::vector<std::string> ids;
+        for (const Ext::SaveTail::Record& r : records) ids.push_back(r.id);
+        if (!Ext::LockForGameWithSet(owner, ids)) {   // Validate checked every id: unreachable
+            ExtSave_Fatal("This save was made with game extensions this version cannot load.");
+            return;
+        }
+        fprintf(stderr, "[ExtSave] manifest: %u B / C extension(s) locked for this game from the save:",
+                static_cast<unsigned>(records.size()));
     }
-    fprintf(stderr, "[ExtSave] manifest: %u B / C extension(s) locked for this game from the save:",
-            static_cast<unsigned>(records.size()));
     for (const Ext::SaveTail::Record& r : records)
         fprintf(stderr, " %s(v%d, %u payload bytes)", r.id.c_str(), r.formatVersion,
                 static_cast<unsigned>(r.payload.size()));
     fprintf(stderr, "\n");
     fflush(stderr);
-    // Class C state: each record's payload to its extension (savetail.h RegisterPayload).
-    Ext::SaveTail::DeliverPayloads(records);
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): class C, each record's payload
+    // is that extension's per-town state (savetail.h, StateCodec). After the whole block above, so it
+    // runs on both routes.
+    if (!Ext::SaveTail::ApplyState(records, &offending)) {
+        ExtSave_Fatal("This save's ext:" + offending + " state is damaged.");
+        return;
+    }
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTHOSTS.md): the host records; never fatal (a refused
+    // one leaves that host at its defaults). PlayerToolManager::Startup reopens the window from it.
+    std::vector<std::string> notes;
+    Ext::SaveTail::ApplyHostState(hosts, &notes);
+    for (const std::string& n : notes) {
+        fprintf(stderr, "[ExtSave] %s\n", n.c_str());
+    }
+    if (!hosts.empty()) {
+        fprintf(stderr, "[ExtSave] %u host record(s) read\n", static_cast<unsigned>(hosts.size()));
+    }
+    fflush(stderr);
 }
 
 // NOT RETAIL (ext.background_save, docs/extensions/handins/HITCH_SAVESNAP.md): the save arm
@@ -844,7 +899,7 @@ void GameUpdateLoop_SaveRestoreBody(GameUpdateLoop* self, IO::CompressedMemorySt
                                     Save::SavedState* savedState,
                                     GameUpdateLoop::SerializeScope& scope) {
     self->SerializeAllBody(*cms, scope);
-    ExtSave_WriteTail(cms);         // EXT SEAM (NOT RETAIL): zero bytes when no B / C is active
+    ExtSave_WriteTail(cms);         // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): zero bytes when no B / C is active
     cms->IO::CompressedMemoryStream::Close();
     savedState->Store(cms->GetMemoryStream());
 }
@@ -866,21 +921,22 @@ void GameUpdateLoop::SaveRestore(bool save, Save::SavedState* savedState) {
         LoadTime::Stamp("ser.open");   // NOT RETAIL: print-only
         cms->Open();
         SerializeAll(*cms);
-        ExtSave_ReadTail(this, cms);    // EXT SEAM (NOT RETAIL): see above
+        ExtSave_ReadTail(this, cms);    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): the manifest's load arm, see above
         cms->IO::CompressedMemoryStream::Close();
     } else {
         const double t0 = g_pfProfOn ? LoadTime::NowMs() : 0.0;   // NOT RETAIL: the HITCH_SAVE line
         cms->Create();
-        // EXT SEAM (NOT RETAIL): ext.async_save_compress, class A -- the windows are compressed
-        // on a worker, in retail's order, while the state is written (io/compressed_stream_async.cpp).
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress,
+        // class A -- the windows are compressed on a worker, in retail's order, while the state
+        // is written (src/ext/async_save_compress/).
         const bool async = Ext::Ext().async_save_compress;
-        if (async) cms->ExtBeginAsyncCompress();
+        if (async) Ext::AsyncSaveCompress::Begin(*cms);
         SerializeAll(*cms);
-        ExtSave_WriteTail(cms);         // EXT SEAM (NOT RETAIL): zero bytes when no B / C is active
+        ExtSave_WriteTail(cms);         // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): zero bytes when no B / C is active
         cms->IO::CompressedMemoryStream::Close();
         savedState->Store(cms->GetMemoryStream());
         if (g_pfProfOn) {   // NOT RETAIL (HITCH_SAVE): one line per save in a stress run
-            const IO::CompressedStream::ExtAsyncStats as = IO::CompressedStream::ExtAsyncLastStats();
+            const Ext::AsyncSaveCompress::Stats as = Ext::AsyncSaveCompress::LastStats();
             ErrLine("[Stress::save] SaveRestore %.2f ms stored=%u async=%d jobs=%d copies=%d "
                     "maxQueued=%d mainCopy=%.2f fullWait=%.2f endWait=%.2f worker=%.2f ms\n",
                     LoadTime::NowMs() - t0, savedState->_size, async ? 1 : 0,
@@ -906,7 +962,7 @@ void GameUpdateLoop::SaveRestore(bool save, Save::SavedState* savedState) {
 // so a difference can be diffed offline.
 // ENDGAME B.3.9 IO (W2): the ?Read / ?GetSize@CompressedStream doors it
 // resolved by name are the class's own members now, called non-virtually.
-// EXT SEAM note (EXTSAVE.md): this reads the WHOLE image, GetSize() bytes, so a
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): a note -- this reads the WHOLE image, GetSize() bytes, so a
 // B / C manifest at the tail is part of the compare. Faithful profile: no tail
 // on either side, the compare is retail's. With a B / C extension active, a
 // save WITHOUT a manifest (Gate.sav) resaves WITH one: an expected DIFF.

@@ -23,7 +23,7 @@
 //                         NewFrame, the panels, Render) and the DX11 draw into the back
 //                         buffer, right before Present. The main thread under the direct
 //                         path (ContextData::Finish), the render thread under
-//                         ext.render_pipe (RenderPipe::FinishPresent). Only this thread
+//                         ext.render_pipe (Ext::RenderPipe::FinishPresent). Only this thread
 //                         touches the ImGui context once it exists.
 //   main, render idle     OnDeviceShutdown (DeviceData::Shutdown): the DX11 backend lets go
 //                         of the device; it re-inits on the next open frame (device lost,

@@ -24,6 +24,17 @@
 // PRESENTS and reports the failure (EmitResult::recover); the recovery runs
 // here, on the main thread, at the join (Host::Recover), where retail runs it
 // (inside MainLoop::Draw, on the main thread, with nothing else in flight).
+//
+// RENDERPIPE_FENCE (docs/extensions/handins/RENDERPIPE_FENCE.md): THE FENCE,
+// threaded, waits only until the emit RELEASED itself (packet.h: after the
+// post-draw callbacks); the emit's tail (EndCommands, _frameUpdateTime, the frame
+// index, Present) may still run while the steps do. That tail is SETTLED (waited
+// idle, its result read, a lost device recovered) at the next Frame tail before
+// anything that needs the render thread idle: a drain / faithful frame, or, in a
+// pipelined frame, after the main half and before the publish (the main half
+// overlaps the tail too; it never reads the context's frame index while a tail
+// may run -- fix 2 takes it from the held packet). A tail that lost the device
+// discards the packet gathered meanwhile, as the hand-off does.
 // ============================================================================
 #pragma once
 
@@ -35,6 +46,7 @@
 #include "ext/render_pipe/pipe_state.h"
 #include "ext/render_pipe/render_pipe.h"   // Counters
 
+namespace Ext {
 namespace RenderPipe {
 
 // What one emit reports to the join.
@@ -52,9 +64,10 @@ inline int64_t NowUs() {
 }
 
 // Host (main thread unless stated):
-//   int32_t    ContextFrameIndex();               Context::_frameIndex (only read when nothing is pending)
+//   int32_t    ContextFrameIndex();               Context::_frameIndex (only read when nothing is in flight)
 //   void       MainHalf(Packet& next, const TailPlan& plan);   steps 1-6 + pass 1 into next.slot
-//   EmitResult Emit(const Packet& p, bool threaded);           the EMITTING thread: render (threaded) or main
+//   EmitResult Emit(const Packet& p, Handoff* h);              the EMITTING thread: render (h non-null:
+//                                                              threaded, the emit calls h->Release()) or main
 //   void       Recover(const EmitResult& r);                   the device-lost recovery half (threaded only)
 //   void       AfterJoin(const Packet& next);                  render idle, a skipping frame kept: the camera shadow
 //   void       FaithfulTail();                                 MainLoop::Frame's own two tail statements
@@ -71,6 +84,7 @@ public:
         _held      = Packet{};
         _result    = EmitResult{};
         _publishUs = 0;
+        _tail      = false;
     }
 
     Counters TakeWindow() {
@@ -79,18 +93,27 @@ public:
         return c;
     }
 
-    // kExtBeforeSteps: THE FENCE. The sim never runs with a packet in flight.
+    // kExtBeforeSteps: THE FENCE. The sim never runs with a packet in flight
+    // up to its post-draw callbacks (threaded: its tail may still run).
     void BeforeSteps(Host& host) {
         if (_state.DrainBeforeSteps(true)) {
             ++_counters.drainStep;
-            Join(host, false);
+            if (_handoff != nullptr)
+                FenceReleased(host);
+            else
+                Join(host, false);
         }
     }
+
+    // True between a fence that let the steps overlap an emit's tail and the
+    // settle of that tail (the unit test reads it).
+    bool TailInFlight() const { return _tail; }
 
     // kExtFrameTail. True: the extension was switched off -- uninstall now (the
     // render thread is idle and joined).
     bool Tail(Host& host, const TailInputs& in) {
         const TailPlan plan = _state.PlanTail(in);
+        if (!plan.pipelined) SettleTail(host, false);   // the faithful tail needs the render thread idle
         if (plan.drain) {
             ++_counters.drainOther;
             Join(host, false);
@@ -108,7 +131,7 @@ public:
     // The render thread's body: park, emit, report, until Stop.
     void WorkerLoop(Host& host) {
         while (_handoff->WaitJob()) {
-            _result = host.Emit(_held, true);
+            _result = host.Emit(_held, _handoff);
             _result.presentUs = NowUs();
             _handoff->Done();
         }
@@ -121,27 +144,75 @@ private:
     bool Join(Host& host, bool handoff) {
         EmitResult res;
         if (_handoff != nullptr) {
-            const int64_t t0 = NowUs();
-            const bool waited = _handoff->WaitIdle();   // ACQUIRE: the emit's writes are visible
-            if (waited) {
-                ++_counters.waits;
-                if (!handoff) ++_counters.waitsFence;
-                _counters.waitUs += static_cast<uint64_t>(NowUs() - t0);
-            }
-            res = _result;
-            if (res.presentUs >= _publishUs) {
-                _counters.latencyUs += static_cast<uint64_t>(res.presentUs - _publishUs);
-                ++_counters.latencyN;
-            }
+            WaitIdle(handoff);   // ACQUIRE: the emit's writes are visible
+            res = Collect();
         } else {
-            res = host.Emit(_held, false);
+            res = host.Emit(_held, nullptr);
         }
         _state.Drained();
         ++_counters.emits;
+        Recover(host, res);
+        return !res.failed && !res.lost;
+    }
+
+    // Threaded: block until the render thread is idle, counted.
+    void WaitIdle(bool handoff) {
+        const int64_t t0 = NowUs();
+        const bool waited = _handoff->WaitIdle();
+        if (waited) {
+            ++_counters.waits;
+            if (!handoff) ++_counters.waitsFence;
+            _counters.waitUs += static_cast<uint64_t>(NowUs() - t0);
+        }
+    }
+
+    // Threaded, the render thread idle: the joined emit's result and its latency.
+    EmitResult Collect() {
+        const EmitResult res = _result;
+        if (res.presentUs >= _publishUs) {
+            _counters.latencyUs += static_cast<uint64_t>(res.presentUs - _publishUs);
+            ++_counters.latencyN;
+        }
+        return res;
+    }
+
+    void Recover(Host& host, const EmitResult& res) {
         if (res.recover) {
             ++_counters.recoveries;
             host.Recover(res);   // the MAIN thread, the render thread idle
         }
+    }
+
+    // THE FENCE, threaded: wait until the pending emit released itself. When
+    // its tail is done already (or it never released: a failed BeginCommands,
+    // released by Done with busy cleared first) this is the full join; else
+    // the tail is left in flight and settled at the next Frame tail.
+    void FenceReleased(Host& host) {
+        const int64_t t0 = NowUs();
+        const bool waited = _handoff->WaitReleased();   // ACQUIRE: the emit's writes up to PostDraw
+        if (waited) {
+            ++_counters.waits;
+            ++_counters.waitsFence;
+            _counters.waitUs += static_cast<uint64_t>(NowUs() - t0);
+        }
+        _state.Drained();
+        ++_counters.emits;
+        if (_handoff->Busy()) {
+            _tail = true;
+            return;
+        }
+        Recover(host, Collect());
+    }
+
+    // The tail a fence left in flight: wait idle, read its result, recover a
+    // lost device. False: it lost the device (or failed) -- what was gathered
+    // since must not be emitted.
+    bool SettleTail(Host& host, bool handoff) {
+        if (!_tail) return true;
+        _tail = false;
+        WaitIdle(handoff);
+        const EmitResult res = Collect();
+        Recover(host, res);
         return !res.failed && !res.lost;
     }
 
@@ -150,16 +221,19 @@ private:
         Packet next;
         next.slot = plan.pass1Slot;
         // Fix 2: the index the context holds when this packet's pass 2 runs. With
-        // a packet pending, that packet's emit increments it first; the context is
-        // read only when nothing is in flight (the render thread may be writing it).
-        next.frameIndex = pending ? _held.frameIndex + 1 : host.ContextFrameIndex();
-        next.modelIndex = plan.renderIdle ? host.ContextFrameIndex() : _held.modelIndex + 1;
+        // a packet pending, or the tail of one a fence released still in flight,
+        // that emit increments it first; the context is read only when nothing is
+        // in flight (the render thread may be writing it). RENDERPIPE_FENCE: both
+        // indices come from the held copy whenever a tail may run.
+        const bool inFlight = pending || _tail;
+        next.frameIndex = inFlight ? _held.frameIndex + 1 : host.ContextFrameIndex();
+        next.modelIndex = inFlight ? _held.modelIndex + 1 : host.ContextFrameIndex();
 
-        host.MainHalf(next, plan);   // threaded: concurrent with the emit of _held
+        host.MainHalf(next, plan);   // threaded: concurrent with the emit of _held (or its tail)
         ++_counters.pipelined;
         if (plan.renderIdle) ++_counters.idleWrites; else ++_counters.idleSkips;
 
-        bool keep = true;
+        bool keep = SettleTail(host, true);     // a fenced tail: wait for it before N+1 goes
         if (pending) keep = Join(host, true);   // THE HAND-OFF: wait for N, then N+1 goes
         if (!keep) {
             _state.Discard(next.slot);
@@ -177,6 +251,7 @@ private:
 
     PipeState  _state;
     Packet     _held;              // the pending packet (the render thread reads it while busy)
+    bool       _tail      = false; // RENDERPIPE_FENCE: a fence released the emit, its tail may run
     EmitResult _result;            // written by the emitting thread before Done
     Handoff*   _handoff   = nullptr;
     int64_t    _publishUs = 0;
@@ -184,3 +259,4 @@ private:
 };
 
 }  // namespace RenderPipe
+}  // namespace Ext

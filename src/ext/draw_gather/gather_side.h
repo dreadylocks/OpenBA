@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace Ext {
 namespace DrawGather {
 
 // One node's record. `box` is a ::Box's bits: min x, y, z, max x, y, z.
@@ -144,3 +145,4 @@ struct Counters {
 };
 
 }  // namespace DrawGather
+}  // namespace Ext

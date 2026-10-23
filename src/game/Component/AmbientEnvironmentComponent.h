@@ -30,8 +30,9 @@ class AmbientEnvironmentComponent final : public Component {
 public:
     AmbientEnvironmentComponent();                                // 0x1400438d0
 
-    // no own work
-    ~AmbientEnvironmentComponent() override = default;            // [0] 0x140002170
+    // Retail's dtor does no own work; ours also drops this component's AMBMEMO entry
+    // (NOT RETAIL: the side table in ambientenvironmentcomponent.cpp, no field here).
+    ~AmbientEnvironmentComponent() override;                      // [0] 0x140002170
     void Persist(IO::Stream& stream) override;                          // [3] 0x1400437e0
     void Update(const System::Time* time) override;                             // [9] 0x140043690
 
@@ -39,6 +40,10 @@ public:
     // The region/position half of 0x1400436a0: the grid region the biome is
     // sampled over, the region's centre, pushed onto the sibling emitter.
     void InitRegion(int gridX, int gridY, int width, int height);
+
+    // AMBMEMO (NOT RETAIL): one stderr line with the memo's hit / miss / shadow totals
+    // at world teardown, when the stress profile ran (docs/extensions/handins/AMBMEMO.md).
+    static void ReportMemo();
 
     // PUBLIC while the ported bodies read them (B38 decision 1). Persist
     // 0x1400437e0: Vector3::Serialize(+0x38), then four ints +0x28..+0x34.

@@ -55,7 +55,7 @@
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
 #include "options.h"
 #include "Game/terrain_sidecar.h"
-#include "ext/perfx/perfx.h"
+#include "ext/render_culling/render_culling.h"
 #include "Object/factory_registration.h"   // ::Object::GetTypeIdByName
 #include <cstdint>
 #include <cstdio>
@@ -269,7 +269,7 @@ static inline float* InlScalarMax(const float* a, float* ret, const float* b) {
 
 // PerfX's deferred pick push (ext.render_culling, PICK_CULL) builds its transform copy through
 // this: the Math::Transform copy constructor, which the exe slot 0x140151418 names.
-static Math::Transform* PickXfCtorMember(void* xformOut, const Math::Transform* transformIn) {   // LEFT: raw placement storage: PerfX's PickXfCtor_t (src/ext/perfx/perfx.h) hands a uint8_t[136] buffer; a Math::Transform local there would add its zeroing ctor's stores
+static Math::Transform* PickXfCtorMember(void* xformOut, const Math::Transform* transformIn) {   // LEFT: raw placement storage: PerfX's PickXfCtor_t (src/ext/render_culling/render_culling.h) hands a uint8_t[136] buffer; a Math::Transform local there would add its zeroing ctor's stores
     return ::new (xformOut) Math::Transform(*transformIn);
 }
 // PerfX's deferred pick push (ext.render_culling, PICK_CULL) replays through this: the
@@ -431,7 +431,7 @@ extern "C" void CharacterComponent_MoveTick_1094c0(CharacterComponent* self, con
             !MoveTickTraceOn()) {
             ++StillPath::g_fastTicks;
             if (!g_verifyOn) {
-                if (!PerfX::GeomXfLastOnly())
+                if (!Ext::RenderCulling::GeomXfLastOnly())
                     model->meshInstance.SetTransform(model->transform);   // Graphics::Geometry::SetTransform
                 GameUpdateLoop::_singleton->m_characterGrid->Place(self->characterIndex);
                 return;
@@ -587,8 +587,8 @@ extern "C" void CharacterComponent_MoveTick_1094c0(CharacterComponent* self, con
     bool pushGeom = true;   // was a Geometry::SetTransform door-readiness test
     if (pushGeom) {
         if (rootOnly != 0) {
-            if (PerfX::GeomXfLastOnly()) pushGeom = false;
-        } else if (PerfX::GeomCull() && PerfX::ModelCulled(model)) {
+            if (Ext::RenderCulling::GeomXfLastOnly()) pushGeom = false;
+        } else if (Ext::RenderCulling::GeomCull() && Ext::RenderCulling::ModelCulled(model)) {
             pushGeom = false;
         }
     }
@@ -645,7 +645,7 @@ extern "C" void CharacterComponent_MoveTick_1094c0(CharacterComponent* self, con
             Picking::Scene* pickScene = GameUpdateLoop::_singleton->m_pickingScene;   // +0x70
             // [ext.render_culling PICK_CULL -- NON-RETAIL] an off-screen citizen cannot be clicked, so
             // its pick-scene transform is deferred; PerfX replays it if the sim pauses.
-            if (!PerfX::PickCullSkip(model, pickScene, pickId,
+            if (!Ext::RenderCulling::PickCullSkip(model, pickScene, pickId,
                                      &PickXfCtorMember,
                                      &PickSetXfMember)) {
                 pickScene->SetTransform(pickId, *localXf);

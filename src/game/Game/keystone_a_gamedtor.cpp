@@ -76,7 +76,7 @@
 #include "system/Thread.h"     // ENDGAME B.3.4b System caller batch (CriticalSection/Thread)
 #include "application/Application.h"   // ENDGAME B.3.7 callers (K2)
 #include "Game/exe_bodies.h"
-#include "ext/path_workers/path_workers.h"   // EXT SEAM: PathWorkers::ReleaseFor (NOT RETAIL)
+#include "ext/path_workers/path_workers.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): Ext::PathWorkers::ReleaseFor
 
 namespace {
 
@@ -190,10 +190,10 @@ void RegionGraph::ReleaseStorage() {
 // 1:1 port of BuildStructure_impl_6720 (FUN_1400a6720).
 // ============================================================================
 PathfinderThread::~PathfinderThread() {
-    // EXT SEAM (NOT RETAIL): ext.path_workers -- its pool finishes its jobs and
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): ext.path_workers -- its pool finishes its jobs and
     // its threads are joined before the results and the cell bytes go
     // (src/ext/path_workers/path_workers.h).
-    if (PathWorkers::Engaged()) PathWorkers::ReleaseFor(this);
+    if (Ext::PathWorkers::Engaged()) Ext::PathWorkers::ReleaseFor(this);
 
     // 0x14001dac0: each result's path (+0x08), then the result array.
     for (int32_t i = 0; i < results.size; ++i) {

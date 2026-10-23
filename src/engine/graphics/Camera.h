@@ -656,11 +656,19 @@ public:
     int                       GetShaderDetail() const;                       // 0x180018060
     void                      SetShaderDetail(int detail);                   // 0x180018050
 
-    // NOT RETAIL -- EXT SEAM (ext.ambient_occlusion; renderer_ext_ao.h has the
+    // EXT SEAM (NOT RETAIL, docs/extensions/AO.md): ext.ambient_occlusion's frame (renderer_ext_ao.h has the
     // contract). Null always, except for the span of the game's own Draw call
     // (GameUpdateLoop::Draw step 7 arms and disarms it). A static: the 0x50-byte
     // layout below is unchanged.
     static const ExtAoFrame* _extAo;
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DRAWBATCH.md): ext.draw_batch's replacement of
+    // DrawItemList (src/ext/draw_batch/). Null by default: DrawItemList tests it once per call (one
+    // test per pass list, never per item) and otherwise runs retail's body unchanged. Set and
+    // cleared only by Ext::DrawBatch::Sync, at boot and on the Extensions-dialog toggle.
+    using ExtDrawItemListFn = void (*)(const Renderer& renderer, Video::Context& context, int group,
+                                       int list, int shader);
+    static ExtDrawItemListFn _extDrawItemList;
 
 public:
     Collection::Array<RendererSceneEntry> _sceneGroups;  // +0x00  GetSceneGroup

@@ -110,6 +110,11 @@ public:
     void OnVideoError();                                              // 0x1400b0be0
     void OnVideoRestart();                                            // 0x1400b0c50
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): ext.terrain_batch's
+    // live bool, null by default (DESIGN.md hook rule 5) and under the faithful profile;
+    // registry_boot.cpp sets it. A static: the 0x230-byte layout is unchanged.
+    static const bool* _extTerrainBatch;
+
 
 public:
     int32_t  _gridSize;           // +0xC0  heightmap edge (cells)

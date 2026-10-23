@@ -136,6 +136,7 @@
 #include "platform_audio.h"   // Platform::AudioWaveFormat (Phase D.4 A2 census)
 #include "audio/xwma_decode.h"  // Audio::XwmaDecoder (Phase D.4 SDL-4 decode at load)
 #include "audio/audio_pcm.h"    // Audio::RewriteFormatAsPcm
+#include "audio/load_decode_batch.h"  // block SNDPAR: the decodes of one load, in parallel
 
 #include <atomic>
 #include <cstdio>
@@ -298,64 +299,123 @@ uint64_t PcmHash(const int16_t* pcm, size_t values) {
 #endif
 }  // namespace
 
-SoundBuffer::ExtLoopSeam SoundBuffer::_extLoopSeam = nullptr;   // EXT SEAM (SoundBuffer.h)
+SoundBuffer::ExtLoopSeam SoundBuffer::_extLoopSeam = nullptr;   // EXT SEAM (NOT RETAIL, docs/extensions/handins/SEAMLESS.md): ext.seamless_loops' loop hook, null by default (SoundBuffer.h)
 
-void SoundBuffer::DecodeAtLoad() {
-    _decodedXwma = DecodedXwma{0, 0};
-    if (_streamed) return;                        // the Stream worker decodes the music
-    auto* const fmt = reinterpret_cast<Platform::AudioWaveFormat*>(_format);  // CAST-OK: byte_io
-    if (fmt->formatTag != Platform::kAudioFormatXwma) return;
+// Block SNDPAR: the decode is split in two so that a load's buffers can decode in
+// parallel (src/engine/audio/load_decode_batch.h). DecodeXwmaJob is the pure half: it
+// reads the buffer's format, packets and seek table and writes only the job. FinishXwmaJob
+// is everything the one-piece body did after its decoder call, in the same order: the
+// counters, the loop seam, the packet free, the stores into `_data` / `_length` /
+// `_decodedXwma` / `_format`. Inline (no Scope open) the two run back to back, which is
+// the one-piece body; deferred, the batch runs the decodes on the pool and the finishes on
+// the loading thread in queue order, so the [SeamlessLoops] lines keep their order too.
+namespace {
 
-    const uint32_t packetCount = static_cast<uint32_t>(
-        static_cast<uint64_t>(static_cast<int64_t>(_wmaLength)) >> 2);
-    const uint32_t packetBytes = fmt->blockAlign;
-
-    // One decoder per call: buffers load on two threads; the decoder's shared
-    // tables are built under a real once-init (wmav2_decoder.h).
-    XwmaDecoder dec;
+struct XwmaJob {
     int16_t* pcm = nullptr;
-    size_t samples = 0;
+    size_t   samples = 0;
+    uint64_t total = 0;
+    uint32_t channels = 0;
+    uint32_t sampleRate = 0;
     uint16_t frameLength = 0;
-    if (dec.Open(_format, _data, _length > 0 ? static_cast<size_t>(_length) : 0u,
-                 _wmaData, packetCount)) {
+    bool     opened = false;
+};
+
+void DecodeXwmaJob(const SoundBuffer& buf, XwmaJob& job) {
+    const uint32_t packetCount = static_cast<uint32_t>(
+        static_cast<uint64_t>(static_cast<int64_t>(buf._wmaLength)) >> 2);
+
+    // One decoder per call: buffers load on two threads (and, deferred, on the pool);
+    // the decoder's shared tables are built under a real once-init (wmav2_decoder.h).
+    XwmaDecoder dec;
+    if (dec.Open(buf._format, buf._data, buf._length > 0 ? static_cast<size_t>(buf._length) : 0u,
+                 buf._wmaData, packetCount)) {
+        job.opened = true;
         // Sized by the table's total; the RETURNED count is the PCM's length: a
         // packet the decoder rejects yields nothing (Tornado.wav's last six,
         // handins/XWMA.md A4.4 and known_port_issues row 1276), so Failed() is
         // not fatal.
-        const uint64_t total = dec.TotalSamples();
-        const uint64_t bytes = total * dec.Channels() * 2u;
+        job.total = dec.TotalSamples();
+        const uint64_t bytes = job.total * dec.Channels() * 2u;
         if (bytes > 0) {
-            pcm = static_cast<int16_t*>(rtcoll::MemAlloc(bytes, 4));
-            samples = dec.DecodePackets(0, dec.PacketCount(), pcm, static_cast<size_t>(total));
+            job.pcm = static_cast<int16_t*>(rtcoll::MemAlloc(bytes, 4));
+            job.samples = dec.DecodePackets(0, dec.PacketCount(), job.pcm, static_cast<size_t>(job.total));
         }
-        if (samples < total) g_decodeShort.fetch_add(1, std::memory_order_relaxed);
-        // EXT SEAM (ext.seamless_loops, NOT RETAIL): a looping buffer's PCM may be rewritten in place
+        job.channels = dec.Channels();
+        job.sampleRate = dec.SampleRate();
+        job.frameLength = static_cast<uint16_t>(dec.FrameLength());
+    }
+}
+
+void FinishXwmaJob(SoundBuffer& buf, const XwmaJob& job) {
+    auto* const fmt = reinterpret_cast<Platform::AudioWaveFormat*>(buf._format);  // CAST-OK: byte_io
+    const uint32_t packetBytes = fmt->blockAlign;
+    int16_t* const pcm = job.pcm;
+    size_t samples = job.samples;
+    if (job.opened) {
+        if (samples < job.total) g_decodeShort.fetch_add(1, std::memory_order_relaxed);
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/SEAMLESS.md): ext.seamless_loops -- a looping buffer's PCM may be rewritten in place
         // and shortened. Null unless the row was on at boot; `_loopForever` was read by Serialize
         // before the payload, and PlayPlatform loops a buffer by that flag alone.
-        if (LoopSeamApplies(_extLoopSeam != nullptr, _loopForever, pcm, samples))
-            samples = _extLoopSeam(pcm, static_cast<uint32_t>(samples), dec.Channels(),
-                                   dec.SampleRate(), _string28._data);
-        frameLength = static_cast<uint16_t>(dec.FrameLength());
+        if (LoopSeamApplies(SoundBuffer::_extLoopSeam != nullptr, buf._loopForever, pcm, samples))
+            samples = SoundBuffer::_extLoopSeam(pcm, static_cast<uint32_t>(samples), job.channels,
+                                                job.sampleRate, buf._string28._data);
     } else {
         // Not mono / stereo WMA v2 or a short payload: no shipped sound. SDL
         // cannot play the packets, so the buffer becomes an empty PCM buffer.
         g_decodeRefused.fetch_add(1, std::memory_order_relaxed);
     }
 
-    g_decodedXwmaBytes.fetch_add(static_cast<uint64_t>(_length > 0 ? _length : 0),
+    g_decodedXwmaBytes.fetch_add(static_cast<uint64_t>(buf._length > 0 ? buf._length : 0),
                                  std::memory_order_relaxed);
-    MemFreeIfSet(_data);                          // the packets
-    _data   = reinterpret_cast<uint8_t*>(pcm);   // CAST-OK: byte_io (S16 PCM held as the buffer's bytes)
-    _length = static_cast<int32_t>(samples * 2u * fmt->channels);
-    g_decodedPcmBytes.fetch_add(static_cast<uint64_t>(_length), std::memory_order_relaxed);
+    MemFreeIfSet(buf._data);                      // the packets
+    buf._data   = reinterpret_cast<uint8_t*>(pcm);   // CAST-OK: byte_io (S16 PCM held as the buffer's bytes)
+    buf._length = static_cast<int32_t>(samples * 2u * fmt->channels);
+    g_decodedPcmBytes.fetch_add(static_cast<uint64_t>(buf._length), std::memory_order_relaxed);
 #ifndef BANISHED_STRIP_LOGS
     g_decodedPcmHash.fetch_add(PcmHash(pcm, samples * fmt->channels), std::memory_order_relaxed);
 #endif
     g_decodedBuffers.fetch_add(1, std::memory_order_relaxed);
 
-    _decodedXwma = DecodedXwma{static_cast<uint16_t>(packetBytes != 0 ? packetBytes : 1), frameLength};
+    buf._decodedXwma = SoundBuffer::DecodedXwma{static_cast<uint16_t>(packetBytes != 0 ? packetBytes : 1),
+                                                job.frameLength};
     RewriteFormatAsPcm(*fmt);
 }
+
+// The batch's two callbacks (LoadDecode::JobFn): the item is the SoundBuffer, the result
+// its XwmaJob, which the finish releases.
+void DecodeXwmaJobFn(void* item, void* result) {
+    DecodeXwmaJob(*static_cast<const SoundBuffer*>(item), *static_cast<XwmaJob*>(result));  // CAST-OK: user_data
+}
+void FinishXwmaJobFn(void* item, void* result) {
+    XwmaJob* const job = static_cast<XwmaJob*>(result);   // CAST-OK: user_data
+    FinishXwmaJob(*static_cast<SoundBuffer*>(item), *job);  // CAST-OK: user_data
+    delete job;
+}
+
+}  // namespace
+
+void SoundBuffer::DecodeAtLoad() {
+    _decodedXwma = DecodedXwma{0, 0};
+    if (_streamed) return;                        // the Stream worker decodes the music
+    const auto* const fmt = reinterpret_cast<const Platform::AudioWaveFormat*>(_format);  // CAST-OK: byte_io
+    if (fmt->formatTag != Platform::kAudioFormatXwma) return;
+
+    // Block SNDPAR: under an External::Load, queue it for the load's batch (the packet
+    // bytes are its cost: the decode time is about proportional to them).
+    if (LoadDecode::BatchOpen()) {
+        XwmaJob* const job = new XwmaJob();
+        if (LoadDecode::Defer(this, job, static_cast<uint64_t>(_length > 0 ? _length : 0),
+                              &DecodeXwmaJobFn, &FinishXwmaJobFn))
+            return;
+        delete job;
+    }
+    XwmaJob job;
+    DecodeXwmaJob(*this, job);
+    FinishXwmaJob(*this, job);
+}
+
+void SoundBuffer::EnsureDecodedAtLoad() const { LoadDecode::Await(this); }
 
 void DumpSoundBufferFormatCensus() {
     // Phase D.4 SDL-4: the decode-at-load total (the memory figure in the hand-in).
@@ -384,6 +444,7 @@ void DumpSoundBufferFormatCensus() {
 
 // [5] 0x1800e0480.
 bool SoundBuffer::Serialize(IO::Stream& streamv) {
+    EnsureDecodedAtLoad();                // block SNDPAR (not retail): no decode of this buffer in flight
     IO::Stream* stream = &streamv;
     IO::Serializer ser(*stream, 0);
 

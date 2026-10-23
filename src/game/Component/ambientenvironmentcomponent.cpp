@@ -58,6 +58,10 @@
 #include <cstdio>
 #include "Object/factory_registration.h"   // Object::GetTypeIdByName
 #include "system/MemoryAllocator.h"
+#include "Game/cell_stamp.h"   // AMBMEMO: the cell write clock
+#include "stress_harness.h"    // AMBMEMO: g_verifyOn / g_compProfOn / StressHarness_Verify
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -184,6 +188,99 @@ AmbientEnvironmentComponent::AmbientEnvironmentComponent()
 // (PerfX's AMBIENT_THROTTLE -- the scan re-run every 8th update per emitter -- is gone
 // since PERFXEXT, docs/extensions/handins/PERFXEXT.md §1: the slot sounds it chose late
 // are serialized by AmbientEmitterComponent::Persist, and its cache was never pruned.)
+//
+// AMBMEMO (NOT RETAIL bookkeeping, EXACT; docs/extensions/handins/AMBMEMO.md): the
+// dominant biome is a pure function of the region's cells (terrain type +0x29, and the
+// blocker +0x00 / else occupant +0x08 entity's description +0x28), the region rect and
+// the description's biome table. It is cached per component with CellStamp's clock
+// (Game/cell_stamp.h) at scan time; while no cell of the rect has been written since,
+// the scan is skipped and the cached argmax used. Everything else -- the histogram's
+// MemAlloc / MemFree, the crossfade, both SetSlot calls -- runs every tick as before, in
+// the same order with the same arguments. The side table is keyed by the component and
+// pruned in its destructor (no field in the 0x48-byte object). The idea was re-prompted
+// by the unbanished project's docs/PERFORMANCE.md (its ambience reweigh fix).
+namespace {
+
+struct AmbMemo {
+    const AmbientEnvironmentDescription* desc = nullptr;
+    const AmbientEnvironmentBiome* table = nullptr;
+    int count = 0;
+    int x = 0, y = 0, w = 0, h = 0;
+    uint64_t clock = 0;       // CellStamp::Now() right after the scan (0 = never scanned)
+    uint64_t histHash = 0;    // the shadow compares the whole histogram, not only the argmax
+    int dominant = 0;
+};
+// Never destroyed: a component torn down during static destruction still finds it.
+std::unordered_map<const AmbientEnvironmentComponent*, AmbMemo>& s_ambMemo =
+    *new std::unordered_map<const AmbientEnvironmentComponent*, AmbMemo>();
+long long s_ambHits = 0, s_ambMisses = 0, s_ambUncached = 0, s_ambVerified = 0, s_ambMismatch = 0;
+
+// Retail's per-cell loop (0x140043310), unchanged: credit the first biome whose terrain
+// mask has the cell's type bit and whose entity filter is absent / matches.
+void ScanRegion(const MapCell* cells, int gridWidth, int gridX, int gridY, int rw, int rh,
+                const AmbientEnvironmentBiome* table, int count, int* hist) {
+    for (int y = 0; y < rh; ++y) {
+        for (int x = 0; x < rw; ++x) {
+            intptr_t ci = (intptr_t)(gridY + y) * gridWidth + (gridX + x);
+            const MapCell* cell = cells + ci;
+            uint8_t bits = cell->terrainType;
+
+            // Cell's entity reference (cell+0x00, else cell+0x08).
+            ComponentEntity* ent = cell->blocker.Get();
+            if (!ent) ent = cell->occupant.Get();
+
+            for (int k = 0; k < count; ++k) {
+                const AmbientEnvironmentBiome* bt = &table[k];
+                uint32_t mask = bt->terrainMask;
+                if ((mask & (1u << (bits & 0x1f))) == 0) continue;
+                // Entity filter: no filter, or the cell entity matches bt+0x08.
+                ComponentDescription* filt = bt->entityFilter;
+                bool match = (ent == nullptr) || (filt == nullptr);
+                if (!match) {
+                    // ent+0x28 == filter target?
+                    match = (ent->_description == filt);
+                }
+                if (match) {
+                    hist[k] += bt->weight;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// Dominant biome = argmax(hist), the first maximum.
+int ArgMax(const int* hist, int count) {
+    int dominant = 0;
+    int best = hist[0];
+    for (int k = 1; k < count; ++k) {
+        if (hist[k] > best) { best = hist[k]; dominant = k; }
+    }
+    return dominant;
+}
+
+uint64_t HashHist(const int* hist, int count) {   // FNV-1a over the counts
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (int k = 0; k < count; ++k) { h ^= (uint32_t)hist[k]; h *= 0x100000001b3ull; }
+    return h;
+}
+
+}  // namespace
+
+static_assert(sizeof(MapCell) == CellStamp::kCellStride, "CellStamp's stride is the MapCell record");
+
+// [0] 0x140002170: retail's dtor does no own work. AMBMEMO drops the entry so a new
+// component at this address starts cold.
+AmbientEnvironmentComponent::~AmbientEnvironmentComponent() {
+    s_ambMemo.erase(this);
+}
+
+void AmbientEnvironmentComponent::ReportMemo() {
+    if (!g_compProfOn && !g_verifyOn) return;
+    if (!s_ambHits && !s_ambMisses && !s_ambUncached) return;
+    std::fprintf(stderr, "[AmbMemo] hits=%lld misses=%lld uncached=%lld verified=%lld mismatches=%lld\n",
+                 s_ambHits, s_ambMisses, s_ambUncached, s_ambVerified, s_ambMismatch);
+}
 
 void AmbientEnvironmentComponent::Update(const System::Time* /*time*/) {
 
@@ -212,47 +309,59 @@ void AmbientEnvironmentComponent::Update(const System::Time* /*time*/) {
     int rw    = regionWidth;
     int rh    = regionHeight;
 
+    // The histogram's MemAlloc / MemFree pair runs on every call, memo hit or not: the
+    // allocator's free lists stay exactly as retail leaves them.
     int* hist = static_cast<int*>(::System::MemoryAllocator::MemAlloc((uint64_t)count * 4, 4));
     if (!hist) return;
-    for (int i = 0; i < count; ++i) hist[i] = 0;
 
-    if (cells) {
-        for (int y = 0; y < rh; ++y) {
-            for (int x = 0; x < rw; ++x) {
-                intptr_t ci = (intptr_t)(gridY + y) * gridWidth + (gridX + x);
-                MapCell* cell = cells + ci;
-                uint8_t bits = cell->terrainType;
-
-                // Cell's entity reference (cell+0x00, else cell+0x08).
-                ComponentEntity* ent = cell->blocker.Get();
-                if (!ent) ent = cell->occupant.Get();
-
-                for (int k = 0; k < count; ++k) {
-                    AmbientEnvironmentBiome* bt = &table[k];
-                    uint32_t mask = bt->terrainMask;
-                    if ((mask & (1u << (bits & 0x1f))) == 0) continue;
-                    // Entity filter: no filter, or the cell entity matches bt+0x08.
-                    ComponentDescription* filt = bt->entityFilter;
-                    bool match = (ent == nullptr) || (filt == nullptr);
-                    if (!match) {
-                        // ent+0x28 == filter target?
-                        match = (ent->_description == filt);
-                    }
-                    if (match) {
-                        hist[k] += bt->weight;
-                        break;
-                    }
-                }
-            }
-        }
+    // AMBMEMO hit test: the rect must lie inside the grid (else the stamps cannot vouch
+    // for every cell the scan reads) and every non-cell input must be the cached one.
+    const uint64_t stamp = cells ? CellStamp::RectStamp(cells, gridWidth, gridX, gridY, rw, rh)
+                                 : CellStamp::kUncacheable;
+    AmbMemo* memo = nullptr;
+    if (stamp != CellStamp::kUncacheable) {
+        AmbMemo& m = s_ambMemo[this];
+        if (m.clock != 0 && stamp <= m.clock && m.desc == desc && m.table == table && m.count == count &&
+            m.x == gridX && m.y == gridY && m.w == rw && m.h == rh)
+            memo = &m;
     }
 
-    // Dominant biome = argmax(hist).
-    int dominant = 0;
-    {
-        int best = hist[0];
-        for (int k = 1; k < count; ++k) {
-            if (hist[k] > best) { best = hist[k]; dominant = k; }
+    int dominant;
+    if (memo) {
+        ++s_ambHits;
+        dominant = memo->dominant;
+        if (g_verifyOn) {
+            // COMPPROF=4 shadow: retail's scan on a scratch histogram, compared whole.
+            static std::vector<int> s_shadow;
+            s_shadow.assign((size_t)count, 0);
+            ScanRegion(cells, gridWidth, gridX, gridY, rw, rh, table, count, s_shadow.data());
+            const int d = ArgMax(s_shadow.data(), count);
+            const uint64_t hh = HashHist(s_shadow.data(), count);
+            const bool ok = d == dominant && hh == memo->histHash;
+            ++s_ambVerified;
+            StressHarness_Verify("AmbientMemo", ok,
+                                 ok ? 0 : ((long long)gridY * gridWidth + gridX) * 2 + (d != dominant ? 1 : 0));
+            if (!ok) {
+                ++s_ambMismatch;
+                dominant = d;   // the faithful answer drives the tick; one stale region counts once
+                memo->dominant = d;
+                memo->histHash = hh;
+            }
+        }
+    } else {
+        for (int i = 0; i < count; ++i) hist[i] = 0;
+        if (cells) ScanRegion(cells, gridWidth, gridX, gridY, rw, rh, table, count, hist);
+        dominant = ArgMax(hist, count);
+        if (stamp != CellStamp::kUncacheable) {
+            ++s_ambMisses;
+            AmbMemo& m = s_ambMemo[this];
+            m.desc = desc; m.table = table; m.count = count;
+            m.x = gridX; m.y = gridY; m.w = rw; m.h = rh;
+            m.clock = CellStamp::Now();   // no cell is written during the scan
+            m.histHash = HashHist(hist, count);
+            m.dominant = dominant;
+        } else {
+            ++s_ambUncached;
         }
     }
 

@@ -6,6 +6,16 @@ PostSim. **Result: two faithful speed-ups (byte-identical saves) and one class A
 save frame drops from 146 ms over to 84 ms over (faithful) and 54 ms over (extension on). The rest is
 retail's own work on the main thread. Not merged.
 
+(2026-10-20: moved to `src/ext/async_save_compress/` (namespace `Ext::AsyncSaveCompress`: `Begin`,
+`LastStats`), seam `IO::CompressedStream::_extAsyncCompress`, a null-by-default static
+`bool (*)(CompressedStream&, int32_t point, int32_t index, uint8_t* dst)` with three points
+(`kExtAsyncCompressWindow`, `kExtAsyncCopyQueued`, `kExtAsyncEnd`), set by `Begin` and cleared when
+the save ends. The engine's old members `ExtBeginAsyncCompress` / `ExtAsyncCompressWindow` /
+`ExtAsyncCopyQueued` / `ExtAsyncEnd` / `_extAsyncOwner` and `compressed_stream_async.cpp` are gone.
+Re-proved with §3's method: per-entry profile, row off vs on, `resavedCompressedHash`
+`d5fb0cce8335778a` on both legs, raw resave md5 `dbd72973...` on both, the on leg 724 jobs / 2
+seek-backs served from the queue; faithful gate PASS `4127020a2ae682eb`.)
+
 | Commit | What |
 |---|---|
 | `498c00344` perf | `ExternalFactory::GetReferenceId`: a per-save memo |

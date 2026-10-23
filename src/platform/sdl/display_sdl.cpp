@@ -25,6 +25,7 @@
 
 #include "platform_window.h"
 #include "display_geometry.h"
+#include "platform_window_hooks.h"
 #include "window_sdl_internal.h"
 
 #include <SDL3/SDL_properties.h>
@@ -44,12 +45,20 @@ constexpr uint32_t kShowMaximized = 3;   // SW_SHOWMAXIMIZED
 
 void Zero(Rect* r) { std::memset(r, 0, sizeof(*r)); }
 
-Rect FromSdl(const SDL_Rect& s) {
+// COORDINATE UNITS. SDL positions and sizes windows and displays in POINTS; the engine
+// works in PIXELS (the back buffer is GetWindowSizeInPixels). The two differ by the
+// window's pixel density (PixelDensity below), which is 1.0 for every window created
+// without SDL_WINDOW_HIGH_PIXEL_DENSITY, so everything here is then the identity
+// (display_geometry.h: PointsToPixels...). Every coordinate that crosses this seam is
+// converted: SDL values * density going out to the engine, engine values / density going
+// into SDL.
+
+Rect FromSdl(const SDL_Rect& s, float density) {
     Rect r;
-    r.left   = s.x;
-    r.top    = s.y;
-    r.right  = s.x + s.w;
-    r.bottom = s.y + s.h;
+    r.left   = PointsToPixels(static_cast<float>(s.x), density);
+    r.top    = PointsToPixels(static_cast<float>(s.y), density);
+    r.right  = PointsToPixels(static_cast<float>(s.x + s.w), density);
+    r.bottom = PointsToPixels(static_cast<float>(s.y + s.h), density);
     return r;
 }
 
@@ -70,6 +79,16 @@ FrameBorders CurrentFrame(SDL_Window* w) {
     }
     if (g_haveFrame[framed]) return g_frame[framed];
     return FrameBorders{0, 0, 0, 0};
+}
+
+// The frame in engine pixels (SDL measures it in points).
+FrameBorders CurrentFramePixels(SDL_Window* w) {
+    const FrameBorders f = CurrentFrame(w);
+    const float d = PixelDensity(w);
+    return FrameBorders{PointsToPixels(static_cast<float>(f.top), d),
+                        PointsToPixels(static_cast<float>(f.left), d),
+                        PointsToPixels(static_cast<float>(f.bottom), d),
+                        PointsToPixels(static_cast<float>(f.right), d)};
 }
 
 }  // namespace
@@ -96,11 +115,12 @@ void GetWindowRect(void* /*window*/, Rect* out) {
     int x = 0, y = 0, cw = 0, ch = 0;
     SDL_GetWindowPosition(w, &x, &y);
     SDL_GetWindowSizeInPixels(w, &cw, &ch);
-    out->left   = x;
-    out->top    = y;
-    out->right  = x + cw;
-    out->bottom = y + ch;
-    ClientRectToOuter(out, CurrentFrame(w));
+    const float d = PixelDensity(w);
+    out->left   = PointsToPixels(static_cast<float>(x), d);
+    out->top    = PointsToPixels(static_cast<float>(y), d);
+    out->right  = out->left + cw;
+    out->bottom = out->top + ch;
+    ClientRectToOuter(out, CurrentFramePixels(w));
 }
 
 // ClientToScreen: SDL's window position IS the client area's screen origin.
@@ -109,8 +129,11 @@ void ClientToScreen(void* /*window*/, Point* inOut) {
     if (w == nullptr) return;
     int x = 0, y = 0;
     SDL_GetWindowPosition(w, &x, &y);
-    inOut->x += x;
-    inOut->y += y;
+    // The client point arrives in pixels, the window origin is in points: the result is in
+    // pixels (the engine's screen unit; see the banner above).
+    const float d = PixelDensity(w);
+    inOut->x += PointsToPixels(static_cast<float>(x), d);
+    inOut->y += PointsToPixels(static_cast<float>(y), d);
 }
 
 uint32_t GetShowCmd(void* /*window*/) {
@@ -159,8 +182,16 @@ void SetWindowPos(void* /*window*/, ZOrder insertAfter, int32_t x, int32_t y,
     SDL_Window* w = Sdl::GameWindow();
     if (w == nullptr) return;
     if (insertAfter == ZOrder::NoTopmost) SDL_SetWindowAlwaysOnTop(w, false);
+    // The engine's outer rect is in pixels; SDL takes points, and the frame it reports is
+    // already in points.
+    const float d = PixelDensity(w);
     int32_t cx = 0, cy = 0, cw = 0, ch = 0;
-    OuterToClient(x, y, width, height, CurrentFrame(w), &cx, &cy, &cw, &ch);
+    OuterToClient(PixelsToPointsRound(x, d), PixelsToPointsRound(y, d),
+                  PixelsToPointsRound(width, d), PixelsToPointsRound(height, d),
+                  CurrentFrame(w), &cx, &cy, &cw, &ch);
+    // Darwin only (window_darwin.cpp): fit a framed window to the usable screen. Identity
+    // elsewhere, so Windows places the window exactly as retail's SetWindowPos does.
+    FitToUsableScreen(w, CurrentFrame(w), &cx, &cy, &cw, &ch);
     SDL_SetWindowPosition(w, cx, cy);
     SDL_SetWindowSize(w, cw, ch);
     SDL_SyncWindow(w);
@@ -172,7 +203,7 @@ void AdjustWindowRect(void* /*window*/, Rect* inOut) {
     SDL_Window* w = Sdl::GameWindow();
     if (w == nullptr) return;
     SDL_SyncWindow(w);
-    ClientRectToOuter(inOut, CurrentFrame(w));
+    ClientRectToOuter(inOut, CurrentFramePixels(w));
 }
 
 // Retail: GetMonitorInfoW(Device::monitor).rcMonitor, the HMONITOR the renderer took from
@@ -183,6 +214,7 @@ void GetMonitorRect(void* monitor, Rect* out) {
     int count = 0;
     SDL_DisplayID* ids = SDL_GetDisplays(&count);
     if (ids == nullptr) return;
+    const float density = PixelDensity(Sdl::GameWindow());
     for (int i = 0; i < count; ++i) {
 #if defined(SDL_PLATFORM_WINDOWS)
         void* hmon = SDL_GetPointerProperty(SDL_GetDisplayProperties(ids[i]),
@@ -196,7 +228,7 @@ void GetMonitorRect(void* monitor, Rect* out) {
         if (w == nullptr || SDL_GetDisplayForWindow(w) != ids[i]) continue;
 #endif
         SDL_Rect b;
-        if (SDL_GetDisplayBounds(ids[i], &b)) *out = FromSdl(b);
+        if (SDL_GetDisplayBounds(ids[i], &b)) *out = FromSdl(b, density);
         break;
     }
     SDL_free(ids);
@@ -210,10 +242,11 @@ bool RectOnAnyDisplay(const Rect* rect) {
     SDL_DisplayID* ids = SDL_GetDisplays(&count);
     if (ids == nullptr) return false;
     bool on = false;
+    const float density = PixelDensity(Sdl::GameWindow());
     for (int i = 0; i < count && !on; ++i) {
         SDL_Rect b;
         if (!SDL_GetDisplayBounds(ids[i], &b)) continue;
-        const Rect d = FromSdl(b);
+        const Rect d = FromSdl(b, density);
         on = RectTouchesAnyDisplay(*rect, &d, 1);
     }
     SDL_free(ids);
@@ -224,7 +257,8 @@ bool RectOnAnyDisplay(const Rect* rect) {
 void GetPrimaryDisplayRect(Rect* out) {
     Zero(out);
     SDL_Rect b;
-    if (SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &b)) *out = FromSdl(b);
+    if (SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &b))
+        *out = FromSdl(b, PixelDensity(Sdl::GameWindow()));
 }
 
 // Retail: EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS) unchecked, so a failure
@@ -235,8 +269,10 @@ void GetCurrentDisplaySize(int32_t* width, int32_t* height) {
     *height = 0;
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
     if (mode == nullptr) return;
-    *width  = mode->w;
-    *height = mode->h;
+    // SDL_DisplayMode w / h are points; the engine's back buffer is pixels.
+    const float d = PixelDensity(Sdl::GameWindow());
+    *width  = PointsToPixels(static_cast<float>(mode->w), d);
+    *height = PointsToPixels(static_cast<float>(mode->h), d);
 }
 
 // Was EnumDisplaySettingsW's dmDisplayFrequency (> 1, else unknown). SDL reports the rate
@@ -246,6 +282,18 @@ int32_t GetCurrentDisplayRefreshHz() {
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
     if (mode == nullptr || mode->refresh_rate <= 1.0f) return 0;
     return static_cast<int32_t>(mode->refresh_rate + 0.5f);
+}
+
+
+// window_sdl_internal.h. The one body of the window's pixel density: back-buffer pixels per
+// SDL point. SDL answers 1.0 for a window created without SDL_WINDOW_HIGH_PIXEL_DENSITY
+// (every Windows and Linux window), so this is the identity there.
+float PixelDensity(SDL_Window* window) {
+    if (window != nullptr) {
+        const float d = SDL_GetWindowPixelDensity(window);
+        if (d > 0.0f) return d;
+    }
+    return 1.0f;
 }
 
 }  // namespace Window

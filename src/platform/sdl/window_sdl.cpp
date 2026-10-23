@@ -35,6 +35,7 @@
 // ============================================================================
 
 #include "platform_window.h"
+#include "platform_window_hooks.h"
 #include "window_sdl_internal.h"
 
 #include <SDL3/SDL_error.h>
@@ -57,13 +58,17 @@ namespace Sdl {
 SDL_Window* GameWindow() { return g_window; }
 }  // namespace Sdl
 
+float GamePixelDensity() {
+    return PixelDensity(g_window);
+}
+
 bool VideoAvailable() {
     return SDL_WasInit(SDL_INIT_VIDEO) != 0;
 }
 
 void* Create(const char* title, int32_t width, int32_t height) {
-    SDL_Window* w = SDL_CreateWindow(title, width, height,
-                                     SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
+    const uint64_t platformFlags = PrepareCreate(&width, &height);
+    SDL_Window* w = SDL_CreateWindow(title, width, height, SDL_WINDOW_HIDDEN | platformFlags);
     if (w == nullptr) {
         std::fprintf(stderr, "[SDL] SDL_CreateWindow failed: %s\n", SDL_GetError());
         return nullptr;
@@ -149,7 +154,10 @@ bool IsVisible(void* /*window*/) {
 
 void ShowDefault(void* /*window*/) {
     // ShowWindow on a handle that is not a window fails and does nothing; so does this.
-    if (SDL_Window* w = Sdl::GameWindow()) SDL_ShowWindow(w);
+    if (SDL_Window* w = Sdl::GameWindow()) {
+        SDL_ShowWindow(w);
+        ConfigureBackgroundWindow(w);
+    }
 }
 
 int64_t DefaultWindowProc(void* /*window*/, uint32_t /*message*/, uint64_t /*wParam*/,
@@ -174,7 +182,7 @@ int64_t DefaultWindowProc(void* /*window*/, uint32_t /*message*/, uint64_t /*wPa
 // this exe declares no common-controls dependency in its manifest, so LoadLibrary finds
 // comctl32 v5 without that export and SDL builds the box from a dialog template with no
 // custom class: a "#32770" window titled with the caption, which is what
-// src/diag/boot_state_watchdog.cpp looks for. SDL's box also centres on the primary
+// src/diag/win/boot_state_watchdog.cpp looks for. SDL's box also centres on the primary
 // display and shows the cursor; MessageBoxW did both too. Callable before SDL_Init.
 // ============================================================================
 namespace {

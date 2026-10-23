@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+namespace Ext {
 namespace RenderPipe {
 namespace {
 
@@ -150,3 +151,4 @@ void FinishRecover(Video::Device& device, int32_t hrIn) {
 }
 
 }  // namespace RenderPipe
+}  // namespace Ext

@@ -16,7 +16,7 @@
 //
 //   (a) the heuristic is retail's octile / Manhattan / Chebyshev distance at
 //       unit cost MULTIPLIED by `heuristicScale` (the cheapest step cost the
-//       search can pay; FastPaths::HeuristicScale computes it). Paths keep
+//       search can pay; Ext::FastPaths::HeuristicScale computes it). Paths keep
 //       retail's cost exactly; among equal-cost routes the cells may differ.
 //       With heuristicScale 1 the search IS retail's (same pops, same cells).
 //   (b) the open set is a circular bucket queue indexed by f, one LIFO stack
@@ -51,6 +51,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace Ext {
 namespace FastPaths {
 
 constexpr int kPathCap   = 0x4000;   // Run 0x14001ce00: the 64 KB path buffer, 0x4000 cells
@@ -128,3 +129,4 @@ private:
 };
 
 }  // namespace FastPaths
+}  // namespace Ext

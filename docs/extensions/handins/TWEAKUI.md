@@ -1,5 +1,7 @@
 # TWEAKUI hand-in: the debug tweak overlay (Dear ImGui, Alt+F10)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/render/dx11/billboard_shadow/` and `src/render/dx11/foliage_aa/` moved to `src/render/dx11/better_trees/` (file names kept); `tests/unit/ext_billboard_shadow_test.cpp` and `ext_foliage_aa_test.cpp` merged into `ext_better_trees_test.cpp`, cases `ext_bbs_*` / `ext_faa_*` renamed `ext_better_trees_*`.)
+
 Branch `worktree-agent-a0c76cd55353c663f`, based on main `57964ec3b`. Not merged. User doc:
 `docs/reference/tweak_overlay.md` (opening it, the panels, adding a tweakable).
 

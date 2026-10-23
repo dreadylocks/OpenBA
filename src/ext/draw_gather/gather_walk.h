@@ -36,8 +36,9 @@
 #include "graphics/Geometry.h"
 #include "graphics/Scene.h"
 #include "ext/draw_gather/gather_side.h"
-#include "ext/draw_gather/gather_threads.h"
+#include "ext/gather_threads/gather_threads.h"
 
+namespace Ext {
 namespace DrawGather {
 
 namespace {
@@ -382,7 +383,7 @@ struct ParPassResult {
 // capacity). Main thread only, except what a running task reads (the pass fields,
 // its root) and writes (its slot, its helper's frame).
 struct ParWalk {
-    HelperPool*              pool = nullptr;
+    Ext::GatherThreads::HelperPool* pool = nullptr;
     std::vector<CullRecord>  roots;      // task -> its root record
     std::vector<Segment>     plan;
     std::vector<Geometry*>   interior;
@@ -518,7 +519,7 @@ ParPassResult ParGather(ParWalk& p, const Scene* self, const Frame& f, SideArray
 
     if (nTasks > 0) {
         if (p.pool != nullptr) {
-            const HelperPool::PassResult pr = p.pool->Finish();
+            const Ext::GatherThreads::HelperPool::PassResult pr = p.pool->Finish();
             r.helperTasks = pr.tasks - pr.callerTasks;
             r.waitTicks   = pr.waitTicks;
         } else {
@@ -544,3 +545,4 @@ ParPassResult ParGather(ParWalk& p, const Scene* self, const Frame& f, SideArray
 
 }  // namespace
 }  // namespace DrawGather
+}  // namespace Ext

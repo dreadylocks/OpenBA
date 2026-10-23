@@ -20,6 +20,7 @@
 // ============================================================================
 
 #include "platform_input.h"
+#include "platform_input_hooks.h"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
@@ -30,6 +31,22 @@ namespace Input {
 bool ShiftHeld() {
     SDL_PumpEvents();
     return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+}
+
+// The hooks of platform_input_hooks.h: nothing to change on this host.
+const bool* ApplyKeyLayer(const bool* raw, int* /*count*/, bool* /*scratch*/) {
+    return raw;
+}
+
+uint32_t PolledMouseButtons(uint32_t physical) {
+    return physical;
+}
+
+void PreprocessPumpEvent(SDL_Event* /*event*/) {
+}
+
+bool ConsumePumpEvent(const SDL_Event& /*event*/) {
+    return false;
 }
 
 }  // namespace Input

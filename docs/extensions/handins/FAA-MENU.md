@@ -1,5 +1,7 @@
 # FAA-MENU hand-in (2026-10-16)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/enhanced_tab/shadow_res_entry.cpp` moved to `src/ext/max_shadow_res/enhanced_entry.cpp`; `EnhancedTab::FindIn` is now `Ext::FindElement` (`src/ext/ui/find_element.h`); the Options dialog's `EXT ARM` comments are `EXT SEAM`.)
+
 The foliage and shadow entries of the Options dialog's "Enhanced" tab (docs/extensions/FOLIAGE_AA.md §3 "Menu",
 §4, §7), built on AOMENU's pattern. Branch `worktree-agent-aa72cca21bfaf8a8f`, on main 8e88908b2 (main had not moved
 at the final `git merge main`). Commits: `c22afd945` (tab move, entries, icons), `6437e9caf` (the deadlock fix, the

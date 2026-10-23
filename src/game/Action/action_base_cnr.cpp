@@ -38,6 +38,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
+#include "ext/registry.h"              // Ext::Fix().rock_seat
+#include "ext/rock_seat/rock_seat.h"   // fix.rock_seat (docs/extensions/handins/ROCKSEAT.md)
 #include "system/Value.h"      // ENDGAME B.3.4b System callers
 #include "Component/ModelComponent.h"
 #include "Component/GrowthComponent.h"
@@ -293,7 +295,13 @@ uint64_t NaturalResourceComponent::PlaceAtCell(int cellIndex) {
     Math::Transform xform = Math::Transform::FromYawPitchOffset(yaw, pitch, offset);
     model->transform = xform;
     model->yaw = yaw;
-    model->meshInstance.SetTransform(model->transform);
+    // FIX rock_seat (NOT RETAIL, docs/extensions/handins/ROCKSEAT.md): a rock's mesh is drawn seated on
+    // the slope; model->transform (serialized) stays retail's.
+    if (Ext::Fix().rock_seat) {
+        Ext::RockSeat::SetMeshTransform(model);
+    } else {
+        model->meshInstance.SetTransform(model->transform);
+    }
     return 1;
 }
 

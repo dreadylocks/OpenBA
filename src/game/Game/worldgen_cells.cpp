@@ -218,3 +218,18 @@ void WgCells_BlendOcclusion(const float* scratch, int dim, uint8_t* out) {
         }
     });
 }
+
+void WgCells_PerlinTable(float* out, int dim, const RtUtility::PerlinNoise* pn, float scale) {
+    // [PERLINPRE] rows split across System::ParallelFor. EXACT: each value is the very
+    // call the serial loop made -- Generate on the const object (no state, no RNG; the
+    // two RandTol seeds were drawn by the caller, before the ctor) with the same float
+    // arguments (float)x * scale, (float)y * scale -- written to its own slot; nothing
+    // accumulates across cells. The serial loop reads the table in its own order.
+    System::ParallelFor(0, dim, 8, [&](int rowBegin, int rowEnd) {
+        for (int y = rowBegin; y < rowEnd; ++y) {
+            float* row = out + (size_t)dim * y;
+            for (int x = 0; x < dim; ++x)
+                row[x] = RtUtility_PerlinNoise_Generate(pn, (float)x * scale, (float)y * scale);
+        }
+    });
+}

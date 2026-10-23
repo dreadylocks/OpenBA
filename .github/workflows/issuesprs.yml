@@ -1,0 +1,46 @@
+name: Label issues and PRs
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      number:
+        description: Issue or PR number to label
+        required: true
+permissions:
+  id-token: write
+  issues: write
+  pull-requests: write
+  contents: read
+jobs:
+  label:
+    # pull_request_target runs this file and the script as they are on main; the PR's own code is
+    # never checked out or run. The federation rule only accepts this file on main.
+    if: ${{ !endsWith(github.actor, '[bot]') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      NUMBER: ${{ inputs.number || github.event.issue.number || github.event.pull_request.number }}
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_019GYXWSqnXFLFBkG95tFMoB
+      ANTHROPIC_ORGANIZATION_ID: fe679033-d7d7-4657-b606-c4fc51be726e
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01Tt8tPb8rqvahzLqxwAVTuY
+      ANTHROPIC_WORKSPACE_ID: wrkspc_01CFUptY7CByEfcE8TfYMXXF
+      ANTHROPIC_IDENTITY_TOKEN_FILE: /tmp/anthropic-jwt
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Fetch the GitHub OIDC token
+        run: |
+          curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+            | jq -r .value > "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+      - name: Pick and apply labels
+        run: |
+          pip install --quiet anthropic==2.1.0
+          python3 .github/scripts/label_item.py

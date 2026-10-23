@@ -1,5 +1,7 @@
 # WALKGRID -- `ext.walk_batch_grid`, the walk batch without Place (class B, default OFF)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: ext.walk_batch_grid's seam helpers are `src/ext/walk_batch_grid/walk_batch_grid.h` (Ext::WalkBatchGrid, over the body it still shares in `src/ext/walk_batch/`); its registry-row test is `tests/unit/ext_walk_batch_grid_test.cpp`; namespace `WalkBatch` -> `Ext::WalkBatch`.)
+
 Block WALKGRID, 2026-10-13. Base `dffc78154` (main). WALKBATCH's measured class B variant (the batched
 tick skips `CharacterGrid::Place`; WALKBATCH.md sections 3, 11, 13), removed as the constexpr switch
 `kPlaceEveryTick` by CLEANUP row 5, is back as **its own extension row**, selectable by the player,

@@ -2,12 +2,12 @@
 //
 // `ext.ambient_occlusion` (class A, docs/extensions/AO.md). AOMENU owns the values: the settings keys
 // `ext.ao_quality` / `ext.ao_opacity`, their parse / clamp / record, the Options tab that edits
-// them (settings.cpp). AOCORE owns everything that consumes them (ao.cpp, src/render/dx11/ao/).
+// them (settings.cpp). AOCORE owns everything that consumes them (ambient_occlusion.cpp, src/render/dx11/ao/).
 // Neither block edits the other's files; this header is the only shared line.
 #pragma once
 
 namespace Ext {
-namespace AO {
+namespace AmbientOcclusion {
 
 struct Params {
     // 0 = off (the row's bool mirrors `quality > 0`), 1 Low, 2 Medium, 3 High (AO.md §3 "Tiers").
@@ -25,5 +25,5 @@ const Params& Current();
 // bool in step with `quality > 0`. AOCORE never calls it.
 void Set(const Params& p);
 
-}  // namespace AO
+}  // namespace AmbientOcclusion
 }  // namespace Ext

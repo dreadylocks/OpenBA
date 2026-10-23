@@ -2,15 +2,17 @@
 # tools/build.sh -- the one build / deploy / run entry point over the CMake build (2026-10-11).
 #
 # usage: tools/build.sh <command> [flavour] [--jobs N] [--cross]
-#   build   [flavour]   configure build/cmake-<flavour> if absent, build OpenBA
+#   build   [flavour]   configure the platform build dir if absent, build OpenBA
 #   unit    [flavour]   build the unit tests and run them (exit = the suite's exit)
 #   deploy  [flavour]   build + copy the exe to the game directory (BANISHED_DIR), then
 #                       tools/ext_resources.sh --deploy (the extension .crs files, loose in WinData/Dialog/)
 #   run     [flavour]   deploy + launch with BANISHED_AUTOSTART=1 and /profile:faithful (THE GATE's by-hand run)
 #   run-menu [flavour]  deploy + launch, stops at the main menu
 #   stress  [flavour]   build perf (default), deploy, tools/stress_run.sh --no-build $STRESS_ARGS
-#   clean   [flavour]   remove build/cmake-<flavour> (all four when no flavour is given)
+#   clean   [flavour]   remove the platform build dir (all flavours when none is given)
 #   exe     [flavour]   print the exe path (for scripts)
+#   build dirs: build/cmake-<flavour> (Windows, Linux); on macOS build/mac-<flavour>, with debug = build/mac-arm64.
+#               Darwin builds with the Metal render backend.
 #   flavours: debug (default) | og | perf | release   -- CMakeLists.txt's BANISHED_FLAVOUR
 #   --cross             (macOS / Linux host) build the WINDOWS exe with mingw-w64 GCC through
 #                       tools/toolchains/mingw-w64-x86_64.cmake, into build/cross-<flavour>.
@@ -47,6 +49,9 @@ if [ "$CROSS" = 1 ]; then
   EXT=.exe
   B="build/cross-$FLAV"
   CROSS_ARGS="-DCMAKE_TOOLCHAIN_FILE=tools/toolchains/mingw-w64-x86_64.cmake"
+elif [ "$(uname -s)" = Darwin ]; then
+  B="build/mac-$FLAV"
+  [ "$FLAV" = debug ] && B="build/mac-arm64"
 fi
 EXE="$B/OpenBA$EXT"
 # THE GATE RUNS FAITHFUL (docs/extensions/DESIGN.md §3 "Gates"): every fix and extension off for
@@ -69,6 +74,10 @@ need_game_dir() {
   [ -d "$BANISHED_DIR" ] || { echo "build.sh $CMD: game directory not found: $BANISHED_DIR (set BANISHED_DIR to the Banished install)"; exit 1; }
 }
 deploy() {
+  if [ "$(uname -s)" = Darwin ] && [ "$CROSS" != 1 ]; then
+    echo "build.sh $CMD is not supported on macOS; use tools/macos/make_app.sh and tools/macos/run_openba.sh" >&2
+    exit 2
+  fi
   need_game_dir
   build OpenBA
   cp -f "$EXE" "$BANISHED_DIR/OpenBA.exe" || { echo "deploy: exe busy, is a game running?"; exit 1; }
@@ -87,9 +96,20 @@ case "$CMD" in
   run)     deploy; ( cd "$BANISHED_DIR" && BANISHED_AUTOSTART=1 MSYS2_ARG_CONV_EXCL="$FAITHFUL" start OpenBA.exe $FAITHFUL )
            echo "Launched (autostart, $FAITHFUL)";;
   run-menu) deploy; ( cd "$BANISHED_DIR" && start OpenBA.exe ); echo "Launched (menu only)";;
-  stress)  deploy; tools/stress_run.sh --no-build ${STRESS_ARGS:-};;
+  stress)  if [ "$(uname -s)" = Darwin ]; then
+             echo "macOS stress harness is not part of this repository; run the stress town directly with BANISHED_STRESS=1 (see perf/README.md)" >&2
+             exit 2
+           else deploy; fi
+           tools/stress_run.sh --no-build ${STRESS_ARGS:-};;
   clean)   if [ "$FLAV_GIVEN" = 1 ]; then rm -rf "$B"; echo "removed $B"
            elif [ "$CROSS" = 1 ]; then rm -rf build/cross-debug build/cross-og build/cross-perf build/cross-release; echo "removed build/cross-{debug,og,perf,release}"
+           elif [ "$(uname -s)" = Darwin ]; then
+             rm -rf build/mac-*
+             echo "removed build/mac-*"
            else rm -rf build/cmake-debug build/cmake-og build/cmake-perf build/cmake-release; echo "removed build/cmake-{debug,og,perf,release}"; fi;;
-  *) echo "unknown command $CMD"; sed -n 2,15p "$0"; exit 2;;
+  *)
+    echo "unknown command $CMD"
+    sed -n '2,21p' "$0"
+    exit 2
+    ;;
 esac

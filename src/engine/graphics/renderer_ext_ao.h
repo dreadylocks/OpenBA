@@ -31,7 +31,7 @@ namespace Graphics {
 struct RendererSceneEntry;
 
 // One frame's AO parameters, decided on the main thread by the extension
-// (src/ext/ambient_occlusion/ao.cpp) from Ext::AO::Current() and the camera.
+// (src/ext/ambient_occlusion/ambient_occlusion.cpp) from Ext::AmbientOcclusion::Current() and the camera.
 struct ExtAoFrame {
     int32_t qualityLevel;       // ASSAO QualityLevel: -1 Lowest, 0 Low, 1 Medium, 2 High
     int32_t blurPassCount;      // ASSAO BlurPassCount

@@ -84,10 +84,13 @@
 #include "save/SaveLoad.h"              // RtSave_SaveLoad_Ctor / RtSave_SavedState_Dtor
 #include "utility/PerlinNoise.h"        // RtUtility_PerlinNoise_Ctor
 #include "Entity/ComponentEntity.h"   // B4 S4 RT2: InternalPtr<ComponentEntity>::Get() needs the class complete
-#include "ext/registry.h"   // EXT SEAM: Ext::LockForGame (NOT RETAIL)
-#include "ext/fast_paths/fast_paths.h"   // EXT SEAM: FastPaths::SelectForGame (NOT RETAIL)
-#include "ext/path_workers/path_workers.h"   // EXT SEAM: PathWorkers::SelectForGame (NOT RETAIL)
-#include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::ResetForGame / SelectForGame (NOT RETAIL)
+#include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): Ext::LockForGame
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): Ext::SaveTail::ResetAllState, a
+// class C extension's state
+#include "ext/savetail.h"
+#include "ext/fast_paths/fast_paths.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/FASTPATHS.md): Ext::FastPaths::SelectForGame
+#include "ext/path_workers/path_workers.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): Ext::PathWorkers::SelectForGame
+#include "ext/neighbour/neighbour.h"   // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::ResetForGame / SelectForGame
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 
 // ============================================================
@@ -730,15 +733,18 @@ void GameUpdateLoop::Load() {
     // Audio::Pause at the tail).
     _singleton = this;
 
-    // EXT SEAM (docs/extensions/DESIGN.md §2; NOT RETAIL): a new game or a
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): the class lock (DESIGN.md §2) -- a new game or a
     // load takes the class B / C lock for this loop's lifetime. A no-op on the
     // game while no B / C extension is registered.
     Ext::LockForGame(this);
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): a class C extension's per-town state
+    // starts empty; a load's tail record decodes it
+    Ext::SaveTail::ResetAllState();
     // ext.fast_paths (class B) reads the lock here; final for a new game, a
     // load's manifest replaces it in SaveRestore and the second call below
     // re-reads it (src/ext/fast_paths/fast_paths.h).
-    FastPaths::SelectForGame();
-    PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
+    Ext::FastPaths::SelectForGame();
+    Ext::PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
     Neighbour::ResetForGame(this);  // ext.neighbour (class C): the last game's room state goes
 
     // Steps 1-4: resource Finds (Diseases/Profession/Material/Help). Only step 3
@@ -1358,11 +1364,11 @@ void GameUpdateLoop::Load() {
         }
     }
 
-    // EXT SEAM (NOT RETAIL): the class B set is final here on every route (a
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/FASTPATHS.md, PATHWORKERS.md): the class B set is final here on every route (a
     // load's manifest was read in SaveRestore above); ext.fast_paths takes its
     // selection for the game before the sim issues its first path request.
-    FastPaths::SelectForGame();
-    PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
+    Ext::FastPaths::SelectForGame();
+    Ext::PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
     Neighbour::SelectForGame();     // ext.neighbour (class C): connects when on (the save's state read)
 
     // Step 32 — AchievementInstance (retail 0x140097645-0x1400976dd).

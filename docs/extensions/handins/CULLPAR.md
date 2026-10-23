@@ -1,5 +1,7 @@
 # CULLPAR -- `ext.gather_threads`, the parallel cull inside ext.draw_gather (hand-in)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/draw_gather/gather_threads.{h,cpp}` moved to `src/ext/gather_threads/` (namespace `Ext::GatherThreads`).)
+
 Block 3 of `THREADPLAN.md` §2 (THREADRESEARCH rank 2, §2.3-§2.5, §5.2, §7.4). Branch
 `worktree-agent-ae1186acfe4439411`, base main `04b4dff7c` (CPULIMIT merged), main merged again
 at `449db6a8a` (RENDERPIPE-0). Static gate only: the game was not run. The coordinator's A/B and

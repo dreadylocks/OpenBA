@@ -7,6 +7,7 @@
 
 #include <cstring>
 
+namespace Ext {
 namespace DrawGather {
 
 void SideArray::Store(int32_t id, const void* owner, const float box[6], uint32_t flags,
@@ -75,3 +76,4 @@ void SceneSides::ForgetAll() {
 }
 
 }  // namespace DrawGather
+}  // namespace Ext

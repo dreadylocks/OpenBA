@@ -82,7 +82,7 @@ void FrustumCull_Prepare(const Frustum* f, FrustumCullPlanes* out);
 //     result = (outside & mask & 0x3F) ? 0x40 : mask & ~(notLe & 0x3F).
 //   The dot products the reference skips have no observable effect but the
 //   sticky MXCSR status flags (exceptions are masked; nothing reads them).
-// Off x86 (no SSE2) it is the reference body.
+// Off x86, evaluate the same prepared snapshot with scalar operations.
 inline unsigned int FrustumCull_ContainsFast(const FrustumCullPlanes* p, const Box* box, unsigned int mask) {
 #if defined(__SSE2__)
     const __m128 mnx = _mm_set1_ps(box->min.x), mxx = _mm_set1_ps(box->max.x);
@@ -119,7 +119,22 @@ inline unsigned int FrustumCull_ContainsFast(const FrustumCullPlanes* p, const B
     if (out & mask & 0x3Fu) return 0x40u;
     return mask & ~(~le & 0x3Fu);
 #else
-    return RtVolume_Frustum_Contains(p->src, box, mask);
+    unsigned int le = 0, out = 0;
+    for (int i = 0; i < 6; ++i) {
+        // Prepared masks are zero or all-one bits (a NaN float, unequal to zero).
+        const bool sx = p->negX[i] != 0.0f, sy = p->negY[i] != 0.0f, sz = p->negZ[i] != 0.0f;
+        const float nx = sx ? box->max.x : box->min.x, px = sx ? box->min.x : box->max.x;
+        const float ny = sy ? box->max.y : box->min.y, py = sy ? box->min.y : box->max.y;
+        const float nz = sz ? box->max.z : box->min.z, pz = sz ? box->min.z : box->max.z;
+        const float dn = ((p->y[i] * ny + p->x[i] * nx) + p->z[i] * nz) - p->w[i];
+        const float dp = ((p->y[i] * py + p->x[i] * px) + p->z[i] * pz) - p->w[i];
+        if (dn <= 0.0f) {
+            le |= 1u << i;
+            if (dp < 0.0f) out |= 1u << i;
+        }
+    }
+    if (out & mask & 0x3Fu) return 0x40u;
+    return mask & ~(~le & 0x3Fu);
 #endif
 }
 

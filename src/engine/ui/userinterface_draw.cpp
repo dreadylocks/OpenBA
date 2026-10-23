@@ -341,7 +341,7 @@ void UI::UserInterface::Draw(Video::Context& context) {
             for (Node* n = _dialogs._head; n != nullptr; n = n->next) {
                 DialogInstance* const d = n->element;
 
-                // EXT SEAM (ext.sharp_ui, NOT RETAIL): this dialog's quads snap
+                // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, this dialog's quads snap
                 // against its own upper-left (ui/SharpDraw.h SnapDevice), so a
                 // dialog that moves -- a panel following its entity while the
                 // camera turns -- moves whole, with no glyph-to-glyph shimmer.
@@ -487,7 +487,7 @@ void UI::UserInterface::Draw(Video::Context& context) {
         }
     }
 
-    // EXT SEAM (ext.sharp_ui, NOT RETAIL): the fade and the cursor snap
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui, the fade and the cursor snap
     // absolutely.
     if (const SharpDraw* const sharp = SpriteContext::_extSharp) {
         if ((sharp->originX != 0 || sharp->originY != 0) && sc->_draws._size > 0)

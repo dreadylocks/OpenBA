@@ -65,7 +65,7 @@ void RequestReadableDepth(bool on) {
     ::Video::Device* const dev = ::Video::Device::_singleton;
     if (dev == nullptr || LiveDevice() == nullptr) return;   // the first CreateDepthBuffer reads it
     if (g_depthReadable.load() != on) {
-        std::fprintf(stderr, "[AO] main depth -> %s: rebuild requested (Device::settingsChanged)\n",
+        std::fprintf(stderr, "[AmbientOcclusion] main depth -> %s: rebuild requested (Device::settingsChanged)\n",
                      on ? "readable (R24G8_TYPELESS + SRV)" : "retail (D24_UNORM_S8_UINT)");
         dev->settingsChanged = 1;
     }
@@ -99,7 +99,7 @@ void CreateMainDepthViews(ID3D11Device* device, ID3D11Texture2D* depth,
         sd.Texture2D.MipLevels = 1;
     }
     const HRESULT h2 = device->CreateShaderResourceView(depth, &sd, srv);
-    std::fprintf(stderr, "[AO] readable main depth %ux%u x%u: DSV 0x%08lx, SRV 0x%08lx\n", td.Width,
+    std::fprintf(stderr, "[AmbientOcclusion] readable main depth %ux%u x%u: DSV 0x%08lx, SRV 0x%08lx\n", td.Width,
                  td.Height, td.SampleDesc.Count, static_cast<unsigned long>(h1),
                  static_cast<unsigned long>(h2));
 }
@@ -126,7 +126,7 @@ struct PassObjects {
     }
     bool EnsureFor(ID3D11Device* dev) {
         if (dev == device) return !failed;
-        if (device != nullptr) std::fprintf(stderr, "[AO] device changed: the AO stage is rebuilt\n");
+        if (device != nullptr) std::fprintf(stderr, "[AmbientOcclusion] device changed: the AO stage is rebuilt\n");
         Drop();
         device = dev;
         failed = !resolve.Create(dev);
@@ -253,7 +253,7 @@ void ExtAoAfterOpaque(Video::Context& context, const ExtAoFrame& frame,
     g_pass.stage->Resize(dev, td.Width, td.Height);
 
     float lh[16];
-    AoMath::AssaoProjection(entry._camera._projection.m, lh);
+    Ext::AmbientOcclusion::AoMath::AssaoProjection(entry._camera._projection.m, lh);
 
     StateBackup saved(dc);
     if (saved.Colour() == nullptr) return;   // nothing bound to darken (never seen; restored by `saved`)
@@ -263,7 +263,7 @@ void ExtAoAfterOpaque(Video::Context& context, const ExtAoFrame& frame,
     // before Renderer::Draw): the materials fogged their pixels already, so AO must be
     // gone where the fog is (ao_math.h FadeFromFog; the user's look 2026-10-14).
     Graphics::ExtAoFrame fogged = frame;
-    AoMath::FadeFromFog(context._fogParams.x, context._fogParams.y, fogged);
+    Ext::AmbientOcclusion::AoMath::FadeFromFog(context._fogParams.x, context._fogParams.y, fogged);
     g_pass.stage->Draw(dc, raw, lh, fogged);
 }
 

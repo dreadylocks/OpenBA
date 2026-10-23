@@ -77,7 +77,7 @@ UNIT_TEST(ext_drain_split_lock_epoch) {
 }
 
 UNIT_TEST(ext_drain_split_owed_half) {
-    using namespace DrainSplit;
+    using namespace Ext::DrainSplit;
     int pgA = 0, pgB = 0, game = 0;
 
     // Off: BeginFrame reads the row; the seam never owes (g_on false), nothing is pending.

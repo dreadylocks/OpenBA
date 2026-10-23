@@ -1,5 +1,7 @@
 # AO-MENU -- `ext.ambient_occlusion` on the main-menu backdrop (hand-in, 2026-10-17)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/ambient_occlusion/ao.{h,cpp}` moved to `ambient_occlusion.{h,cpp}` (namespaces `AmbientOcclusion` / `Ext::AO` / `AoMath` -> `Ext::AmbientOcclusion` / `Ext::AmbientOcclusion::AoMath`), `tests/unit/ext_ao_test.cpp` to `ext_ambient_occlusion_test.cpp`.)
+
 AO.md §7 row 7.8 ("ruled game-only for now, one arm site to change"), the user's call of 2026-10-17:
 the row on = AO on the menu backdrop too, the way `ext.better_trees` and `ext.max_shadow_res`
 already apply there. Branch `worktree-agent-a4b8af7efe972ccf7` from main `9afd16b48`. Nothing is

@@ -93,7 +93,8 @@ int32_t MeasureRun(const GlyphRow* rows, int32_t count) {
 }
 
 bool KitSheetSize(int32_t px, int32_t& width, int32_t& height) {
-    static const int32_t kSheets[][2] = { {128, 128}, {256, 128}, {256, 256}, {512, 256}, {512, 512} };
+    static const int32_t kSheets[][2] = { {128, 128}, {256, 128}, {256, 256}, {512, 256}, {512, 512},
+                                         {1024, 512}, {1024, 1024} };   // the last two: Retina variants (px > 64)
     const int64_t need = 64LL * px * px;
     for (const auto& s : kSheets) {
         if (static_cast<int64_t>(s[0]) * s[1] >= need) { width = s[0]; height = s[1]; return true; }

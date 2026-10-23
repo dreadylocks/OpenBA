@@ -5,7 +5,7 @@
 // static data pointer the game side sets. `UI::SpriteContext::_extSharp`
 // (SpriteContext.h) points at one of these for the duration of one
 // UI::UserInterface::Draw, and only while ext.sharp_ui is on (the game side's
-// SharpUI::Draw sets it and nulls it again). SpriteContext::Flush reads the
+// Ext::SharpUI::Draw sets it and nulls it again). SpriteContext::Flush reads the
 // pointer ONCE per flush; null (always, in the faithful profile) = retail's
 // vertices and retail's samplers, byte for byte. Non-null:
 //   * each axis-aligned quad's corners move to the nearest whole device pixel;

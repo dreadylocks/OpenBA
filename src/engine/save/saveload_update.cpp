@@ -956,7 +956,7 @@ void Save::SaveLoad::UpdateSave() {
         // `if (_data) MemFree(_data)` on it (an ACCESS_VIOLATION inside the
         // allocator, UpdateSaveBody -> GUL_SaveRestore -> Store -> MemFree).
         // (The tree's null test on the MainLoop singleton is kept as it was.)
-        // EXT SEAM (NOT RETAIL): ext.background_save -- the serialise runs on a worker and this
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVESNAP.md): ext.background_save -- the serialise runs on a worker and this
         // machine waits in kExtProgressSerializing (below). Null: retail's call.
         if (_extSaveStart != nullptr && _extSaveStart(fresh)) {
             _progress = kExtProgressSerializing;
@@ -1008,7 +1008,7 @@ void Save::SaveLoad::UpdateSave() {
     }
 }
 
-// EXT SEAM (NOT RETAIL): ext.background_save, null by default (SaveLoad.h).
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVESNAP.md): ext.background_save, null by default (SaveLoad.h).
 bool (*Save::SaveLoad::_extSaveStart)(SavedState*) = nullptr;
 bool (*Save::SaveLoad::_extSavePoll)() = nullptr;
 

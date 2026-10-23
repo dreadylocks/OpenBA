@@ -254,7 +254,7 @@ public:
     // address door is left. PUBLIC: foreign readers name it directly.
     static MainLoop* _singleton;
 
-    // EXT SEAM (NOT RETAIL; ext.render_pipe, docs/extensions/handins/RENDERPIPE0.md).
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RENDERPIPE0.md): ext.render_pipe's frame hook.
     // Null by default (DESIGN.md section 3, hook rule 5); src/ext/render_pipe sets it
     // while the class A extension is installed. Frame calls it at two points:
     //   kExtBeforeSteps  once, before the first fixed step of a Frame that steps
@@ -266,7 +266,7 @@ public:
     static constexpr int32_t kExtFrameTail   = 1;
     using ExtFrameFn = void (*)(MainLoop& loop, int32_t point, float alpha, float time);
     static ExtFrameFn _extFrame;   // defined in mainloop_frame.cpp
-    // EXT SEAM (NOT RETAIL; ext.background_save, docs/extensions/handins/HITCH_BGSAVE.md).
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVESNAP.md, HITCH_BGSAVE.md): ext.background_save's video-error barrier.
     // Null by default; while the class A extension is installed, OnVideoError calls it first:
     // it returns once no save worker is reading the world (the route below destroys the video
     // Externals and the loop releases the terrain and minimap images the worker serialises).

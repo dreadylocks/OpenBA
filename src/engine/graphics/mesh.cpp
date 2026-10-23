@@ -465,7 +465,7 @@ const ::Graphics::InstancedAnimationState* RtInstancedPoolSlot(const ::Graphics:
 // slot ITSELF, with no per-node stride — the root offset is one Vector3 per
 // pool entry.
 //
-// src/ext/perfx/perfx.cpp's ANIM_BATCH note ("the move tick's walk
+// src/ext/render_culling/render_culling.cpp's ANIM_BATCH note ("the move tick's walk
 // speed is |MeshInstance::RootAnimationOffset()| per tick", and "instanced
 // anims read the AnimationManager pool pose") describes exactly these two
 // branches, and this port does not change which branch is taken: it reads the
@@ -490,7 +490,7 @@ const ::Graphics::InstancedAnimationState* RtInstancedPoolSlot(const ::Graphics:
 // THIS PATH TWICE. *** `?_rootOnlyUpdates@MeshInstance@Graphics@@0_NA` being
 // unregistered cost 38% of sim time
 // (project_stress_perf_rootonly_and_libcalls.md), and
-// src/ext/perfx/perfx.cpp's default-on ANIM_BATCH path reads
+// src/ext/render_culling/render_culling.cpp's default-on ANIM_BATCH path reads
 // MeshInstance state every frame. Three things this port does about that:
 //   * It resolves NOTHING per call. `QuaternionMultiply` is a function-local static
 //     resolved once for the life of the process (the raw DLL door); calling
@@ -1748,7 +1748,7 @@ extern "C" void RtGraphics_MeshInstance_AddDrawItems(const ::Graphics::MeshInsta
 //    A DATA export — a single static bool, not a function. The runtime registry
 //    redirects CALLS; there is nothing to register, and its three consumers
 //    (citizenai_executor.cpp, address_registry.cpp:1086,
-//    perfx.cpp:125) already resolve it correctly and read/write it
+//    render_culling.cpp:125) already resolve it correctly and read/write it
 //    in place. Wave 3 and Wave 4 left `FileSystem::_singleton` and
 //    `MemoryAllocator::_singleton` unregistered for the same reason: a data
 //    symbol cannot be registered before cutover. Verified present in the export

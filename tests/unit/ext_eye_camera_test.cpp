@@ -20,13 +20,13 @@ namespace {
 
 bool Near(float a, float b, float eps = 1e-3f) { return std::fabs(a - b) <= eps; }
 bool NearDeg(float a, float b, float eps = 1e-2f) {
-    return std::fabs(EyeCamera::WrapDegrees(a - b)) <= eps;
+    return std::fabs(Ext::EyeCamera::WrapDegrees(a - b)) <= eps;
 }
 
 }  // namespace
 
 UNIT_TEST(ext_eye_camera_wrap_degrees) {
-    using EyeCamera::WrapDegrees;
+    using Ext::EyeCamera::WrapDegrees;
     CHECK(Near(WrapDegrees(0.0f), 0.0f));
     CHECK(Near(WrapDegrees(180.0f), 180.0f));
     CHECK(Near(WrapDegrees(-180.0f), 180.0f));
@@ -40,11 +40,11 @@ UNIT_TEST(ext_eye_camera_yaw_from_model_rotation) {
     for (float yaw : {0.0f, 30.0f, 90.0f, 135.0f, 179.0f, -45.0f, -120.0f, 250.0f}) {
         const Math::Transform t = Math::Transform::FromYawPitchOffset(
             Math::Scalar(yaw), Math::Scalar(0.0f), Math::Vector3(1.0f, 2.0f, 3.0f));
-        CHECK(NearDeg(EyeCamera::ModelYawFromQuaternion(t.rotation.z, t.rotation.w), yaw));
+        CHECK(NearDeg(Ext::EyeCamera::ModelYawFromQuaternion(t.rotation.z, t.rotation.w), yaw));
         // q and -q are the same rotation.
-        CHECK(NearDeg(EyeCamera::ModelYawFromQuaternion(-t.rotation.z, -t.rotation.w), yaw));
+        CHECK(NearDeg(Ext::EyeCamera::ModelYawFromQuaternion(-t.rotation.z, -t.rotation.w), yaw));
         const float half = yaw * 0.5f * 0.017453292f;
-        CHECK(NearDeg(EyeCamera::ModelYawFromQuaternion(-std::sin(half), std::cos(half)), yaw));
+        CHECK(NearDeg(Ext::EyeCamera::ModelYawFromQuaternion(-std::sin(half), std::cos(half)), yaw));
     }
     // A lerped (renderer-interpolated) model transform reads back in between.
     const Math::Transform a = Math::Transform::FromYawPitchOffset(
@@ -52,13 +52,13 @@ UNIT_TEST(ext_eye_camera_yaw_from_model_rotation) {
     const Math::Transform b = Math::Transform::FromYawPitchOffset(
         Math::Scalar(50.0f), Math::Scalar(0.0f), Math::Vector3(2.0f, 0.0f, 0.0f));
     const Math::Transform mid = a.Lerp(b, Math::Scalar(0.5f));
-    CHECK(NearDeg(EyeCamera::ModelYawFromQuaternion(mid.rotation.z, mid.rotation.w), 30.0f, 0.5f));
+    CHECK(NearDeg(Ext::EyeCamera::ModelYawFromQuaternion(mid.rotation.z, mid.rotation.w), 30.0f, 0.5f));
     CHECK(Near(mid.translation.x, 1.0f));
 }
 
 UNIT_TEST(ext_eye_camera_forward_matches_engine_heading) {
     for (float h : {0.0f, 45.0f, 90.0f, -90.0f, 170.0f}) {
-        const EyeCamera::Vec3 f = EyeCamera::Forward(h);
+        const Ext::EyeCamera::Vec3 f = Ext::EyeCamera::Forward(h);
         const Math::Vector3 e = Math::Vector3::FromYawPitch(Math::Scalar(h), Math::Scalar(0.0f));
         CHECK(Near(f.x, e.x));
         CHECK(Near(f.y, e.y));
@@ -69,7 +69,7 @@ UNIT_TEST(ext_eye_camera_forward_matches_engine_heading) {
 }
 
 UNIT_TEST(ext_eye_camera_pose) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     const Vec3 feet{10.0f, -4.0f, 2.0f};
     // First person, heading 0 (facing +Y): the eye just ahead of the face, at
     // eye height, looking level along +Y.
@@ -92,7 +92,7 @@ UNIT_TEST(ext_eye_camera_pose) {
 }
 
 UNIT_TEST(ext_eye_camera_pose_child_scale) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     // A child is the same mesh drawn at its age scale (SetupElder's 0.66):
     // the eye and the face offset shrink with it, about the feet.
     const Vec3 feet{0.0f, 0.0f, 1.0f};
@@ -109,7 +109,7 @@ UNIT_TEST(ext_eye_camera_pose_child_scale) {
 }
 
 UNIT_TEST(ext_eye_camera_shadow_fit_pose) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     // Facing +X (heading -90): the fit view looks at the ground kShadowFitAhead
     // ahead of the feet, from behind (-X) and above, kShadowFitPitch below level.
     const Vec3 feet{5.0f, 7.0f, 3.0f};
@@ -126,7 +126,7 @@ UNIT_TEST(ext_eye_camera_shadow_fit_pose) {
 }
 
 UNIT_TEST(ext_eye_camera_zoom) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     CHECK(Near(ZoomDistance(1.0f, 1), 1.0f - kDistanceStep));    // zoom in: closer
     CHECK(Near(ZoomDistance(1.0f, -1), 1.0f + kDistanceStep));   // zoom out: farther
     CHECK(Near(ZoomDistance(1.0f, -120), 1.0f + kDistanceStep)); // a raw wheel value counts by sign
@@ -136,7 +136,7 @@ UNIT_TEST(ext_eye_camera_zoom) {
 }
 
 UNIT_TEST(ext_eye_camera_smoothing) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     CHECK(Near(BlendFactor(0.0f, 0.1f), 0.0f));
     CHECK(Near(BlendFactor(0.1f, 0.0f), 1.0f));
     CHECK(Near(BlendFactor(0.1f, 0.1f), 1.0f - std::exp(-1.0f)));
@@ -178,7 +178,7 @@ UNIT_TEST(ext_eye_camera_smoothing) {
 }
 
 UNIT_TEST(ext_eye_camera_idle_citizen_stays_followed) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     // EYECAM2 defect 3. The weak reference's table is InternalFactory::_objects,
     // which RemoveObject (0x1800c0110) swap-removes: the LAST object moves into
     // the freed slot. Replay that: the followed entity is last when a transient
@@ -212,7 +212,7 @@ UNIT_TEST(ext_eye_camera_idle_citizen_stays_followed) {
 }
 
 UNIT_TEST(ext_eye_camera_follow_identity_is_the_entity) {
-    using namespace EyeCamera;
+    using namespace Ext::EyeCamera;
     // EYECAM3 (EYECAM.md §10): the engagement decision. The identity is the
     // followed entity read from the frontmost open FollowDialog; a latched
     // entity is never asked of InternalFactory's table again (a live object can

@@ -48,8 +48,10 @@
 
 // B5 DEV-A: the two DLL exports (src/render/dx11/exports.cpp) and the cutover-only DX9
 // placeholder (src/render/dx11/dx9_placeholder.cpp), declared by the plugin's header
-// instead of a local extern block.
-#include "VideoDX11Plugin.h"
+// instead of a local extern block. Reached through the backend-neutral entry points
+// (src/render/common/render_backend.h): the DX11 backend's are forwarders to those four
+// (src/render/dx11/render_backend_dx11.cpp); another backend supplies its own.
+#include "render_backend.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -122,12 +124,12 @@ void VideoInterfaceFillDx11Slot(Video::Device* device) { FillDx11Slot(device); }
 // VideoDX9-x64.dll failed, and only with the Runtime DLL absent.
 void VideoInterfaceFillDx9Placeholder(Video::Device* device) {
     // B5 DEV-A: the Device arrives typed and both entry points already have the
-    // slot's exact types (VideoDX11Plugin.h), so the three dx11_seam casts that
+    // slot's exact types (render_backend.h), so the three dx11_seam casts that
     // stood here are gone; the HMODULE goes into the header's `void* module`.
     Video::Device::InterfaceSlot& slot = device->dllSlots[kInterfaceDX9];
     slot.module           = SentinelModule();
-    slot.getDeviceName    = &VideoDX11::Dx9Placeholder_GetDeviceName;
-    slot.createDeviceData = &VideoDX11::Dx9Placeholder_CreateDeviceData;
+    slot.getDeviceName    = &Render::PlaceholderDeviceName;
+    slot.createDeviceData = &Render::PlaceholderCreateDeviceData;
     printf("[VideoInterface] DX9 slot filled with the cutover PLACEHOLDER on Device %p "
            "(VideoDX9-x64.dll cannot load without Runtime-x64.dll)\n", static_cast<void*>(device));
 }
@@ -138,16 +140,16 @@ void FillDx11Slot(Video::Device* device) {
     // B5 DEV-A: as the placeholder fill above -- typed Device, exact types.
     Video::Device::InterfaceSlot& slot = device->dllSlots[kInterfaceDX11];
     slot.module           = SentinelModule();
-    slot.getDeviceName    = &VideoDX11::Dx11_GetDeviceName;
-    slot.createDeviceData = &VideoDX11::Dx11_CreateDeviceData;
+    slot.getDeviceName    = &Render::DeviceName;
+    slot.createDeviceData = &Render::CreateDeviceData;
 
     g_filled = true;
     printf("[VideoInterface] DX11 slot pre-filled on Device %p: "
            "module=%p GetDeviceName=%p CreateDeviceData=%p — Runtime will not "
            "LoadLibrary VideoDX11-x64.dll\n",
            static_cast<void*>(device), (void*)SentinelModule(),
-           reinterpret_cast<void*>(&VideoDX11::Dx11_GetDeviceName),
-           reinterpret_cast<void*>(&VideoDX11::Dx11_CreateDeviceData));
+           reinterpret_cast<void*>(&Render::DeviceName),
+           reinterpret_cast<void*>(&Render::CreateDeviceData));
     fflush(stdout);
 }
 

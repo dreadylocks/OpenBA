@@ -25,8 +25,8 @@
 #include "Game/GameLoadDialogLoopT.h"
 #include "Game/GameLoaderLoop.h"
 #include "Dialog/ModDialog.h"
-#include "Dialog/ExtensionsDialog.h"   // EXT SEAM: the Extensions button (NOT RETAIL)
-#include "ext/neighbour/lobby_panel.h"    // EXT SEAM: ext.neighbour's Multiplayer button (NOT RETAIL)
+#include "Dialog/ExtensionsDialog.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): the Extensions button
+#include "ext/neighbour/lobby_panel.h"    // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour's Multiplayer button
 #include "Dialog/NewGameDialog.h"
 #include "Dialog/MapParamsDialog.h"
 #include "Dialog/AchievementDialog.h"
@@ -41,6 +41,7 @@
 #include "Dialog/SaveLoadDialog.h"      // SaveLoadDialog's constructor 0x1400b8270
 #include "Dialog/OptionsDialog.h"       // OptionsDialog's constructor 0x140075150
 #include "system/Configuration.h"      // B3R: System::Configuration, RtSystem_Configuration_CurrentBuildId
+#include "openba_build_info.h"         // OPENBA_GIT_HASH / OPENBA_BUILD_DATE (generated into build/<flavour>/gen)
 #include "save/SaveLoad.h"             // B3R: RtSave_SaveLoad_Dtor
 #include "Dialog/dialog_exe_helpers.h"
 #include "system/String.h"
@@ -521,10 +522,6 @@ void MainMenuDialog::OnOpened() {
     // ?CurrentVersion@Configuration@System@@ is a by-value static.
     {
         System::String versionStr(System::Configuration::CurrentVersion());
-        // Standalone-only: the OpenBA version (CMake project VERSION, macro
-        // OPENBA_VERSION) follows the retail version, "1.0.7  OpenBA v1.0.0".
-        versionStr += "  OpenBA v" OPENBA_VERSION;
-        printf("[BuildId] version text \"%s\"\n", versionStr._data);
         textBuildNotice->SetParameter(0, versionStr);
     }
     // ?CurrentBuildId@ has no member yet (Configuration.h note 2): its body is the
@@ -532,10 +529,17 @@ void MainMenuDialog::OnOpened() {
     {
         System::String buildIdStr;
         RtSystem_Configuration_CurrentBuildId(&buildIdStr);
+        // Standalone-only (README "Versioning"): retail's version and build id
+        // stay on the left, untouched; OpenBA's own stamp follows on the right:
+        // "17Se10  OpenBA v1.0.0 2424a9093 2026-10-19". OPENBA_VERSION is the
+        // CMake project VERSION; the commit and date come from the header the
+        // openba-build-info target regenerates on every build.
+        buildIdStr += "  OpenBA v" OPENBA_VERSION " " OPENBA_GIT_HASH " " OPENBA_BUILD_DATE;
+        printf("[BuildId] build text \"%s\"\n", buildIdStr._data);
         textBuildNotice->SetParameter(1, buildIdStr);
     }
 
-    // EXT SEAM (docs/extensions/DESIGN.md §3 "Menu"; NOT RETAIL): the
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): DESIGN.md §3 "Menu" -- the
     // Extensions button beside Mods. Retail's steps above are untouched; under
     // the gate's command-line faithful profile this adds nothing.
     ExtensionsDialog_AttachMenuButton(this);
@@ -654,7 +658,7 @@ void MainMenuDialog::OnElementEvent(Object::InternalPtr<UI::Element>* /*element*
         ModDialog_OpenFromMainMenu(this);
         break;
     case kExtensionsMenuButtonId:
-        // EXT SEAM (NOT RETAIL): the Extensions button ExtensionsDialog_
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): the Extensions button ExtensionsDialog_
         // AttachMenuButton adds in OnOpened. Retail has no id 13.
         printf("[MainMenuDialog::OnCommand] -> OpenExtensions (ExtensionsDialog)\n");
         ExtensionsDialog_OpenFromMainMenu(this);

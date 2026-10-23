@@ -3,7 +3,7 @@
 // src/platform/common/platform_cpu.h -- CPU affinity and core topology (block CPULIMIT)
 // ============================================================================
 // NOT RETAIL. Retail never touches its affinity and never asks how many cores it has.
-// The seam under src/ext/cpu/ (the `sys.cpu_limit` settings key and the thread-count
+// The seam under src/platform/common/cpu/ (the `sys.cpu_limit` settings key and the thread-count
 // roster, docs/extensions/handins/CPULIMIT.md). D4_RULES C1: namespace `Platform`,
 // free functions, NO OS header here. Bodies: src/platform/win/cpu_win.cpp,
 // src/platform/posix/cpu_posix.cpp.

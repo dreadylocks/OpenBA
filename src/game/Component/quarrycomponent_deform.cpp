@@ -65,6 +65,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "Component/still_terrain.h"   // STILLTERRAIN: StillTerrain::Bump (the terrain epoch)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 namespace {
 
@@ -326,6 +327,7 @@ void QuarryComponent::OnMessage(int /*message*/, void* /*data*/, uint32_t /*arg0
                 tileGrid->field_0xA2 |= dirty;
                 cell->terrainType = 5;
                 TerrainSidecar::NoteWrite(cell);   // [terrain sidecar] mirror
+                CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
 
                 if (dirty) {
                     RegionGraph* regionObj = tileGrid->regionGraph;
@@ -337,6 +339,7 @@ void QuarryComponent::OnMessage(int /*message*/, void* /*data*/, uint32_t /*arg0
 
                 // MapCell::occupant (+0x08) is the ENTITY raster — the quarry claims the dug cell.
                 cell->occupant = entity;
+                CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
                 ++converted;
             }
         }

@@ -43,5 +43,18 @@ int32_t PlaneStride(int32_t width);
 void PlanesToArgb(const uint8_t* andPlane, const uint8_t* xorPlane, int32_t width,
                   int32_t height, uint32_t inverted, uint32_t* argb, int32_t pitchPixels);
 
+// Retail's classification of a 32-bit texel (VideoDX11 slot 8, 0x180005520): alpha 0 ->
+// AND bit (transparent); else blue byte != 0 -> XOR bit (white); else neither (black).
+// `texels` is width * height BGRA8 pixels (alpha in the top byte, blue in the low byte),
+// `pitchPixels` apart; the planes are PlaneStride(width) * height bytes each and are
+// overwritten (zeroed first). Same result as devicedata.cpp's bit loop + byte reversal.
+void TexelsToPlanes(const uint32_t* texels, int32_t width, int32_t height,
+                    int32_t pitchPixels, uint8_t* andPlane, uint8_t* xorPlane);
+
+// Nearest-neighbour upscale by an integer `factor` (>= 1): `dst` is (width * factor) x
+// (height * factor) pixels, `dstPitchPixels` apart. A 1-bit cursor stays crisp.
+void UpscaleNearest(const uint32_t* src, int32_t width, int32_t height, int32_t factor,
+                    uint32_t* dst, int32_t dstPitchPixels);
+
 }  // namespace Cursor
 }  // namespace Platform

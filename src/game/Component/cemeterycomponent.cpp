@@ -31,6 +31,7 @@
 #include "Entity/CitizenBehavior.h"
 #include "Game/Map.h"
 #include "Game/PathfinderThread.h"
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // ============================================================
 // Resolved helpers
@@ -197,6 +198,7 @@ char CemeteryComponent::EnterBuilt() {
         world->field_0xA2 |= walkableZone ? 1 : 0;   // retail ORs the byte (row 311)
         cell->terrainType = 2;
         TerrainSidecar::NoteWrite(cell);   // [terrain sidecar] mirror
+        CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
 
         if (walkableZone) {
             const int mapWidth = world->size;
@@ -214,6 +216,7 @@ char CemeteryComponent::EnterBuilt() {
         }
 
         cell->occupant = nullptr;   // a null InternalBasePtr (+0x08)
+        CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
         ++claimed;
     }
 

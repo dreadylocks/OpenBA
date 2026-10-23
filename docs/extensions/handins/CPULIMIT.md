@@ -1,5 +1,7 @@
 # CPULIMIT -- `sys.cpu_limit`, the CPU topology and the thread-count roster (hand-in)
 
+(moved to src/platform/common/cpu/ 2026-10-20: a platform helper, not an extension)
+
 Block 1 of `THREADPLAN.md` §2. Branch `worktree-agent-a71a201c2c74c81af`, base main `eff2464a1`.
 Static gate only (the game was not run): the coordinator's first masked run is the live proof.
 

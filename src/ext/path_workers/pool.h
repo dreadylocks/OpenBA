@@ -34,12 +34,13 @@
 #include <deque>
 #include <mutex>
 
+namespace Ext {
 namespace PathWorkers {
 
 constexpr int kMaxWorkers = 4;
 constexpr int kStepCosts  = 0x20;   // GridPathSearch::stepCost[0x20]
 
-// The worker count is Cpu::PathWorkers (src/ext/cpu/roster.h, block CPULIMIT):
+// The worker count is Cpu::PathWorkers (src/platform/common/cpu/roster.h, block CPULIMIT):
 // clamp(physical cores in the affinity mask - 2 - (render_pipe ? 1 : 0), 1, kMaxWorkers).
 // (It replaced ChooseWorkers(hardware_concurrency) = clamp(threads - 2, 1, 4).)
 
@@ -140,3 +141,4 @@ inline void DispatchCommand(Pool& pool, Host& host, const Command& cmd) {
 }
 
 }  // namespace PathWorkers
+}  // namespace Ext

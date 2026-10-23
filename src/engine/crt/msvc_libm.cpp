@@ -14,10 +14,23 @@
 
 #include <cstdint>
 #include <cstring>
+#if defined(__SSE2__)
 #include <emmintrin.h>
+#else
+#include <cmath>
+#endif
 
 #if defined(__FMA__) || defined(__FMA4__)
 #error "msvc_libm.cpp must not be compiled with FMA enabled: a contracted multiply-add rounds once where retail rounds twice."
+#endif
+
+// aarch64 contracts a*b+c into fmadd, which rounds once where retail rounds twice. The
+// compiler macro __FP_FAST_FMA only says the hardware HAS fma (clang and GCC define it on
+// every aarch64 target whatever the contraction mode), so it cannot be tested here.
+// CMakeLists.txt passes -ffp-contract=off in the common flags; clang also honours the
+// pragma, which keeps this file correct when it is built by hand.
+#if defined(__aarch64__) && defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
 #endif
 
 namespace MsvcLibm {
@@ -47,10 +60,24 @@ inline double   F64(uint64_t u) { double d;   std::memcpy(&d, &u, 8); return d; 
 inline double K(uint64_t bits) { return F64(bits); }
 
 // cvttsd2si / cvttpd2dq -- truncate toward zero.
-inline int32_t TruncToI32(double d) { return _mm_cvttsd_si32(_mm_set_sd(d)); }
+inline int32_t TruncToI32(double d) {
+#if defined(__SSE2__)
+    return _mm_cvttsd_si32(_mm_set_sd(d));
+#else
+    const double v = std::trunc(d);
+    return v >= -2147483648.0 && v < 2147483648.0 ? static_cast<int32_t>(v) : INT32_MIN;
+#endif
+}
 // cvtpd2dq -- round to nearest, ties to even. powf uses this where sinf/cosf
 // use the truncating form; they are not interchangeable.
-inline int32_t RoundToI32(double d) { return _mm_cvtsd_si32(_mm_set_sd(d)); }
+inline int32_t RoundToI32(double d) {
+#if defined(__SSE2__)
+    return _mm_cvtsd_si32(_mm_set_sd(d));
+#else
+    const double v = std::nearbyint(d);
+    return v >= -2147483648.0 && v < 2147483648.0 ? static_cast<int32_t>(v) : INT32_MIN;
+#endif
+}
 
 constexpr uint64_t kSignBit64 = 0x8000000000000000ull;
 constexpr uint64_t kAbsMask64 = 0x7fffffffffffffffull;
@@ -177,7 +204,11 @@ float Sqrtf(float x) {
         return F32(0xffc00000u);                      // retail: negative -> domain error
     }
     COV(sqrtHardware);
+#if defined(__SSE2__)
     return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
+#else
+    return std::sqrt(x);
+#endif
 }
 
 // ===========================================================================

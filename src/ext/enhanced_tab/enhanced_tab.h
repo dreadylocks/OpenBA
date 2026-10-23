@@ -6,7 +6,7 @@
 // of rows; each extension contributes its own rows through a Contribution:
 //   ambient_occlusion/enhanced_entry.cpp   combo "Ambient occlusion" + slider "AO strength"
 //   better_trees/enhanced_entry.cpp        combo "Better trees"
-//   enhanced_tab/shadow_res_entry.cpp      combo "Max shadow resolution"
+//   max_shadow_res/enhanced_entry.cpp      combo "Max shadow resolution"
 //   seamless_loops/enhanced_entry.cpp      combo "Seamless ambient loops"
 // A contribution keeps its own element pointers (found by name in the new page); this file holds
 // only the dialog key, never OptionsDialog fields (its sizeof 0x1C0 is retail's, asserted). One
@@ -24,6 +24,7 @@
 #include "object/TypeInfo.h"
 #include "system/String.h"
 #include "ui/Element.h"
+#include "ext/ui/find_element.h"   // Ext::FindElement<T>: the contributions find their elements by name
 
 namespace UI {
 class TabElement;
@@ -44,13 +45,6 @@ const Contribution& AmbientOcclusionEntry();
 const Contribution& BetterTreesEntry();
 const Contribution& MaxShadowResEntry();
 const Contribution& SeamlessLoopsEntry();
-
-// An element of type T by name in the new page; null when absent or of another type.
-template <class T>
-T* FindIn(UI::Element* page, const char* name) {
-    UI::Element* e = page->FindElement(System::String(name)).Get();
-    return ::Object::IsDerivedFromNullSafe(e, T::TypeId()) ? static_cast<T*>(e) : nullptr;
-}
 
 // Whether this build offers the tab: always, except under the gate (`/profile:faithful` from the
 // command line), whose menus stay exactly retail's (Ext::GateProfileForced). Deliberately NOT a

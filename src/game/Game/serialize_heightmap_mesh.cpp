@@ -58,9 +58,11 @@
 #include <cstdlib>
 #include <cmath>
 #include "Game/exe_bodies.h"
+#include "Work/exe_bodies.h"      // WorkBase_TreeNodeFree (0x140014c30)
 #include "Game/WorldGeometryElements.h"
 #include "Action/PathAvl.h"
 #include "math/Math.h"
+#include "ext/terrain_batch/terrain_batch.h"   // ext.terrain_batch: the run index buffer (BuildTerrainMesh)
 
 namespace {
 
@@ -394,6 +396,10 @@ void WorldGeometry::BuildTerrainMesh() {
         printf("[sub_c1e0] IB Set returned %d (idxBytes=%d quadsPerChunk=%d)\n",
                ibSetOk ? 1 : 0, idxBytes, quadsPerChunk);
         fflush(stdout);
+
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): ext.terrain_batch
+        // builds its run index buffer from this list, repeated once per chunk of a run.
+        if (_extTerrainBatch != nullptr) Ext::TerrainBatch::OnTerrainIndices(*this, idxBuf, idxCount);
     }
 
     // (8) Free the scratch buffers (the original's MemFree(idxBuf);
@@ -416,8 +422,11 @@ void WorldGeometry::BuildTerrainMesh() {
 // +0x10, right +0x18), regenerates each chunk's vertices (0x1400ac880) and
 // uploads them into the master VertexBuffer.
 //
-// The original also re-meshes the decals at +0x1F0 whose box overlaps a rebuilt
-// chunk (0x1400ace40); omitted, see the TODO at the end.
+// After each chunk's upload (0x1400aae7e..0x1400aafbe) every decal at +0x1F0
+// whose box overlaps the chunk's vertex range (inclusive: a shared edge counts)
+// goes into a local int set; once every chunk is uploaded each set member, in
+// ascending index, is re-tessellated against the new heights (0x1400ab06f). The
+// walk does not test the material: a freed slot is re-tessellated too.
 namespace { std::atomic<bool> s_chunkUpdateWarned{false}; }
 
 void WorldGeometry::RebuildDirtyChunks() {
@@ -448,6 +457,9 @@ void WorldGeometry::RebuildDirtyChunks() {
 
     AvlNode28* treeRoot = _dirtyChunks.root;    // +0xE8
 
+    // The decals to re-tessellate: a local Collection::Set<int> (0x28 nodes).
+    AvlTreeHead<AvlNode28> decalSet{nullptr, 0, {}};
+
     auto upload = [&](const AvlNode28* node) {
         int chunkIdx = node->key;
         int row = chunkIdx / chunksPerSide;
@@ -459,6 +471,25 @@ void WorldGeometry::RebuildDirtyChunks() {
         int byteSize   = vertsPerChunk * 0x10;
         int byteOffset = (row * chunksPerSide + col) * vertsPerChunk * 0x10;
         _vertexBuffer.Set(byteSize, byteOffset, vertScratch);   // +0x100
+
+        // The decals over this chunk (0x1400aae53..0x1400aafbe). The chunk's vertex
+        // range is [x0, x1] x [y0, y1]; a decal is skipped when its box lies wholly
+        // outside it (signed compares, JG / JL).
+        int x0 = _chunkSize * col;          // +0xC8, re-read after the upload
+        int y0 = _chunkSize * row;
+        int x1 = _fieldCC + x0;             // +0xCC
+        int y1 = _fieldCC + y0;
+        for (int i = 0; i < _decals._size; ++i) {   // +0x1F8
+            const GeometryBatch& decal = _decals._data[i];   // +0x1F0
+            if (decal.minX > x1) continue;   // +0x2C
+            if (decal.maxX < x0) continue;   // +0x34
+            if (decal.minY > y1) continue;   // +0x30
+            if (decal.maxY < y0) continue;   // +0x38
+            // Collection::Set<int>::Insert, inlined (0x14001a4f0's body; the rebalance
+            // is 0x14001a8c0). An index already in the set is left as it is.
+            AvlNode28* inserted;
+            AvlInsert28(&decalSet, &inserted, &i);
+        }
     };
 
     // Iterative in-order walk using the parent links to ascend.
@@ -488,6 +519,36 @@ void WorldGeometry::RebuildDirtyChunks() {
         }
     }
 
+    // Re-tessellate the decals, in ascending index (0x1400ab02e..0x1400ab0bd: the
+    // set's in-order walk, TessellateDecal(idx, 0, 0, 0) at 0x1400ab06f).
+    if (decalSet.root) {
+        AvlNode28* node = decalSet.root;
+        while (node->left) node = node->left;   // leftmost
+
+        while (node) {
+            TessellateDecal(node->key, 0, 0, 0);   // 0x1400ace40
+
+            // The in-order successor.
+            if (node->right) {
+                node = node->right;
+                while (node->left) node = node->left;
+            } else {
+                while (true) {
+                    AvlNode28* parent = node->parent;
+                    if (!parent) {
+                        node = nullptr;
+                        break;
+                    }
+                    if (parent->right != node) {
+                        node = parent;
+                        break;
+                    }
+                    node = parent;
+                }
+            }
+        }
+    }
+
     // Free the dirty tree (post-order via FUN_140014c30 in the original —
     // "free children, then self").
     auto freeNode = [&](auto&& self_, AvlNode28* node) -> void {
@@ -501,13 +562,18 @@ void WorldGeometry::RebuildDirtyChunks() {
     _dirtyChunks.root = nullptr; // +0xE8
     _dirtyChunks.count = 0;      // +0xF0
 
+    // Free the decal set (0x1400ab0ee: both children through 0x140014c30, then the root).
+    if (AvlNode28* top = decalSet.root) {
+        WorkBase_TreeNodeFree(&decalSet.root, top->left);    // +0x10
+        WorkBase_TreeNodeFree(&decalSet.root, top->right);   // +0x18
+        System::MemoryAllocator::MemFree(top);
+    }
+    decalSet.root = nullptr;
+    decalSet.count = 0;
+
     if (scratch.data) {
         System::MemoryAllocator::MemFree(scratch.data);
     }
-
-    // TODO (in-game): the original also walks the decals at +0x1F0 for each
-    // rebuilt chunk and re-meshes any whose box overlaps the chunk's region
-    // (FUN_1400ace40). Skipped here (the menu scene has none).
 }
 
 

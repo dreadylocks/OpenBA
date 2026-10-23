@@ -73,7 +73,7 @@ private:
 // The "Extensions" button's click (MainMenuDialog::OnElementEvent, id 13).
 void ExtensionsDialog_OpenFromMainMenu(MainMenuDialog* menu);
 
-// EXT SEAM in MainMenuDialog::OnOpened: instantiate
+// Called from the seam in MainMenuDialog::OnOpened: instantiate
 // Dialog/Extensions.rsc:buttonExtensions beside buttonMod as the Extensions
 // button (id 13). Does nothing when the gate forced the faithful profile on
 // the command line (Ext::GateProfileForced), when the menu has no buttonMod,

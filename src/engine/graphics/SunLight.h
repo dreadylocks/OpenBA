@@ -151,8 +151,8 @@ public:
     // `(this, ret, renderer)` order and placement-news the prvalue.
     Camera GetSunCamera(Renderer& renderer) const;   // 0x180107010
 
-    // NOT RETAIL -- the engine end of an EXT SEAM (ext.eye_camera,
-    // docs/extensions/handins/EYECAM.md §9). Null always, except for the span
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md §9): the engine end of ext.eye_camera's shadow-fit view.
+    // Null always, except for the span
     // of the one Renderer::Draw call the eye camera makes in its seam at
     // GameUpdateLoop::Draw step 7 (the selection is there; src/engine does not
     // include src/ext). While set, AddDrawItems fits the shadow camera to this
@@ -163,8 +163,8 @@ public:
     // pointer, not a hook: no indirect call, GetSunCamera itself unchanged.
     static const Camera* _extShadowFitView;
 
-    // NOT RETAIL -- the engine end of an EXT SEAM (ext.max_shadow_res,
-    // docs/extensions/handins/FAA-SHADOW.md; FOLIAGE_AA.md §7). Null by default
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/FAA-SHADOW.md): the engine end of ext.max_shadow_res
+    // (FOLIAGE_AA.md §7). Null by default
     // (and always under the faithful profile); otherwise src/ext/registry_boot.cpp
     // points it at the row's live bool. While it points at `true` and the retail
     // "Shadow Resolution" combo is at High (`Configuration::shadowScalar == 0`),

@@ -20,10 +20,10 @@ namespace {
 UI::ComboElement* g_combo = nullptr;
 
 void Open(UI::Element* page) {
-    g_combo = FindIn<UI::ComboElement>(page, "comboBetterTrees");
+    g_combo = FindElement<UI::ComboElement>(page, "comboBetterTrees");
     const int mode = BetterTrees::Current().mode;
     if (g_combo != nullptr) g_combo->SetCurrentItem(mode);
-    std::fprintf(stderr, "[BetterTreesMenu] combo=%p mode=%d\n", static_cast<void*>(g_combo), mode);
+    std::fprintf(stderr, "[BetterTrees] combo=%p mode=%d\n", static_cast<void*>(g_combo), mode);
 }
 
 void Apply() {
@@ -31,7 +31,7 @@ void Apply() {
     BetterTrees::Params p;
     p.mode = g_combo->_currentItem;
     BetterTrees::Set(p);
-    std::fprintf(stderr, "[BetterTreesMenu] Apply: mode=%d\n", BetterTrees::Current().mode);
+    std::fprintf(stderr, "[BetterTrees] Apply: mode=%d\n", BetterTrees::Current().mode);
 }
 
 void Close() { g_combo = nullptr; }

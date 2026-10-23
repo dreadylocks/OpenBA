@@ -51,6 +51,7 @@
 #include <cstdlib>
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
 #include "Game/Minimap.h"   // Minimap::ClearTerrain (0x1400a4d30)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // dc20 stale-occupant EVICTION tally. Counts only the arm that actually destroys
 // (MarkForRemoval + push onto the world removal queue), not the arm that skips an
@@ -256,6 +257,7 @@ void MapComponent_overlay_dc20(Map* param_1, ComponentEntity* const* owner, uint
 
                     iVar13 = iVar13 + 1;
                     *occupant = bVar19 ? *owner : nullptr;   // the owner / a null InternalBasePtr
+                    CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
                 } while (iVar13 < param_6);
             }
             iVar18 = iVar18 + 1;
@@ -329,6 +331,7 @@ void CreateNaturalResource_impl_dee0(Map* param_1, ComponentEntity* const* owner
 
                     iVar12 = iVar12 + 1;
                     plVar11->occupant = nullptr;   // +0x08, a null InternalBasePtr
+                    CellStamp::NoteWrite(plVar11);   // [AMBMEMO] cell write clock
                 } while (iVar12 < param_5);
             }
             iVar16 = iVar16 + 1;

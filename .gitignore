@@ -87,3 +87,11 @@ docs/history/notes/wp_runs/*.err
 # dxvk-native for the Linux build: fetched by tools/fetch_dxvk_native.sh (sha256-pinned), never committed;
 # third_party/dxvk-native/README.md (the layout) is
 third_party/dxvk-native/*/
+
+# macOS port: local dependency builds and outputs
+/dist/
+/run/
+third_party/dxmt_src/
+third_party/airconv_build/build/
+third_party/llvm15_arm64/source/
+third_party/llvm15_arm64/build/

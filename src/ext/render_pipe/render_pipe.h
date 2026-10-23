@@ -20,6 +20,7 @@
 
 #include <cstdint>
 
+namespace Ext {
 namespace RenderPipe {
 
 // Install the seam when ext.render_pipe is on (the switch-off is the hook's own,
@@ -51,3 +52,4 @@ bool Threaded();
 Counters TakeWindow();
 
 }  // namespace RenderPipe
+}  // namespace Ext

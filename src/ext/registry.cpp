@@ -6,6 +6,7 @@
 // ============================================================================
 
 #include "ext/registry.h"
+#include "ext/savetail.h"   // ResetAllState: UnlockForGame (class C state goes with the game)
 
 #include <cstring>
 
@@ -45,6 +46,15 @@ const Entry kEntries[] = {
       "Dialogs no longer flash to a corner when the UI scale changes.",
       0, [](State& s) -> bool& { return s.fix.ui_scale_layout; } },
 
+    // ROCKSEAT (docs/extensions/handins/ROCKSEAT.md, docs/retail_bugs.md section 7): rocks and ore
+    // are drawn seated on the slope (the valued key rock_seat_mode below picks how). Render only:
+    // the serialized transform, the sim and the save are retail's.
+    { "rock_seat", Tier::Fix, Class::None, true,
+      "Rocks sit on the ground",
+      "Rocks and iron deposits on a slope no longer float on their downhill side, so their shadows "
+      "meet them.",
+      0, [](State& s) -> bool& { return s.fix.rock_seat; } },
+
     // Extensions. Each one adds a field to Ext::Extensions and a row here:
     // Tier::Extension, its Class, default true for class A / false for B or C, and for class B or C its
     // formatVersion (>= 1). The id is [a-z0-9_]+ (the unit tests check every row).
@@ -54,6 +64,24 @@ const Entry kEntries[] = {
       "Eye-level camera",
       "Follow a citizen at eye level, looking where they look.",
       0, [](State& s) -> bool& { return s.ext.eye_camera; } },
+
+    // BETTERCAM (docs/extensions/handins/BETTERCAM.md): the two camera fixes of Banished Game Tweaks, in source.
+    // Class B (PR review): with the row on, the zoom target and the camera distance, which retail serializes,
+    // can hold values outside retail's range, so a save records the extension.
+    { "better_camera", Tier::Extension, Class::B, false,
+      "Better camera",
+      "Zoom in much closer and out much farther, and keep the camera's tilt when zoomed out "
+      "instead of flattening to top-down.",
+      1, [](State& s) -> bool& { return s.ext.better_camera; } },
+    // HIGHLIMITS (docs/extensions/handins/HIGHLIMITS.md): the limit spinners of the Town Hall, the Limits
+    // window and the production buildings take values up to 999,999,999 and 9 typed digits instead of
+    // 999,999 and 6. Class B: no serialized state, but a limit above 999,999 is a value the faithful
+    // spinner cannot show, so it is locked for the game and recorded in the save.
+    { "high_limits", Tier::Extension, Class::B, false,
+      "Higher limit values",
+      "Lets the limit boxes in the Town Hall, the Limits window and the production buildings take values "
+      "up to 999,999,999 (retail stops at 999,999). Play diverges.",
+      1, [](State& s) -> bool& { return s.ext.high_limits; } },
 
     { "sharp_ui", Tier::Extension, Class::A, true,
       "Sharp UI",
@@ -84,6 +112,12 @@ const Entry kEntries[] = {
       "Faster scene gathering",
       "Skips out-of-view objects without touching them. Same picture.",
       0, [](State& s) -> bool& { return s.ext.draw_gather; } },
+    // DRAWBATCH (docs/extensions/handins/DRAWBATCH.md): consecutive decals, roads and smoke
+    // emitters of one material drawn as one dynamic draw; the same vertex bytes in the same order.
+    { "draw_batch", Tier::Extension, Class::A, true,
+      "Batched small draws",
+      "Draws runs of decals, roads and smoke in one go. Same picture.",
+      0, [](State& s) -> bool& { return s.ext.draw_batch; } },
     { "walk_batch", Tier::Extension, Class::A, true,
       "Batched walking",
       "Above 1x speed, walking steps take a shortcut. Same positions.",
@@ -105,7 +139,7 @@ const Entry kEntries[] = {
       0, [](State& s) -> bool& { return s.ext.render_pipe; } },
 
     // CULLPAR (docs/extensions/handins/CULLPAR.md): the draw gather's walk split over helper
-    // threads; the helper count is Cpu::CullHelpers (src/ext/cpu/roster.h), 0 on 4 cores.
+    // threads; the helper count is Cpu::CullHelpers (src/platform/common/cpu/roster.h), 0 on 4 cores.
     { "gather_threads", Tier::Extension, Class::A, true,
       "Parallel culling",
       "Faster scene gathering split over threads (5+ cores).",
@@ -140,6 +174,14 @@ const Entry kEntries[] = {
       "Max shadow resolution",
       "Shadow Resolution High builds a 4096 shadow map instead of 2048.",
       0, [](State& s) -> bool& { return s.ext.max_shadow_res; } },
+    // RESTRICTEDFOODS (docs/extensions/handins/RESTRICTEDFOODS.md): the foods checked on the Foods page stay
+    // Edible for storage, markets and recipes but are not eaten by citizens. Class C: the checked list is the
+    // town's own state, recorded in the save's tail (src/ext/restricted_foods/save_state.cpp).
+    { "restricted_foods", Tier::Extension, Class::C, false,
+      "Restricted foods",
+      "Lets you stop citizens eating foods you choose, from the Foods page in a game. Play diverges; the "
+      "choice is recorded in the save.",
+      1, [](State& s) -> bool& { return s.ext.restricted_foods; } },
     // HITCH_PFBURST (docs/extensions/handins/HITCH_PFBURST.md): a per-frame budget of the cold
     // citizens' warm-house scans (one region path search per residence), so a cold spell at high
     // speed spreads its scans over a few frames instead of one 10-20 ms frame.
@@ -171,6 +213,15 @@ const Entry kEntries[] = {
       "Saves are written on a worker thread while the town holds still for a moment; the screen "
       "and the camera keep moving. Identical save files.",
       0, [](State& s) -> bool& { return s.ext.background_save; } },
+    // TERRAINBATCH (docs/extensions/handins/TERRAINBATCH.md; gpuframe/ideas_passes.md ranks 2 and 4):
+    // each grid row's run of visible terrain chunks is one draw (same vertices, indices, order and
+    // state as the chunk draws), and the shadow pass skips the chunks whose shadow cannot reach the
+    // view. The picture is unchanged.
+    { "terrain_batch", Tier::Extension, Class::A, true,
+      "Batched terrain drawing",
+      "Draws each row of visible terrain in one call and skips shadow work for terrain whose shadow "
+      "cannot reach the screen. Same picture.",
+      0, [](State& s) -> bool& { return s.ext.terrain_batch; } },
     // SEAMLESS (docs/extensions/handins/SEAMLESS.md, CHATTER-DIAG.md): every looping ambience's decoded
     // PCM loses its codec tail and has its end folded into its start, at load. The seam
     // Audio::SoundBuffer::_extLoopSeam is installed at boot, so a toggle takes effect at the next start.
@@ -179,6 +230,13 @@ const Entry kEntries[] = {
       "Blends the end of each looping ambient sound into its start, removing the dropout at the loop "
       "point. Takes effect at the next start.",
       0, [](State& s) -> bool& { return s.ext.seamless_loops; } },
+    // NOFOG (docs/extensions/handins/NOFOG.md): the fog is taken off the finished lighting each frame, so
+    // the far map stays clear when the camera is zoomed out. Class A: a picture-only change, no sim effect,
+    // nothing saved, live. OFF by default: how the map looks is the player's choice (like eye_camera).
+    { "no_fog", Tier::Extension, Class::A, false,
+      "No fog",
+      "Removes the fog that hazes the far map when the camera is zoomed far out.",
+      0, [](State& s) -> bool& { return s.ext.no_fog; } },
     // NEIGHBOUR TOWNS (this fork; docs/fork/NEIGHBOUR_TOWNS.md): two players' towns talk through
     // a relay server (neighbour.* keys in settings.cfg). Class C: the town's room state is in the
     // save's tail record (src/ext/neighbour/protocol.h SavedState).
@@ -223,6 +281,12 @@ const ValueKey kValueKeys[] = {
     // retail's 1024 / 512 whatever this says (src/engine/graphics/sunlight.cpp SunMapRawSize).
     { "max_shadow_size", "max_shadow_res", 4096, 8192, 4096,
       [](State& s) -> int32_t& { return s.val.max_shadow_size; }, kMaxShadowSizes, 2 },
+    // ROCKSEAT: how fix.rock_seat seats a rock (src/ext/rock_seat/rock_seat_math.h): 1 sinks it to the
+    // lowest ground under its bottom ring, 2 tilts it to the slope and seats it (the default: sink
+    // buries small rocks on a slope, ROCKSEAT.md section 4). The only valued key owned by a fix; the
+    // fix's bool is the off switch.
+    { "rock_seat_mode", "rock_seat", 1, 2, 2,
+      [](State& s) -> int32_t& { return s.val.rock_seat_mode; }, nullptr, 0 },
 };
 
 constexpr int kValueKeyCount = static_cast<int>(sizeof(kValueKeys) / sizeof(kValueKeys[0]));
@@ -236,6 +300,8 @@ Profile     g_profile = Profile::PerEntry;
 bool        g_profileFromCommandLine = false;
 const void* g_lockOwner = nullptr;
 uint32_t g_lockEpoch = 0;   // LockEpoch(): bumped by Install / LockForGame* / UnlockForGame
+bool g_keepRequestNext = false;   // KeepRequestOnNextLock(): the next LockForGame is an in-game B / C change
+bool g_lockKeepsRequest = false;  // LockKeepsRequest(): the lock held now is that reload's
 
 }  // namespace
 
@@ -403,6 +469,8 @@ void Install(const State& requested, Profile profile, bool profileFromCommandLin
     g_profileFromCommandLine = profileFromCommandLine;
     g_lockOwner = nullptr;
     ++g_lockEpoch;
+    g_keepRequestNext = false;
+    g_lockKeepsRequest = false;
 }
 
 Profile CurrentProfile() { return g_profile; }
@@ -425,6 +493,8 @@ void LockForGame(const void* owner) {
             e.slot(g_active) = e.slot(g_requested);
     g_lockOwner = owner;
     ++g_lockEpoch;
+    g_lockKeepsRequest = g_keepRequestNext;   // one shot: only the reload that asked for it
+    g_keepRequestNext = false;
 }
 
 bool LockForGameWithSet(const void* owner, const std::vector<std::string>& ids) {
@@ -442,13 +512,22 @@ bool LockForGameWithSet(const void* owner, const std::vector<std::string>& ids) 
     }
     g_lockOwner = owner;
     ++g_lockEpoch;
+    g_lockKeepsRequest = false;
     return true;
 }
+
+void KeepRequestOnNextLock() { g_keepRequestNext = true; }
+
+bool LockKeepsRequest() { return Locked() && g_lockKeepsRequest; }
 
 void UnlockForGame(const void* owner) {
     if (owner == nullptr || owner != g_lockOwner) return;
     g_lockOwner = nullptr;
     ++g_lockEpoch;
+    g_lockKeepsRequest = false;
+    // A class C extension's per-town state goes with the town that held the lock: only the owner's unlock
+    // gets here, so a reload whose new loop already took the lock keeps the state it decoded.
+    SaveTail::ResetAllState();
     // Back at the menu nothing holds the lock: the active state is the request.
     for (const Entry& e : kEntries)
         e.slot(g_active) = e.slot(g_requested);

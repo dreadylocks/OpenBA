@@ -27,8 +27,8 @@
 
 namespace {
 
-using DrawGather::SideArray;
-using DrawGather::SideRecord;
+using Ext::DrawGather::SideArray;
+using Ext::DrawGather::SideRecord;
 
 // A model geometry: the fields the gather and Clean read, with Geometry::Clean's
 // box half (scene.cpp 0x1800a4420): bit 1 = local box changed -> recompute the
@@ -94,7 +94,7 @@ void ExtClean(ModelScene& sc, SideArray& side, Graphics::SceneAddLog& log) {
         ModelGeo* g = sc.nodes[i];
         if (g == nullptr) continue;
         const bool changed = g->dirty != 0 && g->Clean();
-        DrawGather::UpkeepAfterClean(side, static_cast<int32_t>(i), g, changed,
+        Ext::DrawGather::UpkeepAfterClean(side, static_cast<int32_t>(i), g, changed,
                                      [g](float* b) { std::memcpy(b, g->world, sizeof(g->world)); },
                                      g->flags, g->detail);
     }
@@ -144,7 +144,7 @@ UNIT_TEST(ext_draw_gather_node_visible_is_live_and_box_in_either_order) {
         for (int live = 0; live < 2; ++live)
             for (int box = 0; box < 2; ++box) {
                 int liveCalls = 0, boxCalls = 0;
-                const bool r = DrawGather::NodeVisible(
+                const bool r = Ext::DrawGather::NodeVisible(
                     hint != 0,
                     [&] { ++liveCalls; return live != 0; },
                     [&] { ++boxCalls; return box != 0; });
@@ -159,11 +159,11 @@ UNIT_TEST(ext_draw_gather_node_visible_is_live_and_box_in_either_order) {
             }
     SideRecord r{};
     r.flagsHint = 0x6u; r.detailHint = 1;
-    CHECK(DrawGather::HintPasses(r, 0x2u, 1));
-    CHECK(!DrawGather::HintPasses(r, 0x1u, 1));
-    CHECK(!DrawGather::HintPasses(r, 0x2u, 0));   // signed compare, as retail's
+    CHECK(Ext::DrawGather::HintPasses(r, 0x2u, 1));
+    CHECK(!Ext::DrawGather::HintPasses(r, 0x1u, 1));
+    CHECK(!Ext::DrawGather::HintPasses(r, 0x2u, 0));   // signed compare, as retail's
     r.detailHint = -5;
-    CHECK(DrawGather::HintPasses(r, 0x4u, -5));
+    CHECK(Ext::DrawGather::HintPasses(r, 0x4u, -5));
 }
 
 UNIT_TEST(ext_draw_gather_upkeep_reads_the_box_only_on_refresh) {
@@ -171,14 +171,14 @@ UNIT_TEST(ext_draw_gather_upkeep_reads_the_box_only_on_refresh) {
     int owner = 0, other = 0;
     int boxReads = 0;
     auto box = [&](float* b) { ++boxReads; std::memcpy(b, kBox0, sizeof(kBox0)); };
-    CHECK(DrawGather::UpkeepAfterClean(s, 2, &owner, false, box, 1u, 0));   // invalid: refresh
+    CHECK(Ext::DrawGather::UpkeepAfterClean(s, 2, &owner, false, box, 1u, 0));   // invalid: refresh
     CHECK(boxReads == 1);
-    CHECK(!DrawGather::UpkeepAfterClean(s, 2, &owner, false, box, 3u, 1));  // valid, unchanged: hints
+    CHECK(!Ext::DrawGather::UpkeepAfterClean(s, 2, &owner, false, box, 3u, 1));  // valid, unchanged: hints
     CHECK(boxReads == 1);
     CHECK(s.At(2).flagsHint == 3u && s.At(2).detailHint == 1);
-    CHECK(DrawGather::UpkeepAfterClean(s, 2, &owner, true, box, 3u, 1));    // Clean reported a change
+    CHECK(Ext::DrawGather::UpkeepAfterClean(s, 2, &owner, true, box, 3u, 1));    // Clean reported a change
     CHECK(boxReads == 2);
-    CHECK(DrawGather::UpkeepAfterClean(s, 2, &other, false, box, 3u, 1));   // a different owner
+    CHECK(Ext::DrawGather::UpkeepAfterClean(s, 2, &other, false, box, 3u, 1));   // a different owner
     CHECK(boxReads == 3);
 }
 
@@ -280,8 +280,8 @@ UNIT_TEST(ext_draw_gather_record_walk_gives_the_live_sequence) {
             const ModelGeo& g = geos[static_cast<size_t>(i)];
             if (!side.Valid(i, &g)) side.Store(i, &g, g.world, g.flags, g.detail);
             const SideRecord& r = side.At(i);
-            if (DrawGather::NodeVisible(
-                    DrawGather::HintPasses(r, passMask, rDetail),
+            if (Ext::DrawGather::NodeVisible(
+                    Ext::DrawGather::HintPasses(r, passMask, rDetail),
                     [&] { ++geoReads; return (g.flags & passMask) != 0 && g.detail <= rDetail; },
                     [&] { return boxOk(r.box); }))
                 ext.push_back(i);
@@ -292,7 +292,7 @@ UNIT_TEST(ext_draw_gather_record_walk_gives_the_live_sequence) {
 }
 
 UNIT_TEST(ext_draw_gather_scene_table_lru) {
-    DrawGather::SceneSides t;
+    Ext::DrawGather::SceneSides t;
     int s[6];
     for (int i = 0; i < 4; ++i) t.Acquire(&s[i]).Store(0, &s[i], kBox0, 1u, 0);
     CHECK(t.Count() == 4);

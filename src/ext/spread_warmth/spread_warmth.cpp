@@ -3,6 +3,7 @@
 #include "ext/spread_warmth/spread_warmth.h"
 #include "ext/registry.h"   // Ext::Ext().spread_warmth (B: locked for the game)
 
+namespace Ext {
 namespace SpreadWarmth {
 
 bool g_on = false;
@@ -55,3 +56,4 @@ const Stats& GetStats() { return s_stats; }
 void ResetStats() { s_stats = Stats(); }
 
 }  // namespace SpreadWarmth
+}  // namespace Ext

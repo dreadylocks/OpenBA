@@ -64,7 +64,7 @@ UNIT_TEST(ext_quick_screens_row) {
 }
 
 UNIT_TEST(ext_quick_screens_off_is_retail_hold) {
-    using QuickScreens::SplashHoldOver;
+    using Ext::QuickScreens::SplashHoldOver;
     // OFF: exactly `elapsed >= delay`, whatever the work and fade state.
     for (bool fadeOut : {false, true})
         for (bool pending : {false, true})
@@ -77,7 +77,7 @@ UNIT_TEST(ext_quick_screens_off_is_retail_hold) {
 }
 
 UNIT_TEST(ext_quick_screens_on_waits_for_the_work) {
-    using QuickScreens::SplashHoldOver;
+    using Ext::QuickScreens::SplashHoldOver;
     // ON, retail's hold not elapsed: over only when the menu-scene build is
     // done AND the reveal fade has finished ...
     CHECK(SplashHoldOver(true, 0, 100, false, false, 0.0f));
@@ -98,4 +98,4 @@ UNIT_TEST(ext_quick_screens_on_waits_for_the_work) {
 // Save::SaveLoad's gates wait while `_elapsed <= _minOperationTime`; the first
 // SaveLoad::Update adds a positive frame delta before it dispatches, so a zero
 // minimum never holds. A constant, so a static_assert, not a test.
-static_assert(QuickScreens::kNoMinOperationTime == 0, "quick_screens: no minimum operation time");
+static_assert(Ext::QuickScreens::kNoMinOperationTime == 0, "quick_screens: no minimum operation time");

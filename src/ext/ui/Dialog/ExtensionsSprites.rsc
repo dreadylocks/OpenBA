@@ -33,6 +33,7 @@ SpriteSheet resource
 		{ String _name = "ExtensionsEntry_render_culling";	String _source = "Sprite/Extensions/Entry_render_culling.png"; }
 		{ String _name = "ExtensionsEntry_anim_batch";	String _source = "Sprite/Extensions/Entry_anim_batch.png"; }
 		{ String _name = "ExtensionsEntry_draw_gather";	String _source = "Sprite/Extensions/Entry_draw_gather.png"; }
+		{ String _name = "ExtensionsEntry_draw_batch";	String _source = "Sprite/Extensions/Entry_draw_batch.png"; }
 		{ String _name = "ExtensionsEntry_walk_batch";	String _source = "Sprite/Extensions/Entry_walk_batch.png"; }
 		{ String _name = "ExtensionsEntry_walk_batch_grid";	String _source = "Sprite/Extensions/Entry_walk_batch_grid.png"; }
 		{ String _name = "ExtensionsEntry_render_pipe";	String _source = "Sprite/Extensions/Entry_render_pipe.png"; }
@@ -46,5 +47,11 @@ SpriteSheet resource
 		{ String _name = "ExtensionsEntry_async_save_compress";	String _source = "Sprite/Extensions/Entry_async_save_compress.png"; }
 		{ String _name = "ExtensionsEntry_drain_split";	String _source = "Sprite/Extensions/Entry_drain_split.png"; }
 		{ String _name = "ExtensionsEntry_background_save";	String _source = "Sprite/Extensions/Entry_background_save.png"; }
+		{ String _name = "ExtensionsEntry_better_camera";	String _source = "Sprite/Extensions/Entry_better_camera.png"; }
+		{ String _name = "ExtensionsEntry_no_fog";	String _source = "Sprite/Extensions/Entry_no_fog.png"; }
+		{ String _name = "ExtensionsEntry_high_limits";	String _source = "Sprite/Extensions/Entry_high_limits.png"; }
+		{ String _name = "ExtensionsEntry_restricted_foods";	String _source = "Sprite/Extensions/Entry_restricted_foods.png"; }
+		{ String _name = "ToolbarExtensions";	String _source = "Sprite/Extensions/Toolbar_extensions.png"; }	// the toolbar's one extension button (ExtensionsWindow.rsc, src/ext/toolbar)
+		{ String _name = "ExtensionsEntry_terrain_batch";	String _source = "Sprite/Extensions/Entry_terrain_batch.png"; }
 	]
 }

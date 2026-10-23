@@ -10,7 +10,9 @@
 //   * the eee0 brush falloff memo (WgBrushCurveCache) vs the OLD per-cell expression:
 //     span and every w(s) of the scan window bit-equal for the game's (base, cutoff)
 //     pairs and random ones, with both brush files' pow (powf, std::pow), across cache
-//     evictions; and a whole brush application old vs memo on a random mask.
+//     evictions; and a whole brush application old vs memo on a random mask;
+//   * [PERLINPRE] the start town's scatter noise table (WgCells_PerlinTable) vs the old
+//     per-cell Generate call, memcmp'd, non-power-of-two dims, 0 / 1 / 2 / 4 / 7 workers.
 // docs/extensions/handins/WGPAR.md
 // ============================================================================
 #include "unit.h"
@@ -385,6 +387,39 @@ UNIT_TEST(wg_brush_memo_application_matches_old_brush) {
         }
         CHECK(std::memcmp(a.data(), b.data(), cells * sizeof(float)) == 0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// [PERLINPRE] the start town's scatter noise table (starttown.cpp StartTown_SpawnResources)
+// vs the old per-cell call of its serial loop. docs/extensions/handins/PERLINPRE.md
+// ---------------------------------------------------------------------------
+UNIT_TEST(wg_parallel_scatter_perlin_table_matches_per_cell_call) {
+    const int dims[] = {16, 97, 130, 256};                  // 97 / 130: not powers of two
+    const float divs[] = {1.0f, 8.0f, 16.5f, 40.0f, 0.75f};  // scale = uvScale / div, as the caller
+    const uint32_t seeds[] = {7u, 0xBEEFu};
+    for (int dim : dims) {
+        for (uint32_t seed : seeds) {
+            std::mt19937 rng(seed ^ (uint32_t)(dim * 31));
+            RtUtility::PerlinNoise pn;
+            MakeNoise(rng, 0.5f + 0.05f * (float)(seed & 3), 4.0f + (float)(dim & 1), &pn);
+            for (float div : divs) {
+                const float uvScale = 1.0f;                  // kRdata_14017214c
+                const float scale = uvScale / div;
+                const size_t cells = (size_t)dim * dim;
+                std::vector<float> ref(cells);
+                for (int y = 0; y < dim; ++y)
+                    for (int x = 0; x < dim; ++x)
+                        ref[(size_t)dim * y + x] = RtUtility_PerlinNoise_Generate(&pn, (float)x * scale, (float)y * scale);
+                for (int workers : {0, 1, 2, 4, 7}) {
+                    System::Parallel::SetWorkers(workers);
+                    std::vector<float> table(cells, -7.0f);
+                    WgCells_PerlinTable(table.data(), dim, &pn, scale);
+                    CHECK(std::memcmp(table.data(), ref.data(), cells * sizeof(float)) == 0);
+                }
+            }
+        }
+    }
+    System::Parallel::Shutdown();
 }
 
 }  // namespace

@@ -293,6 +293,13 @@ void Dx11TrackConstantBuffer(ConstantBufferData* p);
 void Dx11UntrackConstantBuffer(ConstantBufferData* p);
 void Dx11InvalidateConstantBufferBindings();
 
+// ClearState() also drops the primitive topology, which ContextData caches in
+// `topology` and would otherwise never re-issue. DeviceData_Resize bumps this
+// counter; ContextData::BeginCommands compares it with its own copy (the
+// otherwise unused `pad14`) and clears the cache when they differ.
+void     Dx11NoteClearState();
+unsigned Dx11ClearStateGeneration();
+
 // ENDGAME B.3.5, RULE B5-2.3 — COLLAPSED. Block A deleted the
 // `sizeof(RenderBufferOwner) == 0x10` assertion (a size assert on a prefix view
 // of a 0x30-byte class: it could not fail, because it described the view rather

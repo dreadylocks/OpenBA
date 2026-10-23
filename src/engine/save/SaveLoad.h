@@ -353,8 +353,8 @@ public:
     // PUBLIC while foreign readers still reach the row through the doors.
     static SaveLoad* _singleton;
 
-    // EXT SEAM (NOT RETAIL; docs/extensions/DESIGN.md §2 and hook rule 5,
-    // docs/extensions/handins/SAVETAIL.md §4, EXTSAVE.md). The pseudo-mods a
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md, SAVETAIL.md §4): the class B / C pseudo-mods
+    // (DESIGN.md §2 and hook rule 5). The pseudo-mods a
     // class B / C extension adds to the save's mod list: SaveMetaData appends
     // one ModInfo per record after the enabled real mods (path `ext:<id>`,
     // name, +0x10, +0x14, +0x18; +0x1c unwritten, as retail). Null by default:
@@ -411,7 +411,7 @@ public:
     void UpdateDelete();
 
     // ---- NOT RETAIL: ext.background_save (docs/extensions/handins/HITCH_SAVESNAP.md) ----
-    // EXT SEAM, null by default (docs/extensions/DESIGN.md hook rule 5; set by
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVESNAP.md): ext.background_save, null by default (DESIGN.md hook rule 5; set by
     // src/ext/background_save). When set, UpdateSave's state 1 offers the fresh SavedState to
     // `_extSaveStart` in place of retail's `SaveRestore(true, state)` call. true: the game state
     // is being serialised into it on a worker; the machine waits in kExtProgressSerializing,

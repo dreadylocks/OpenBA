@@ -65,6 +65,7 @@
 #include "Component/UIComponent.h"
 #include "application/Application.h"   // Application::IsPaused (Update)
 #include "Game/GameSettings.h"          // g_gameSettings->autoPause (Update)
+#include "ext/toolbar/toolbar.h"         // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTHOSTS.md): RestoreWindow
 
 // ============================================================
 // GetDescPage (0x140011320)
@@ -834,6 +835,9 @@ void PlayerToolManager::Startup() {
         if (node->active)
             ToggleUtilityDialog(node->key);   // 0x140101a80
     }
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTHOSTS.md): the extension window reopens with the save,
+    // as the pinned utility windows above do.
+    Ext::Toolbar::RestoreWindow(GameUpdateLoop::_singleton->m_userInterface);
 
     // The pinned entity panels: one EntityUI dialog per tracked entity whose
     // description carries a UIDescription, placed where it was, its pin box

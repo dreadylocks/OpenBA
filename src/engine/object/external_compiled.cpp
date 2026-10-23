@@ -72,7 +72,7 @@ namespace RtObject {
 
 CompiledCounters g_cc = {};
 
-// EXT SEAM (external_compiled.h): the resource providers' entry, null until
+// EXT SEAM (NOT RETAIL, docs/extensions/KITFREE.md §2): the resource providers' entry (external_compiled.h), null until
 // the first registers.
 ::Object::External* (*g_extProvideSeam)(const char* expandedPath) = nullptr;
 
@@ -249,7 +249,7 @@ const ::Object::External* RtObject_ExternalFactory_FindOrLoad(ExternalFactory* s
 
         ::Object::External* loaded = RtObject_External_Load(&compiled, nullptr);
 
-        // EXT SEAM (NOT RETAIL; docs/extensions/KITFREE.md section 2): no loose
+        // EXT SEAM (NOT RETAIL, docs/extensions/KITFREE.md §2): no loose
         // .crs and no package entry -- a registered provider may build the object
         // from the exe's own data. Null under the faithful profile (no provider
         // registers), so retail's miss path is unchanged there.

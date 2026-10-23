@@ -31,17 +31,19 @@ set -u
 GAME="${BANISHED_DIR:-${BANISHED_GAME_DIR:-C:/GOG Games/Banished}}"
 RDCMD="${RENDERDOCCMD:-C:/Program Files/RenderDoc/renderdoccmd.exe}"
 
-TAG="${1:?usage: capture_arm.sh <tag> [--frame N] [--expect-log RE] [--out DIR] -- ENV=V ...}"
+TAG="${1:?usage: capture_arm.sh <tag> [--frame N] [--expect-log RE] [--out DIR] [--exe-args 'A B'] -- ENV=V ...}"
 shift
 FRAME=150
 OUT="$GAME/rdoc_trace"
 EXPECT=""
+EXE_ARGS=""   # --exe-args '/profile:faithful': passed to OpenBA.exe (an arm that needs the exe's own switches)
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --frame)      FRAME="$2"; shift 2 ;;
     --expect-log) EXPECT="$2"; shift 2 ;;
     --out)        OUT="$2";   shift 2 ;;
+    --exe-args)   EXE_ARGS="$2"; shift 2 ;;
     --)           shift; break ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -90,19 +92,21 @@ rm -f "$GAME/standalone_boot_state.txt" "$GAME"/reimpl_capture*.rdc standalone_d
   echo "tag=$TAG"
   echo "frame=$FRAME"
   echo "expect=$EXPECT"
+  echo "exe_args=$EXE_ARGS"
   echo "exe_md5=$(md5sum "$GAME/OpenBA.exe" 2>/dev/null | cut -d' ' -f1)"
   echo "when=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   for e in "${EXTRA_ENV[@]:-}"; do [ -n "$e" ] && echo "env=$e"; done
 } > "$OUT/$TAG.arm.txt"
 
-echo "=== capture '$TAG' frame=$FRAME env=${EXTRA_ENV[*]:-<none>} ==="
+echo "=== capture '$TAG' frame=$FRAME env=${EXTRA_ENV[*]:-<none>} exe_args=${EXE_ARGS:-<none>} ==="
 
 env "${EXTRA_ENV[@]:-BANISHED_TRACE_ORACLE=1}" \
     BANISHED_AUTOSTART=1 \
     BANISHED_CAPTURE_INGAME="$FRAME" \
+    MSYS2_ARG_CONV_EXCL="/profile:" \
     "$RDCMD" capture --opt-ref-all-resources \
       -d "$GAME" -c "$GAME/reimpl_capture" \
-      "$GAME/OpenBA.exe" >/dev/null 2>&1 &
+      "$GAME/OpenBA.exe" $EXE_ARGS >/dev/null 2>&1 &
 
 # WHICH .rdc IS THE IN-GAME ONE (AO.md §7.6). The menu loop triggers its own capture
 # on its draw 10 whenever RenderDoc is attached (menudialogloopt_stubs.cpp), so the

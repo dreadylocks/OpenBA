@@ -17,7 +17,9 @@
 #include "io/settings_file.h"     // Phase D.4 SETTINGS E.4: the harness guard
 #include "io/settings_store.h"    //   and DumpVideoSettings read settings.cfg
 #include "runtime_init.h"
+#if defined(_WIN32)
 #include "VideoDX11Plugin.h"   // B5 DEV-A: VideoDX11::Dx11SwapChain (the two swap-chain probes)
+#endif
 #include "video_interface.h"
 #include "renderdoc_integration.h"
 #include "stall_debug.h"
@@ -32,11 +34,12 @@
 #include "alloc_cutover_arm.h"            // RtAllocSwapArmCutover
 #include "system/MemoryAllocator.h"   // RtSystemAllocatorSetCutoverArmer
 #include "Game/game_main.h"
-#include "ext/cpu/topology.h"     // block CPULIMIT: Cpu::Boot (sys.cpu_limit, before any thread)
+#include "platform/common/cpu/topology.h"     // block CPULIMIT: Cpu::Boot (sys.cpu_limit, before any thread)
 #include "Object/factory_registration.h"
 #include "Goal/StatGoal.h"             // ENDGAME B.3.9 EXA: StatGoal::Vtable() for the self-test
 #include "object/TypeInfo.h"           // ENDGAME B.3.9 RF: BaseTypeInfo::_firstTypeInfo for the self-test
 #include "platform_window.h"   // Phase D.4 SDL W6: the pump observer
+#include "platform_app.h"      // Platform::App: the lifecycle hooks around SDL_Init / SDL_Quit
 #include "engine/MainLoop.h"   // ENDGAME B.3.9 SS2: Engine::MainLoop::_singleton
 // WAVE 11 follow-up 5 (lane TINFO): the BaseTypeInfo::factoryFn dispatch census.
 
@@ -1002,9 +1005,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     setvbuf(stderr, NULL, _IONBF, 0);
     LoadTime::Stamp("main");   // NOT RETAIL: print-only (the logs are open)
 
-    // Block CPULIMIT (NOT RETAIL; src/ext/cpu/topology.h): settings.cfg's `sys.cpu_limit`
+    // Block CPULIMIT (NOT RETAIL; src/platform/common/cpu/topology.h): settings.cfg's `sys.cpu_limit`
     // -> the process affinity mask, then the core topology every thread-count rule reads
-    // (src/ext/cpu/roster.h). FIRST, before any thread of ours exists -- the crash
+    // (src/platform/common/cpu/roster.h). FIRST, before any thread of ours exists -- the crash
     // handler's, the sampler, the boot-state watchdog, SDL's, the loader, audio, the
     // pathfinder, the path workers -- and after the freopen so its [Cpu] line is logged.
     Cpu::Boot();
@@ -1089,6 +1092,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     }
     // A failure is logged and boot continues: Application::PlatformStartup then reports
     // retail's "failed to register a window class" (Platform::Window::VideoAvailable).
+    Platform::App::PreSdlInitHints();
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[SDL] SDL_Init(SDL_INIT_VIDEO) failed: %s\n", SDL_GetError());
     }
@@ -1103,11 +1107,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     // calls neither (a disable also revokes it from any window that already exists).
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, false);
     SDL_SetEventEnabled(SDL_EVENT_DROP_TEXT, false);
+    Platform::App::PostSdlInit();
 
     if (!Init()) {
         // Phase D.4 SDL W6: was MessageBoxA(nullptr, ..., MB_OK | MB_ICONERROR).
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Banished Standalone - Init Failed",
             "Failed to initialize. Check standalone_debug.log for details.", nullptr);
+        Platform::App::Shutdown();
         SDL_Quit();
         SDL_UnregisterApp();
         return 1;
@@ -1122,6 +1128,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 
     // Phase D.4 SDL: the matching shutdown of the SDL_Init above, then the class
     // registration (SDL_RegisterApp) it outlived.
+    Platform::App::Shutdown();
     SDL_Quit();
     SDL_UnregisterApp();
     return rc;
@@ -1178,6 +1185,7 @@ int main(int argc, char** argv) {
     SDL_SetHintWithPriority(SDL_HINT_NO_SIGNAL_HANDLERS, "1", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_AUTO_CAPTURE, "0", SDL_HINT_OVERRIDE);
+    Platform::App::PreSdlInitHints();
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[SDL] SDL_Init(SDL_INIT_VIDEO) failed: %s\n", SDL_GetError());
     }
@@ -1185,10 +1193,12 @@ int main(int argc, char** argv) {
     // property on the window; its Wayland driver marks the window as refusing drag offers).
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, false);
     SDL_SetEventEnabled(SDL_EVENT_DROP_TEXT, false);
+    Platform::App::PostSdlInit();
 
     if (!Init()) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Banished Standalone - Init Failed",
             "Failed to initialize. Check standalone_debug.log for details.", nullptr);
+        Platform::App::Shutdown();
         SDL_Quit();
         return 1;
     }
@@ -1206,6 +1216,7 @@ int main(int argc, char** argv) {
     printf("[Standalone] === GameMain returned %d ===\n", rc);
     PrintExitSummaries();
 
+    Platform::App::Shutdown();
     SDL_Quit();
     return rc;
 }

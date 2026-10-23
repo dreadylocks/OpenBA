@@ -1,5 +1,7 @@
 # TS-CORE -- `ext.billboard_shadow` "Stable tree shading" (hand-in, 2026-10-16)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/render/dx11/billboard_shadow/` and `src/render/dx11/foliage_aa/` moved to `src/render/dx11/better_trees/` (file names kept); `tests/unit/ext_billboard_shadow_test.cpp` and `ext_foliage_aa_test.cpp` merged into `ext_better_trees_test.cpp`, cases `ext_bbs_*` / `ext_faa_*` renamed `ext_better_trees_*`.)
+
 Blocks TS-SPIKE + TS-CORE + TS-MENU of `docs/extensions/TREE_SHADOW.md` §5. The design is option (e),
 TREE_SHADOW.md §4, which the coordinator approved, with these decisions: blueberry shares the fix; the
 row is `ext.billboard_shadow`, class A, default OFF; the carrier is `textureProjection` (cb2 rows

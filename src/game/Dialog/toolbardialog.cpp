@@ -53,6 +53,8 @@
 #include "Game/exe_bodies.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
 #include "Game/PlayerToolManager.h"
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension window's toolbar button
+#include "ext/toolbar/toolbar.h"
 #include "Game/PlayerController.h"
 #include "Game/Map.h"
 #include "Entity/CitizenBehavior.h"
@@ -200,6 +202,11 @@ void ToolbarDialog::UpdateButtons() {
 
     for (int i = 0; i < itemCount; i++) {
         const Toolbar* item = toolbarItems[i];
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button
+        // has no Toolbar item
+        if (item == nullptr) {
+            continue;
+        }
         // The item's template
         ComponentDescription* typeId = item->_field58;
 
@@ -895,13 +902,28 @@ ToolbarDialog::ToolbarDialog(UI::UserInterface* userInterface, const UI::Dialog*
         }
     }
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension window's one button
+    // (src/ext/toolbar) in the Reports group. A null entry in the item list marks its slot; the readers of
+    // toolbarItems below and in UpdateButtons / OnUpdateLayout / OnElementEvent skip it.
+    {
+        const int extSlot = Ext::Toolbar::InsertAt(group, itemList, itemListCount);
+        if (extSlot >= 0 && extSlot <= itemListCount) {
+            DynArray_Push(&itemList, &itemListCount, &itemListCap, static_cast<const Toolbar*>(nullptr));
+            for (int i = itemListCount - 1; i > extSlot; --i) {
+                itemList[i] = itemList[i - 1];
+            }
+            itemList[extSlot] = nullptr;
+        }
+    }
+
     // --- Step 6: Determine the nesting depth ---
     // Walk the parent chain (_field60) of the first item
     int depth = 0;
     if (itemListCount > 0) {
-        const Toolbar* firstItem = itemList[0];
-        // (the parent chain, ExternalPtr<Toolbar>)
-        for (const Toolbar* link = firstItem->_field60;
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the chain starts at `group`, the
+        // parent of every collected item (retail's `itemList[0]->_field60`). The first slot may be the
+        // extension button's null entry. (the parent chain, ExternalPtr<Toolbar>)
+        for (const Toolbar* link = group;
              link != nullptr;
              link = link->_field60) {
             depth++;
@@ -932,6 +954,21 @@ ToolbarDialog::ToolbarDialog(UI::UserInterface* userInterface, const UI::Dialog*
     int buttonIndex = 0;
     for (int i = 0; i < itemListCount; i++) {
         const Toolbar* item = itemList[i];
+        if (item == nullptr) {
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button, a
+            // utility-style button (template 3) with no Toolbar item behind it.
+            const UI::ElementDescription* extTemplate = dialog->GetTemplate(3).Get();
+            Object::InternalPtr<UI::Element> extClone;
+            extTemplate->CreateInstance(&extClone, dialog);
+            UI::Element* extElement = extClone.Get();
+            buttonElements.SetSize(buttonElements.GetSize() + 1, extElement);
+            toolbarItems.SetSize(toolbarItems.GetSize() + 1, nullptr);
+            Object::InternalPtr<UI::Element> extPtr(extElement);
+            tableElement->SetChild(&extPtr, buttonIndex);
+            Ext::Toolbar::Style(extElement, buttonIndex);
+            buttonIndex++;
+            continue;
+        }
         // LEFT: Toolbar's +0x30 / +0x38 Strings are declared void* (GAME-c's header,
         // H5): the button text and sprite names are read through a cast.
         ComponentDescription* itemTemplate = item->_field58;
@@ -1159,6 +1196,11 @@ void ToolbarDialog::OnUpdateLayout() {
 
     for (int i = 0; i < itemCount; i++) {
         const Toolbar* item = toolbarItems[i];
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button
+        // has no Toolbar item
+        if (item == nullptr) {
+            continue;
+        }
         int32_t actionType = item->_field48;
 
         if (actionType == 1) {
@@ -1259,6 +1301,23 @@ void ToolbarDialog::OnElementEvent(Object::InternalPtr<UI::Element>* element, in
         UI::Element* elemObj = element->Get();
         bool isDerived = ::Object::IsDerivedFromNullSafe(elemObj, UI::CheckElement::TypeId());
         UI::CheckElement* checkElem = isDerived ? static_cast<UI::CheckElement*>(elemObj) : nullptr;
+
+        if (item == nullptr) {
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button. Like a
+            // utility button: it opens the window or closes it. The button is released at once (the window's
+            // own close button can close it too); any open sub-toolbar closes as for every non-Tool button.
+            if (subDialog.Get() != nullptr) {
+                Object::InternalPtr<UI::DialogInstance> closeRef = subDialog;
+                _ui->CloseDialog(&closeRef);
+                subDialog = Object::InternalPtr<UI::DialogInstance>(nullptr);
+                openSubIndex = -1;
+            }
+            if (checkElem != nullptr) {
+                checkElem->_checked = 0;
+            }
+            Ext::Toolbar::Toggle(_ui);   // open, or close when open
+            return;
+        }
 
         int32_t actionType = item->_field48;
 
@@ -1426,7 +1485,9 @@ void ToolbarDialog::OnElementEvent(Object::InternalPtr<UI::Element>* element, in
         UI::Element* elemObj = element->Get();
         (void)::Object::IsDerivedFromNullSafe(elemObj, UI::CheckElement::TypeId());
 
-        int32_t actionType = item->_field48;
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button
+        // acts as a Utility
+        int32_t actionType = item != nullptr ? item->_field48 : 2;
 
         // If not a Tool (case 0) and we have an open sub-dialog, close it
         if (actionType != 0 && subDialog.Get() != nullptr) {

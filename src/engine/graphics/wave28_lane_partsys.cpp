@@ -866,12 +866,12 @@ void SunLight::Draw(Video::Context& context, const Camera& camera,
 
 namespace Graphics {
 
-// NOT RETAIL (EXT SEAM, ext.eye_camera; SunLight.h has the contract).
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md §9): ext.eye_camera's shadow-fit view (SunLight.h has the contract).
 const Camera* SunLight::_extShadowFitView = nullptr;
 
 namespace {
 
-// NOT RETAIL (EXT SEAM, ext.eye_camera): retail's GetSunCamera, fitted to
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md §9): ext.eye_camera -- retail's GetSunCamera, fitted to
 // `view`. GetSunCamera reads draw group 0's camera (sun_camera.cpp), so `view`
 // sits there for this one call and the real camera is put back at once: the
 // main pass, the BeginDrawGroup below and every other reader see the real one.
@@ -894,7 +894,7 @@ void SunLight::AddDrawItems(const Scene& sceneRef, Renderer& rendererRef) const 
     if (_depthTarget == nullptr) return;
     ++g_sunAddDrawEmit;
 
-    // EXT SEAM (NOT RETAIL, ext.max_shadow_res; SunLight.h): null unless the
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/FAA-SHADOW.md): ext.max_shadow_res (SunLight.h), null unless the
     // row is registered for this run; then the map's size follows the row and
     // the retail combo (a rebuild is requested when it differs).
     if (_extMaxShadowRes != nullptr) ExtSyncMaxShadowRes(false);   // record + log; never a raise here

@@ -138,7 +138,7 @@ to blend); the season / fall-colour behaviour; the retail RenderState objects; t
 profile (with the row off nothing is rewritten, one null test per program bind).
 
 ```
-src/render/dx11/foliage_aa/      the D3D side, the AO precedent (src/render/dx11/ao/)
+src/render/dx11/better_trees/    the D3D side, the AO precedent (src/render/dx11/ao/)
   dxbc_rewrite.cpp/.h            container parse, SM4 token walk, the pattern match, the emit, the checksum
   foliage_aa_stage.cpp/.h        per-program transformed copies, the A2C blend-state clones
 src/ext/foliage_aa/              the extension: Sync(), params (mode, k), the seam set/clear
@@ -197,7 +197,7 @@ blobs, `.srsl` / `.rsc` copies, captures, extracted textures).
 - **6.2 The container (S3).** Parse -> re-emit -> checksum is byte-identical for 148/148 blob creations.
   The runtime rejects a wrong checksum, so ours is verified. A dropped discard and the full part-1
   transform create with `hr=0` and add no debug-layer message. Start from the spike's
-  `src/render/dx11/foliage_aa/dxbc.{h,cpp}` + `cutout_rewrite.{h,cpp}`.
+  `src/render/dx11/better_trees/dxbc.{h,cpp}` + `cutout_rewrite.{h,cpp}`.
 - **6.3 The blend clone (S4; changes §3).** Not `RenderTargetWriteMask = RGB`. The RGB mask leaves the
   OLD alpha under the leaves, and the water reads the reflection target's alpha (`_reflection_.w`): 818k
   covered samples differed from retail in one street-level frame. Use **AlphaToCoverage + BlendEnable,

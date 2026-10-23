@@ -31,3 +31,7 @@ target_include_directories(wmadec
           ${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg)
 target_compile_definitions(wmadec PRIVATE HAVE_AV_CONFIG_H NDEBUG)
 target_compile_options(wmadec PRIVATE -O2 -w)
+
+if(APPLE)
+  target_compile_options(wmadec PRIVATE -ffp-contract=off)
+endif()

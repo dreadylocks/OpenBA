@@ -5,7 +5,7 @@
 // drives the same WorkerMain from System::Thread). The mock pathfinder below is
 // retail's worker reduced to what the protocol touches: a flag byte per cell,
 // the parameter record commands 0 / 1 / 4 write (ApplyCommand 0x1400a6430's
-// cases), and a result table. The search is FastPaths::Searcher -- at scale 1
+// cases), and a result table. The search is Ext::FastPaths::Searcher -- at scale 1
 // it is retail's search (ext_fast_paths_test proves it), and with the real
 // scale it reads the present-type mask, so the ext.fast_paths composition
 // (the mask taken at dispatch) is exercised too.
@@ -33,11 +33,11 @@
 #include <thread>
 #include <vector>
 
-using PathWorkers::Command;
-using PathWorkers::DispatchCommand;
-using PathWorkers::Job;
-using PathWorkers::Params;
-using PathWorkers::Pool;
+using Ext::PathWorkers::Command;
+using Ext::PathWorkers::DispatchCommand;
+using Ext::PathWorkers::Job;
+using Ext::PathWorkers::Params;
+using Ext::PathWorkers::Pool;
 
 namespace {
 
@@ -72,7 +72,7 @@ struct MockGrid {
         p.manhattan = manhattan;
         p.respectBlocked = respectBlocked;
         p.fast = fast ? 1 : 0;
-        p.presentTypes = fast ? FastPaths::PresentTypes(cells.data(), static_cast<int>(cells.size())) : 0u;
+        p.presentTypes = fast ? Ext::FastPaths::PresentTypes(cells.data(), static_cast<int>(cells.size())) : 0u;
         return p;
     }
 };
@@ -84,9 +84,9 @@ struct Result {
 };
 
 // The search one request runs: retail's at scale 1, ext.fast_paths' when `fast`.
-int Search(FastPaths::Searcher& s, const Params& p, int width, const uint8_t* cells,
+int Search(Ext::FastPaths::Searcher& s, const Params& p, int width, const uint8_t* cells,
            int start, int goal, int32_t* out) {
-    FastPaths::SearchInput in;
+    Ext::FastPaths::SearchInput in;
     in.width = width;
     in.cellFlags = cells;
     in.stepCost = p.stepCost;
@@ -96,10 +96,10 @@ int Search(FastPaths::Searcher& s, const Params& p, int width, const uint8_t* ce
     in.respectBlocked = p.respectBlocked != 0;
     in.start = start;
     in.goal = goal;
-    in.heuristicScale = p.fast ? FastPaths::HeuristicScale(p.stepCost, p.passableTypes, p.presentTypes) : 1;
+    in.heuristicScale = p.fast ? Ext::FastPaths::HeuristicScale(p.stepCost, p.passableTypes, p.presentTypes) : 1;
     if (in.heuristicScale < 0) return -1;
-    const FastPaths::SearchResult r = s.Run(in, out);
-    return r.status == FastPaths::Status::Unsupported ? -1 : r.count;
+    const Ext::FastPaths::SearchResult r = s.Run(in, out);
+    return r.status == Ext::FastPaths::Status::Unsupported ? -1 : r.count;
 }
 
 uint64_t Checksum(const std::vector<uint8_t>& v) {
@@ -161,8 +161,8 @@ Case MakeCase(std::mt19937& rng) {
 std::vector<Result> RunSerial(const Case& c) {
     MockGrid g = c.start;
     std::vector<Result> out(static_cast<size_t>(c.slots));
-    FastPaths::Searcher s;
-    std::vector<int32_t> buf(FastPaths::kPathCap);
+    Ext::FastPaths::Searcher s;
+    std::vector<int32_t> buf(Ext::FastPaths::kPathCap);
     for (const Command& cmd : c.commands) {
         if (cmd.type != 5) { g.Apply(cmd); continue; }
         const Params p = g.Snapshot(c.fast);
@@ -184,18 +184,18 @@ struct PoolCase {
     std::mutex lock;   // the pathfinder's lock: the publish runs under it
 };
 
-class TestRunner final : public PathWorkers::Runner {
+class TestRunner final : public Ext::PathWorkers::Runner {
 public:
     explicit TestRunner(int workers) {
         for (int i = 0; i < workers; ++i) {
-            searchers.emplace_back(new FastPaths::Searcher());
-            buffers.emplace_back(FastPaths::kPathCap);
+            searchers.emplace_back(new Ext::FastPaths::Searcher());
+            buffers.emplace_back(Ext::FastPaths::kPathCap);
         }
     }
     PoolCase* pc = nullptr;   // swapped only while the pool is idle
     std::atomic<int> running{0};
     std::atomic<int64_t> gridChangedUnderJob{0};
-    std::vector<std::unique_ptr<FastPaths::Searcher>> searchers;
+    std::vector<std::unique_ptr<Ext::FastPaths::Searcher>> searchers;
     std::vector<std::vector<int32_t>> buffers;
     unsigned shake = 0;       // > 0: yield now and then, to vary completion order
 
@@ -266,7 +266,7 @@ bool SameResults(const std::vector<Result>& a, const std::vector<Result>& b) {
 UNIT_TEST(ext_path_workers_pool_matches_serial) {
     std::mt19937 rng(0x9a7b1u);
     int64_t cases = 0, requests = 0, mismatches = 0, edits = 0, editsBusy = 0, changed = 0, found = 0;
-    for (int n = 1; n <= PathWorkers::kMaxWorkers; ++n) {
+    for (int n = 1; n <= Ext::PathWorkers::kMaxWorkers; ++n) {
         RunningPool rp(n);
         rp.runner.shake = n == 1 ? 0u : 7u;
         for (int k = 0; k < 750; ++k) {

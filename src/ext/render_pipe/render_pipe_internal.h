@@ -12,6 +12,7 @@
 namespace Graphics { class Renderer; class Camera; class SunLight; struct ExtAoFrame; }
 namespace Video { class Context; class RenderBuffer; }
 
+namespace Ext {
 namespace RenderPipe {
 
 // passes.cpp: Renderer::Draw's two loops, copied and cut where pass 1 ends.
@@ -28,3 +29,4 @@ void Pass2(Graphics::Renderer& r, Video::Context& context, const Graphics::ExtAo
 uint64_t HashFrame(const Graphics::Renderer& r, const Graphics::SunLight* sun);
 
 }  // namespace RenderPipe
+}  // namespace Ext

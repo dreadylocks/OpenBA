@@ -24,3 +24,10 @@ void WgCells_BaseHeightmap(float* heightmap, int dim,
 void WgCells_BlendScratch(const float* hm, int dim, float* scratch);
 void WgCells_BlendRockGrass(const float* scratch, int dim, const RtUtility::PerlinNoise* pn, uint8_t* out);
 void WgCells_BlendOcclusion(const float* scratch, int dim, uint8_t* out);
+
+// [PERLINPRE] The scatter noise of StartTown_SpawnResources (a12b0's per-pool cell loop,
+// starttown.cpp), precomputed: out[y * dim + x] = Generate(pn, (float)x * scale,
+// (float)y * scale) for the dim x dim cells, rows split. The caller keeps the RandTol
+// draws, the Perlin ctor and the whole serial loop; this draws nothing.
+// docs/extensions/handins/PERLINPRE.md
+void WgCells_PerlinTable(float* out, int dim, const RtUtility::PerlinNoise* pn, float scale);

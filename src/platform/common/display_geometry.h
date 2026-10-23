@@ -42,5 +42,61 @@ void OuterToClient(int32_t x, int32_t y, int32_t w, int32_t h, const FrameBorder
 // nothing.
 bool RectTouchesAnyDisplay(const Rect& rect, const Rect* displays, int count);
 
+
+// ---------------------------------------------------------------------------
+// Points <-> pixels (macOS Retina). SDL positions and sizes windows, and reports the
+// cursor, in POINTS; the engine (back buffer, GetClientRect, the UI, the cursor) works in
+// PIXELS. `density` is SDL_GetWindowPixelDensity (1.0 without SDL_WINDOW_HIGH_PIXEL_DENSITY,
+// 2.0 on a Retina display with it; the SDL backend passes 1.0 on every non-Apple host, so
+// these are the identity there). Positions are converted too, so the engine sees one unit
+// (pixels of the window's display) for every screen coordinate.
+// ---------------------------------------------------------------------------
+int32_t PointsToPixels(float points, float density);   // round to nearest
+int32_t PixelsToPointsFloor(int32_t pixels, float density);
+int32_t PixelsToPointsCeil(int32_t pixels, float density);
+int32_t PixelsToPointsRound(int32_t pixels, float density);
+
+// A cursor coordinate along one axis, relative to the client area: `pointsRel` points from
+// the client origin, `extentPoints` the client size in points. Returns the pixel the cursor
+// is on (floor). The last point of the client area covers `density` pixels but the OS reports
+// a cursor pinned against the edge at its first sub-pixel, so a cursor in the last point
+// (and not beyond the edge) is snapped to the last PIXEL: otherwise edge scrolling at the
+// right / bottom edge of a Retina window would stop one pixel short of the engine's
+// "cursor at the edge" test.
+int32_t CursorPointToPixel(float pointsRel, int32_t extentPoints, float density);
+
+// ---------------------------------------------------------------------------
+// The size a windowed game window OPENS at, in POINTS (what SDL_SetWindowSize takes).
+// savedPxW/H: the persisted client size (Video::Configuration windowWidth/Height), which the
+// engine writes in PIXELS (GetClientRect); <= 0 means never saved (-1 on a fresh install).
+// videoW/H: the configured video size (VideoWidth/VideoHeight), used as POINTS when nothing
+// was saved: 1280x720 means a 1280x720-point window (2560x1440 pixels on a Retina display),
+// not a 640x360-point one. A zero / negative request falls back to 1280x720; the result is
+// never below kMinWindowPointsW x kMinWindowPointsH, and never above maxW x maxH (the usable
+// screen less the window frame; <= 0 = unknown, no cap) -- except that the cap wins over
+// the minimum on a screen smaller than the minimum.
+// ---------------------------------------------------------------------------
+constexpr int32_t kMinWindowPointsW = 640;
+constexpr int32_t kMinWindowPointsH = 360;
+constexpr int32_t kDefaultWindowPointsW = 1280;
+constexpr int32_t kDefaultWindowPointsH = 720;
+void InitialWindowPoints(int32_t savedPxW, int32_t savedPxH, int32_t videoW, int32_t videoH,
+                         float density, int32_t maxW, int32_t maxH,
+                         int32_t* outW, int32_t* outH);
+
+
+// ---------------------------------------------------------------------------
+// The resolution list the Options dialog offers (engine PIXELS). A windowed client of
+// w x h pixels is a window of w/density x h/density points, so on a Retina Mac 1920x1080 is
+// a 960x540-point window. A candidate is listed when it fits the usable screen: maxW x maxH
+// are the usable area in PIXELS less the window frame (<= 0 = unknown, no filter). The
+// display's own pixel size (nativeW x nativeH, <= 0 = unknown) is always appended when it
+// is not already there, so a full screen has a mode that covers the display. The result is
+// never empty (falls back to 1280x720). Returns the count written to out[i][0..1];
+// `cap` bounds the output.
+// ---------------------------------------------------------------------------
+int32_t BuildResolutionList(int32_t maxW, int32_t maxH, int32_t nativeW, int32_t nativeH,
+                            int32_t (*out)[2], int32_t cap);
+
 }  // namespace Window
 }  // namespace Platform

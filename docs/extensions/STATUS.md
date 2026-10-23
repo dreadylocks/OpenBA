@@ -49,7 +49,7 @@
   are what retail already does; Unity carries the same receiver artefact as Won't Fix. **`ext.billboard_shadow`**
   "Stable tree shading": a load-time DXBC rewrite of the user's installed billboard vertex shader (45 instructions
   cloned, the shadow lookup from the card rebuilt sun-facing where its caster was; `receiver_rewrite.{h,cpp}`,
-  the stage in `src/render/dx11/billboard_shadow/`, seam `VideoDX11::g_extBillboardShadow`); the sun camera's
+  the stage in `src/render/dx11/better_trees/`, seam `VideoDX11::g_extBillboardShadow`); the sun camera's
   worldToCamera rides in the unused light constant `textureProjection` (cb2 rows 6..9), written by
   `SunLight::DrawLight` through `SunLight::_extBillboardShadow` (null by default; bit-identical to the shadow
   pass's matrix; a mod shader reading that constant would see it, row on only). Evidence: the two-heading
@@ -230,10 +230,10 @@
 ## 2026-10-14 night -- THE MULTITHREADING SESSION: render thread + parallel cull shipped (gates 0, shadows 0); 4-core heavy speed 10 +67%, speed 50 +35%; the in-game fps work is COMPLETE (the user), next phase = loading speed
 
 - Plan `handins/THREADPLAN.md` (decisions on THREADRESEARCH's eight questions: class A live toggle, one frame of latency accepted,
-  counts DERIVED from `src/ext/cpu/roster.h`, physical cores inside the affinity mask, path workers BELOW_NORMAL, TSan deferred).
+  counts DERIVED from `src/ext/cpu/roster.h` (now `src/platform/common/cpu/roster.h`, moved 2026-10-20), physical cores inside the affinity mask, path workers BELOW_NORMAL, TSan deferred).
   Four opus worktree blocks, static gate only; the coordinator ran every gate, shadow run, the device-loss route and the A/Bs.
 - **CPULIMIT** (`handins/CPULIMIT.md`, merge `c09a54566`, gate 0, unit 1156 / 0): `sys.cpu_limit` (settings.cfg, a CPU mask applied
-  before any thread exists, pre-read from the file), `src/ext/cpu/` (topology: logical / physical cores inside the mask; the 7.4 roster
+  before any thread exists, pre-read from the file), `src/ext/cpu/` (now `src/platform/common/cpu/`, moved 2026-10-20: a platform helper, not an extension) (topology: logical / physical cores inside the mask; the 7.4 roster
   as pure functions), path workers = clamp(physical - 2 - render_pipe, 1, 4) at BELOW_NORMAL, the `[Cpu]` line on `[BootState]` and in
   the stress header. This box: P4 = `0x55`, S4 = `0xf`. `stress_run.sh` takes `STRESS_CPU_LIMIT=<mask>`.
 - **RENDERPIPE-0** (`handins/RENDERPIPE0.md`, merge `76bdc5718`, gate 0, unit 1164 / 0): `ext.render_pipe` (class A, default OFF) as the

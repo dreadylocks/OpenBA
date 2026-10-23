@@ -95,6 +95,10 @@ const Options& Opt() { return g_opt; }
 
 void OptionsInit() {
     Options& o = g_opt;
+    o.airconv = Raw("BANISHED_AIRCONV");
+    o.metalStats = On("BANISHED_METAL_STATS");
+    o.inputTrace = On("BANISHED_INPUT_TRACE");
+    o.background = On("BANISHED_BACKGROUND");
 
     // ── harness drivers: menu → game ─────────────────────────────────────────
     o.autostart       = On("BANISHED_AUTOSTART");

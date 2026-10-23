@@ -10,6 +10,21 @@ Run it under `tools/game_dir_lock.sh`. It needs `Documents/Banished/Save/Gate.sa
 golden was cut against md5 `68f99e06e6cdce6c17a8fb06e867b2c8`, a copy of the 2026-09-12
 autosave; copy any save to that name and delete the golden to start over). Exit 0 is PASS.
 
+## The class C golden: GateRestrictedFoods (2026-10-21, block EXTHOSTS)
+
+DESIGN.md's Gates ask every shipped class C extension for its own golden. `GateRestrictedFoods.sav`
+(in the save directory, beside `Gate.sav`) is `Gate.sav` loaded with only `ext.restricted_foods`
+requested among the B / C rows, Potato blocked on the Foods page, the extension window open, saved.
+Its tail carries the `restricted_foods` record (the blocked template path) and the `toolbar` host
+record. Run it under the forced all-on profile, so the golden does not depend on settings.cfg (the
+save's own manifest decides the B / C set):
+
+    GATE_PROFILE=/profile:all tools/resave_gate/resave_gate.sh GateRestrictedFoods
+
+Golden md5 `a5a1dc485139a26f3190cfcf89f9d350` (23,440,348 bytes), mods parked; PASS on the run after
+NEW-GOLDEN. A change to the restricted_foods payload or the toolbar host record is a DIFF here and a
+PASS on `Gate`.
+
 ## The golden was re-cut on 2026-10-11 (Phase D.4 close, row 1286) -- same fixture
 
 Golden md5 `994eb184a8e88db9372b5b9cd13a9ed9` -> `9c18dd25f2a84677e33cc61c233943b3` (23,453,453 bytes, +516,

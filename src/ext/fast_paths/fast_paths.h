@@ -8,7 +8,7 @@
 //
 // THE SEAMS (src/game/Action/action_pf_astar.cpp, PathfinderThread::ApplyCommand
 // 0x1400a6430; both on the pathfinder's worker thread):
-//   case 5 (a path request): `Engaged() ? FastPaths::Run(grid, ...)
+//   case 5 (a path request): `Engaged() ? Ext::FastPaths::Run(grid, ...)
 //                                       : grid.Run(...)` -- retail's line when
 //          the game did not select the extension. The result publish after it
 //          stays retail's (row 961's race untouched).
@@ -35,6 +35,7 @@
 
 struct GridPathSearch;
 
+namespace Ext {
 namespace FastPaths {
 
 enum : uint8_t {
@@ -125,9 +126,10 @@ struct ShadowResult {
 ShadowResult Shadow(const Request& req);
 
 }  // namespace FastPaths
+}  // namespace Ext
 
 // The hook point in command 5 (shadow mode only): runs Shadow(req) and hands
 // the result to the stress harness (StressHarness_PathShadow, fast_paths.cpp;
 // the harness arms the mode at BANISHED_STRESS_COMPPROF=3). This header does
 // not include the harness.
-void FastPaths_ShadowHook(const FastPaths::Request& req);
+void FastPaths_ShadowHook(const Ext::FastPaths::Request& req);

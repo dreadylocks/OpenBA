@@ -5,6 +5,7 @@
 // ============================================================================
 #include "ext/path_workers/pool.h"
 
+namespace Ext {
 namespace PathWorkers {
 
 Pool::Pool(Runner& runner, int workers)
@@ -65,3 +66,4 @@ long long Pool::Completed() {
 }
 
 }  // namespace PathWorkers
+}  // namespace Ext

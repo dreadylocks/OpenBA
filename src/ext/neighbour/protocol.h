@@ -109,7 +109,7 @@ struct Parcel {
 constexpr size_t kMaxParcelIdChars = 40;
 bool ValidParcelId(const std::string& id);
 
-// The class C save payload (savetail.h RegisterPayload): what a town remembers about its
+// The class C save payload (save_state.h, the save tail's codec): what a town remembers about its
 // room between sessions.
 //   v1: the room name and the last chat sequence number seen (the relay replays anything newer).
 //   v2: + the OUTBOX (parcels this town sent that the relay has not yet confirmed it holds; they

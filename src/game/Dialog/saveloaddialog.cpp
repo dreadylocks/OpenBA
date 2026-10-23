@@ -83,10 +83,10 @@
 
 
 #include "Game/MenuDialogLoopT.h"
-#include "ext/registry.h"   // EXT SEAM: DoLoad's `ext:` pseudo-mods (NOT RETAIL)
-#include "ext/load_notice.h"  // EXT SEAM: their notices, Dialog/Extensions.rsc:extension* (NOT RETAIL)
-#include "ext/resources/text_provider.h"  // EXT SEAM: InitText, the notices' provider (NOT RETAIL)
-#include "ext/quick_screens/quick_screens.h"  // EXT SEAM: ext.quick_screens' minimum operation time (NOT RETAIL)
+#include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): DoLoad's `ext:` pseudo-mods
+#include "ext/load_notice.h"  // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTNOTICE.md): their notices, Dialog/Extensions.rsc:extension*
+#include "ext/resources/text_provider.h"  // EXT SEAM (NOT RETAIL, docs/extensions/KITFREE.md): InitText, the notices' provider
+#include "ext/quick_screens/quick_screens.h"  // EXT SEAM (NOT RETAIL, docs/extensions/handins/SPLASH.md): ext.quick_screens' minimum operation time
 #include <vector>
 #include "ui/ButtonElement.h"
 
@@ -429,10 +429,10 @@ void SaveLoadDialog::OnOpened() {
     // --- Set minimum operation time (0.75f seconds) ---
     System::Time timeVal;
     RtSystem_Time_Ctor(&timeVal, 0.75f);
-    // EXT SEAM (block SPLASH, NOT RETAIL): ext.quick_screens ends the list's
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SPLASH.md): ext.quick_screens ends the list's
     // floor once the scan is done (SaveLoad::Update runs it only with the
     // persistence worker idle). docs/extensions/handins/SPLASH.md.
-    if (Ext::Ext().quick_screens) timeVal._ticks = QuickScreens::kNoMinOperationTime;
+    if (Ext::Ext().quick_screens) timeVal._ticks = Ext::QuickScreens::kNoMinOperationTime;
     ::Save::SaveLoad::_singleton->SetMinOperationTime(timeVal);
 
     // --- Start operation: 1 (list/scan), param = -2 or -3 based on mode ---
@@ -819,9 +819,9 @@ void SaveLoadDialog::DoSave() {
     // Set minimum operation time (1.5f seconds — DAT_140172160)
     System::Time minTime{};
     RtSystem_Time_Ctor(&minTime, 1.5f);
-    // EXT SEAM (block SPLASH, NOT RETAIL): ext.quick_screens ends the floor once
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SPLASH.md): ext.quick_screens ends the floor once
     // the worker has written the file. docs/extensions/handins/SPLASH.md.
-    if (Ext::Ext().quick_screens) minTime._ticks = QuickScreens::kNoMinOperationTime;
+    if (Ext::Ext().quick_screens) minTime._ticks = Ext::QuickScreens::kNoMinOperationTime;
     saveLoad->SetMinOperationTime(minTime);
 
     // Check if the selected save slot already contains data
@@ -866,9 +866,9 @@ void SaveLoadDialog::DoLoad() {
     // Set minimum operation time (1.5f seconds)
     System::Time minTime{};
     RtSystem_Time_Ctor(&minTime, 1.5f);
-    // EXT SEAM (block SPLASH, NOT RETAIL): ext.quick_screens ends the floor once
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SPLASH.md): ext.quick_screens ends the floor once
     // the worker has read the file (LOADPLAN ruling 3). docs/extensions/handins/SPLASH.md.
-    if (Ext::Ext().quick_screens) minTime._ticks = QuickScreens::kNoMinOperationTime;
+    if (Ext::Ext().quick_screens) minTime._ticks = Ext::QuickScreens::kNoMinOperationTime;
     saveLoad->SetMinOperationTime(minTime);
 
     // If game world is active, ask user to confirm leaving the current game
@@ -899,7 +899,7 @@ void SaveLoadDialog::DoLoad() {
         fflush(stdout);
     }
 
-    // EXT SEAM (NOT RETAIL; docs/extensions/handins/SAVETAIL.md §4-5, EXTSAVE.md):
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SAVETAIL.md §4-5, EXTSAVE.md): the `ext:` pseudo-mods leave the list before CheckMod.
     // the save's `ext:<id>` pseudo-mods (a class B / C extension recorded by
     // SaveMetaData) are split out HERE, before CheckMod: retail's loop below
     // sees the real mods only, in their own order, so a real-mod save is
@@ -978,7 +978,7 @@ void SaveLoadDialog::DoLoad() {
         else if (modStatus == 3) warnPath = "Dialog/SaveLoad.rsc:modsVersion";
         else if (modStatus == 4) warnPath = "Dialog/SaveLoad.rsc:modsChanged";
         else                     warnPath = "Dialog/SaveLoad.rsc:modsMissing";
-        // EXT SEAM (block EXTNOTICE): an `ext:` entry gets our notice instead,
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTNOTICE.md): an `ext:` entry gets our notice instead,
         // the same MessageBox shape with a text that says extension. The notice
         // is built in the exe by the embedded-text provider, which the ext boot
         // registers under every profile but the faithful one -- and a faithful
@@ -1001,7 +1001,7 @@ void SaveLoadDialog::DoLoad() {
                 checkedWarn = static_cast<const UI::Dialog*>(warnExt);
             }
         }
-        // EXT SEAM (block EXTNOTICE): should our notice still not resolve (the
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTNOTICE.md): should our notice still not resolve (the
         // embedded text failed to parse or build; `[ExtRes]` in standalone_error.log
         // says why), the entry gets retail's own modsMissing, which names it by
         // the same three parameters. Our dialog only: retail's path is unchanged.
@@ -1050,7 +1050,7 @@ void SaveLoadDialog::DoLoad() {
         uint32_t modVer   = modEntry.versionMinor;
         System::String verStrBuf = System::Configuration::GetVersionString(isBeta, (bool)(isBeta != 0));
         System::String fmtBuf = System::String::Format("%i (%s)", (unsigned)modVer, verStrBuf._data);
-        // EXT SEAM (block EXTNOTICE): an extension's @2 is its format version
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTNOTICE.md): an extension's @2 is its format version
         // alone; its +0x14 is the pseudo-mod constant, not a game version.
         if (modIsExt[k]) fmtBuf = System::String::Format("%i", (unsigned)modVer);
         textElem->SetParameter(2, fmtBuf);

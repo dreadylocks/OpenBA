@@ -3,6 +3,7 @@
 
     python tools/abi_audit.py                    # checks (i) and (ii) against tools/abi_audit.baseline
     python tools/abi_audit.py --list PATTERN     # every counted line of one section-(ii) pattern
+    python tools/abi_audit.py --list PATTERN:guarded   # its uncounted lines (Windows-only #if branches)
     python tools/abi_audit.py --write-baseline   # rewrite the baseline from the tree (ratchet DOWN only:
                                                  #   a growth must be justified in the commit, not baselined)
     python tools/abi_audit.py --layout [-j N]    # (iii) the tail-padding candidates (needs g++ on PATH)
@@ -19,10 +20,16 @@ the build when such a type moves a PINNED offset; this script covers what they c
      accident of the data model (a new member can be absorbed by padding the asserts never see).
      Allowed findings are listed in the baseline (`pinned` rows); any other one fails.
 (ii) PATTERN COUNTS. The plans/ABI.md section-A patterns, counted as LINES (comments and string
-     contents stripped first) per top-level directory, outside src/platform/win, src/render/dx11 and
-     src/diag/win (the Windows backends, where they belong; src/diag/win is the Windows-only
-     diagnostics directory, D4_RULES C10). Fails when a (pattern, directory) count exceeds the
-     baseline. A count below the baseline is reported so the next commit can ratchet it down.
+     contents stripped first) per top-level directory, outside src/platform/win, src/render/dx11,
+     src/diag/win, src/platform/darwin and src/diag/darwin (the platform backends, where they
+     belong; src/diag/win is the Windows-only diagnostics directory, D4_RULES C10, and the
+     darwin twins are its macOS counterpart). A line inside a Windows-only preprocessor branch
+     (`#ifdef _WIN32`, `#if defined(_WIN32) && ...`, the `#else` of `#ifndef _WIN32`; likewise
+     `_WIN64`, `__MINGW32__`, `__MINGW64__`, `_MSC_VER`) is Windows backend code kept beside its
+     POSIX twin: it is not counted, and the number of such lines is printed. An `||` condition and
+     the `#else` of an `#elif` chain are never treated as Windows-only. Fails when a (pattern,
+     directory) count exceeds the baseline. A count below the baseline is reported so the next
+     commit can ratchet it down.
 (iii) --layout. Compiles one TU per header that pins a layout with `g++ -fsyntax-only -fdump-lang-class`
      (the Makefile's include path; no build, no object written) and lists every class of the tree whose
      size exceeds its data size (`base size`, the Itanium dsize) AND that is a base of another class:
@@ -44,7 +51,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASELINE = os.path.join(ROOT, 'tools', 'abi_audit.baseline')
 SCAN_ROOTS = ['src', 'tests']
-EXCLUDED = ('src/platform/win/', 'src/render/dx11/', 'src/diag/win/')
+EXCLUDED = ('src/platform/win/', 'src/render/dx11/', 'src/diag/win/', 'src/platform/darwin/', 'src/diag/darwin/')
 EXTS = ('.h', '.hpp', '.cpp', '.inl')
 
 # ---------------------------------------------------------------------------------------------
@@ -167,22 +174,78 @@ PATTERNS = collections.OrderedDict([
 ])
 
 
+WIN_MACROS = ('_WIN32', '_WIN64', '__MINGW32__', '__MINGW64__', '_MSC_VER')
+_WIN_NAME = r'(?:' + '|'.join(WIN_MACROS) + r')'
+_WIN_TERM = r'(?:defined\s*\(\s*' + _WIN_NAME + r'\s*\)|defined\s+' + _WIN_NAME + r'\b|' + _WIN_NAME + r'\b)'
+RE_PP = re.compile(r'\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$')
+
+
+def _cond_is_win(expr):
+    """True when `#if expr` can only be taken on Windows: a conjunction (no `||`) one of whose
+    terms is a plain, un-negated Windows macro test."""
+    if '||' in expr:
+        return False
+    return any(re.fullmatch(r'\s*\(?\s*' + _WIN_TERM + r'\s*\)?\s*', t) for t in expr.split('&&'))
+
+
+def _cond_is_notwin(expr):
+    """True when `#if expr` is exactly one negated Windows macro test, so its `#else` is Windows-only."""
+    return re.fullmatch(r'\s*!\s*\(?\s*' + _WIN_TERM + r'\s*\)?\s*', expr) is not None
+
+
+def windows_only_lines(nc):
+    """The 1-based line numbers of `nc` (comments stripped) inside a Windows-only #if branch."""
+    out, stack = set(), []          # one [branch_is_win, else_is_win] per open #if
+    lines = nc.split('\n')
+    i = 0
+    while i < len(lines):
+        first, text = i + 1, lines[i]
+        while text.rstrip().endswith('\\') and i + 1 < len(lines):   # a continued directive
+            i += 1
+            text = text.rstrip()[:-1] + ' ' + lines[i]
+        m = RE_PP.match(text)
+        if m:
+            kind, rest = m.group(1), m.group(2).strip()
+            if kind == 'ifdef':
+                stack.append([rest in WIN_MACROS, False])
+            elif kind == 'ifndef':
+                stack.append([False, rest in WIN_MACROS])
+            elif kind == 'if':
+                stack.append([_cond_is_win(rest), _cond_is_notwin(rest)])
+            elif kind == 'elif' and stack:
+                stack[-1] = [_cond_is_win(rest), False]
+            elif kind == 'else' and stack:
+                stack[-1] = [stack[-1][1], False]
+            elif kind == 'endif' and stack:
+                stack.pop()
+        if any(e[0] for e in stack):
+            out.update(range(first, i + 2))
+        i += 1
+    return out
+
+
 def count_patterns():
     counts = collections.Counter()
     hits = collections.defaultdict(list)
+    guarded = collections.Counter()
     for rel, path in iter_sources():
         if rel.startswith(EXCLUDED):
             continue
         nc, bl = load(rel, path)
+        win = windows_only_lines(nc)
         b_lines, r_lines = bl.split('\n'), nc.split('\n')
         for ln, (b, r) in enumerate(zip(b_lines, r_lines), 1):
             if not b.strip():
                 continue
             for name, (_, test) in PATTERNS.items():
                 if test(b, r):
+                    if ln in win:
+                        guarded[bucket(rel)] += 1
+                        hits[name + ':guarded'].append(f'{rel}:{ln}: {r.strip()}')
+                        continue
                     counts[(name, bucket(rel))] += 1
                     hits[name].append(f'{rel}:{ln}: {r.strip()}')
-    return counts, hits
+    return counts, hits, guarded
 
 # ---------------------------------------------------------------------------------------------
 # (i) pinned members
@@ -378,7 +441,8 @@ def write_baseline(counts, pinned):
         f.write('# The check fails when the tree exceeds a row. Lower a row when the tree falls below it;\n')
         f.write('# a row that rises needs the reason in the commit that raises it (plans/ABI.md C.1).\n')
         f.write('# pinned <file> <Class::member> <reason>: an allowed pinned-layout member (section (i)).\n')
-        f.write('# count <pattern> <directory> <lines>: section (ii), outside src/platform/win, src/render/dx11 and src/diag/win.\n')
+        f.write('# count <pattern> <directory> <lines>: section (ii), outside src/platform/win, src/render/dx11, src/diag/win\n')
+        f.write('#   and Windows-only #if branches (#ifdef _WIN32, __MINGW32__, ...; see the docstring).\n')
         for p in sorted(pinned):
             f.write('pinned\t' + '\t'.join(p) + '\n')
         for (pat, d), c in sorted(counts.items(), key=lambda kv: (list(PATTERNS).index(kv[0][0]), kv[0][1])):
@@ -388,7 +452,7 @@ def write_baseline(counts, pinned):
 # (iii) --layout
 # ---------------------------------------------------------------------------------------------
 
-INCLUDES = ['-I.', '-Isrc/game', '-Isrc/engine', '-Isrc/render/dx11', '-Isrc/app', '-Isrc/diag']
+INCLUDES = ['-I.', '-Isrc/game', '-Isrc/engine', '-Isrc/render/common', '-Isrc/render/dx11', '-Isrc/app', '-Isrc/diag']
 FLAGS = ['-std=c++17', '-fexceptions', '-fno-strict-aliasing', '-fno-lifetime-dse', '-w',
          '-fsyntax-only', '-fdump-lang-class']
 RE_DUMP_CLASS = re.compile(r'^Class ([^\n]+)\n[ \t]+size=(\d+) align=\d+\n[ \t]+base size=(\d+) base align=\d+\n(.*?)(?=\n\n|\Z)', re.M | re.S)
@@ -470,10 +534,12 @@ def main():
     os.chdir(ROOT)
     if a.layout:
         return layout(a.j)
-    counts, hits = count_patterns()
+    counts, hits, guarded = count_patterns()
     if a.list:
-        if a.list not in PATTERNS:
-            print('patterns: ' + ', '.join(PATTERNS)); return 2
+        base, _, suffix = a.list.partition(':')
+        if base not in PATTERNS or suffix not in ('', 'guarded'):
+            print('patterns: ' + ', '.join(PATTERNS) + '  (PATTERN:guarded lists its Windows-only, uncounted lines)')
+            return 2
         print('\n'.join(hits[a.list])); return 0
     findings, nclasses = pinned_findings()
     if a.write_baseline:
@@ -497,6 +563,9 @@ def main():
             fail |= c > b
             if c or b:
                 print(f'  {pat:14s} {d:16s} {c:5d} / {b:5d} {mark}')
+    if guarded:
+        print('  not counted, inside a Windows-only #if branch (--list PATTERN:guarded): ' +
+              ', '.join(f'{d} {c}' for d, c in sorted(guarded.items())))
     print('FAIL' if fail else 'OK')
     return 1 if fail else 0
 

@@ -29,6 +29,7 @@
 
 #include <cstdint>
 
+namespace Ext {
 namespace QuickScreens {
 
 // The splash hold's remaining work under ext.quick_screens, asked only while
@@ -63,3 +64,4 @@ inline bool SplashHoldOver(bool quick, int64_t elapsedTicks, int64_t delayTicks,
 constexpr int64_t kNoMinOperationTime = 0;
 
 }  // namespace QuickScreens
+}  // namespace Ext

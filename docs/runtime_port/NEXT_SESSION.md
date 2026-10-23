@@ -137,7 +137,7 @@ Still the user's call:
   is warm; package read-ahead only pays there), a real 1025^2 field in the erosion bench. The census routes randomise the seed, so
   new-game times vary ~0.1 s by map. By hand, the user: `ext.quick_screens` on -- boot, a save load, an in-game save, quit to menu, the tutorial (no flash or hang).
 - **Multithreading: DONE 2026-10-14** (`docs/extensions/handins/THREADPLAN.md`, hand-ins CPULIMIT / RENDERPIPE0 / CULLPAR / RENDERPIPE1,
-  `docs/extensions/STATUS.md` top entry): `sys.cpu_limit` + the roster (`src/ext/cpu/`), `ext.render_pipe` (the render thread, class A) and
+  `docs/extensions/STATUS.md` top entry): `sys.cpu_limit` + the roster (`src/platform/common/cpu/`), `ext.render_pipe` (the render thread, class A) and
   `ext.gather_threads` (the parallel cull, class A) shipped at gate 0 with every shadow 0; 4-core heavy speed 10 +67%, speed 50 +35%;
   speed-50 close-out 752 / 618 / 425 fps everything on. **The user (2026-10-14): the in-game fps improvements are COMPLETE. The next
   phase is SPEEDING UP THE LOADING** (new game / load game / boot times): not yet planned; the first step is a timed census of the

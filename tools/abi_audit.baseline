@@ -2,19 +2,12 @@
 # The check fails when the tree exceeds a row. Lower a row when the tree falls below it;
 # a row that rises needs the reason in the commit that raises it (plans/ABI.md C.1).
 # pinned <file> <Class::member> <reason>: an allowed pinned-layout member (section (i)).
-# count <pattern> <directory> <lines>: section (ii), outside src/platform/win, src/render/dx11 and src/diag/win.
-count	long	src/app	4
+# count <pattern> <directory> <lines>: section (ii), outside src/platform/win, src/render/dx11, src/diag/win
+#   and Windows-only #if branches (#ifdef _WIN32, __MINGW32__, ...; see the docstring).
 count	long	src/engine	2
-count	wchar_t	src/app	1
-count	callconv	src/app	1
-count	callconv	src/diag	1
-count	callconv	src/engine	1
-count	declspec	src/app	2
-count	declspec	src/engine	1
-count	win_include	src/app	6
-count	win_include	src/diag	6
-count	win32_typedef	src/app	14
-count	win32_typedef	src/diag	7
+count	long	src/render	1
 count	pragma_pack	src/engine	2
 count	pragma_pack	src/game	2
+count	va_list	src/diag	1
 count	va_list	src/engine	6
+count	va_list	src/ext	2

@@ -55,6 +55,7 @@
 #include <climits>
 #include <cstdint>
 
+namespace Ext {
 namespace FastPaths {
 
 namespace {
@@ -294,3 +295,4 @@ SearchResult Searcher::Run(const SearchInput& in, int32_t* path) {
 }
 
 }  // namespace FastPaths
+}  // namespace Ext

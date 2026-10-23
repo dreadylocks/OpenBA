@@ -49,6 +49,7 @@
 
 #include "platform_window.h"
 #include "cursor_planes.h"
+#include "cursor_image.h"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_mouse.h>
@@ -114,8 +115,20 @@ SDL_Cursor* MakeCursor(int32_t hotX, int32_t hotY, int32_t width, int32_t height
     SDL_Surface* surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_ARGB8888,
                                                  pixels.data(), width * 4);
     if (surface == nullptr) return nullptr;
+    // Retina: a 32 x 32 point cursor needs 64 x 64 pixels or macOS scales the 1x image up
+    // and blurs it. SDL picks the alternate whose scale matches the display (Cocoa: both
+    // become representations of one NSImage). Failure to add it leaves the 1x image.
+    std::vector<uint32_t> big(static_cast<size_t>(width) * height * 4);
+    SDL_Surface* surface2 = nullptr;
+    if (width > 0 && height > 0) {
+        UpscaleNearest(pixels.data(), width, height, 2, big.data(), width * 2);
+        surface2 = SDL_CreateSurfaceFrom(width * 2, height * 2, SDL_PIXELFORMAT_ARGB8888,
+                                         big.data(), width * 2 * 4);
+        if (surface2 != nullptr) SDL_AddSurfaceAlternateImage(surface, surface2);
+    }
     SDL_Cursor* c = SDL_CreateColorCursor(surface, hotX, hotY);
-    SDL_DestroySurface(surface);
+    SDL_DestroySurface(surface);    // also releases the alternate image list
+    SDL_DestroySurface(surface2);
     return c;
 }
 
@@ -154,6 +167,19 @@ void Set(CursorHandle cursor) {
 void Show(bool show) {
     if (show) SDL_ShowCursor();
     else      SDL_HideCursor();
+}
+
+// The only caller is the Metal backend (src/render/metal, the renderer PR).
+void SetFromTexels(const uint32_t* texels, int32_t hotX, int32_t hotY) {
+    static CursorHandle current = nullptr;
+    uint8_t andPlane[4 * 32];
+    uint8_t xorPlane[4 * 32];
+    TexelsToPlanes(texels, 32, 32, 32, andPlane, xorPlane);
+    CursorHandle built = Create(nullptr, hotX, hotY, 32, 32, andPlane, xorPlane);
+    if (built == nullptr) return;
+    Set(built);                      // SDL keeps drawing the new cursor before the old is freed
+    if (current != nullptr) Destroy(current);
+    current = built;
 }
 
 void Destroy(CursorHandle cursor) {

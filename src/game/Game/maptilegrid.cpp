@@ -29,6 +29,7 @@
 #include "Game/terrain_sidecar.h"
 #include <cstdint>
 #include <cstring>
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // --- classifier thresholds (exe .rdata) -------------------------------------
 static constexpr float kCenterBias   = 0.5f;    // DAT_140172114 (cell-center offset)
@@ -78,6 +79,7 @@ extern "C" void MapTileGrid_Build(Map* game, int dim) {
     for (int i = 0; i < count; ++i)
         game->cells[i].terrainType = (uint8_t)MapTileGrid_Classify(game, dim, i);
     TerrainSidecar::Invalidate();   // [terrain sidecar] fresh grid: mirror rebuilds on first read
+    CellStamp::Invalidate();        // [AMBMEMO] fresh grid: every block re-stamped on the next read
     StillTerrain::Bump();           // [STILLTERRAIN] a new size and cell array (every floorCount 0)
 
     LoadTime::Stamp("tg.fillzones");   // NOT RETAIL: print-only

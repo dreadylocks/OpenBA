@@ -48,7 +48,7 @@ void RewriteFormatAsPcm(Platform::AudioWaveFormat& format);
 uint32_t XwmaPcmPlayBegin(uint32_t playBegin, const uint32_t* seekTable, uint32_t packetCount,
                           uint32_t channels, uint32_t frameLength, uint32_t pcmSamples);
 
-// EXT SEAM gate (NOT RETAIL, block SEAMLESS): DecodeAtLoad hands a buffer's decoded PCM to
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/SEAMLESS.md): ext.seamless_loops' gate -- DecodeAtLoad hands a buffer's decoded PCM to
 // SoundBuffer::_extLoopSeam only when the seam is installed (the row ext.seamless_loops was on at boot),
 // the buffer loops (SoundBuffer::_loopForever: PlayPlatform's loop count comes from that flag alone, so a
 // one-shot buffer is never looped and a looping one never plays once), and the decode produced PCM.

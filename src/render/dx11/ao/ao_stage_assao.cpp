@@ -59,7 +59,7 @@ public:
         if (_logAllocation) {
             _logAllocation = false;
             // (ASSAO's GetAllocatedVideoMemory is never updated upstream: always 0.)
-            std::fprintf(stderr, "[AO] ASSAO targets allocated for %ux%u\n", _width, _height);
+            std::fprintf(stderr, "[AmbientOcclusion] ASSAO targets allocated for %ux%u\n", _width, _height);
         }
     }
 
@@ -97,12 +97,12 @@ Stage* CreateAssao(ID3D11Device* device) {
     ASSAO_CreateDescDX11 desc(device, kNoSource, sizeof(kNoSource));
     ASSAO_Effect* effect = ASSAO_Effect::CreateInstance(&desc);
     if (effect == nullptr) {
-        std::fprintf(stderr, "[AO] ASSAO_Effect::CreateInstance failed: the AO stage stays off\n");
+        std::fprintf(stderr, "[AmbientOcclusion] ASSAO_Effect::CreateInstance failed: the AO stage stays off\n");
         return nullptr;
     }
     int major = 0, minor = 0;
     effect->GetVersion(major, minor);
-    std::fprintf(stderr, "[AO] ASSAO %d.%d created\n", major, minor);
+    std::fprintf(stderr, "[AmbientOcclusion] ASSAO %d.%d created\n", major, minor);
     return new AssaoStage(effect);
 }
 

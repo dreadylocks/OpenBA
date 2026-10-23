@@ -7,7 +7,9 @@ real `final` subclass of the runtime's abstract `Video::*Data` base
 compiler builds the vtables, `DeviceData`'s eleven factories are `new XData(owner)`
 (the base's `operator new` is retail's `MemAlloc(size, 4)`) and the runtime
 destroys a companion with `delete`. The hand-built tables, `DX11_REGISTER_SLOT`
-and `src/render/dx11/funcs/dx11_seam.{h,cpp}` are gone. The Makefile globs `src/render/dx11/*.cpp`.
+and `src/render/dx11/funcs/dx11_seam.{h,cpp}` are gone. `backend.cmake` (included by the top-level
+`CMakeLists.txt` for `BANISHED_RENDER_BACKEND=dx11`) globs `src/render/dx11/*.cpp`; the top level
+adds `src/render/common/*.cpp`.
 
 ## Landed — all twelve classes, all 84 slots, unconditional
 
@@ -34,6 +36,8 @@ verified per-draw against the shipped DLL in RenderDoc — see `src/render/dx11/
 | `dx9_placeholder.cpp` | The cutover-only DX9 placeholder, a real subclass of `Video::DeviceData` that lists the same adapters under the "DirectX 9" name so the interface array keeps one entry per slot | — |
 | `dx11_backend_access.{h,cpp}` | Shared plumbing: the `Video::Device -> DeviceData -> ID3D11Device/Context` walk (the one downcast dx11 makes: it built the object), `Dx11SwapChain()`, the constant-buffer registry | — |
 | `exports.cpp` | The two plugin entry points (`../types/VideoDX11Plugin.h`): `Dx11_CreateDeviceData` is `new DeviceData(device)` | — |
+| `render_backend_dx11.cpp` | NOT RETAIL. The backend-neutral `Render::` entry points (`../common/render_backend.h`) as forwarders to the plugin's four (`VideoDX11Plugin.h`); what `src/app/video_interface.cpp` writes into the Device's interface slots | — |
+| `backend.cmake` | NOT RETAIL. This backend's CMake fragment: `RENDER_SRCS`, include directory, per-file properties, the Linux dxvk-native check (`../common/README.md`) | — |
 
 ## The seam that is gone (ENDGAME B5, 2026-10-05)
 

@@ -9,7 +9,7 @@
 //
 // Smooth alpha-tested edges (leaves, needles, twigs): the six retail cutout
 // programs (x 4 DETAIL variants) are rewritten at load, in memory, from the
-// user's own installed bytecode (src/render/dx11/foliage_aa/): the discard
+// user's own installed bytecode (src/render/dx11/better_trees/): the discard
 // becomes a sharpened alpha written to o0.w and drawn with alpha to coverage
 // (MSAA on); mode 2 also scales the alpha up with the mip level (the distance
 // fill). With MSAA off the discard stays and mode 2 keeps only the fill.
@@ -17,7 +17,7 @@
 // Stable tree shading: the deciduous canopies and the blueberry bushes are camera-facing
 // leaf cards; retail casts their shadow from sun-facing cards but looks it up from the
 // camera-facing ones, so the canopy shows a line that turns with the view. With the row on,
-// the billboard colour vertex shader (src/render/dx11/billboard_shadow/) looks the shadow up
+// the billboard colour vertex shader (src/render/dx11/better_trees/) looks the shadow up
 // at the card centre's depth moved toward the sun, and the cut is dappled per card and per
 // texel (BbsRewrite::Params: basis / margin / jitter / noise / noiseScale).
 //

@@ -2,7 +2,7 @@
 // src/ext/ambient_occlusion/ao_math.h -- the pure parts of ext.ambient_occlusion
 // ============================================================================
 // NOT RETAIL. docs/extensions/AO.md §3 ("Zoom", "Tiers"), §6.2; handins/AOCORE.md.
-// Standard C++ only: tests/unit/ext_ao_test.cpp links ao_math.cpp on its own, and
+// Standard C++ only: tests/unit/ext_ambient_occlusion_test.cpp links ao_math.cpp on its own, and
 // the D3D backend (src/render/dx11/ao/ao_pass.cpp) uses AssaoProjection.
 // ============================================================================
 #pragma once
@@ -10,8 +10,10 @@
 #include <cstdint>
 
 namespace Graphics { struct ExtAoFrame; }
-namespace Ext { namespace AO { struct Params; } }
+namespace Ext { namespace AmbientOcclusion { struct Params; } }
 
+namespace Ext {
+namespace AmbientOcclusion {
 namespace AoMath {
 
 // ---------------------------------------------------------------------------
@@ -93,7 +95,7 @@ constexpr float kShadowPower           = 1.5f;
 constexpr float kHorizonAngleThreshold = 0.06f;
 constexpr float kSharpness             = 0.98f;
 constexpr float kDetailShadowStrength  = 0.5f;
-bool FrameFor(const Ext::AO::Params& params, float cameraDistance, Graphics::ExtAoFrame& out);
+bool FrameFor(const Ext::AmbientOcclusion::Params& params, float cameraDistance, Graphics::ExtAoFrame& out);
 
 // ---------------------------------------------------------------------------
 // The fog alignment (the user's look 2026-10-14: AO drawn over the fog). The
@@ -110,3 +112,5 @@ constexpr float kFogFadeCeiling = 500.0f;   // FadeOutTo stays below the far pla
 bool FadeFromFog(float fogParamX, float fogParamY, Graphics::ExtAoFrame& frame);
 
 }  // namespace AoMath
+}  // namespace AmbientOcclusion
+}  // namespace Ext

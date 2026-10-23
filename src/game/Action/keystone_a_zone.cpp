@@ -29,6 +29,7 @@
 #include "Game/PathfinderThread.h"     // PathfinderThread
 #include "Entity/ComponentEntity.h"   // B4 S4 RT2: InternalPtr<ComponentEntity>::Get() needs the class complete
 #include "stress_harness.h"   // PFBENCH: PfMainTimer (pf_sync_wait_ms; stress harness only)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // Match the action_pf_*.cpp decompile token aliases.
 typedef unsigned int  uint;
@@ -178,6 +179,7 @@ LAB_clear:
                         stored = owner->Get();
                     }
                     map->cells.GetData()[iVar15].blocker = stored;
+                    CellStamp::NoteWrite(&map->cells.GetData()[iVar15]);   // [AMBMEMO] cell write clock
                     SetCellBlocked(map->pathfinder, static_cast<uint32_t>(iVar15),
                                    static_cast<uint32_t>(stored != nullptr));   // 0x1400a6f00
                     if (bVar18) {

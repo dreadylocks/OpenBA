@@ -51,9 +51,11 @@
 #include "platform_window.h"
 #include "window_messages.h"
 #include "window_sdl_internal.h"
+#include "platform_input_hooks.h"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_video.h>
 
 #include <deque>
@@ -203,10 +205,12 @@ bool Pump(Window::MessageHandler handler) {
 #endif
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        Input::PreprocessPumpEvent(&ev);
 #if BANISHED_TWEAK_OVERLAY
         // The toggle key, and while the overlay is open its mouse / keyboard events (the game sees none).
         if (Diag::TweakOverlay::OnSdlEvent(ev)) continue;
 #endif
+        if (Input::ConsumePumpEvent(ev)) continue;
         WindowMessage msgs[kMaxMessagesPerEvent];
         const int n = TranslateWindowEvent(FromSdl(ev), window, msgs);
         for (int i = 0; i < n; ++i) {

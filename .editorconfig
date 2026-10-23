@@ -1,0 +1,28 @@
+# Editor basics every tool reads without a formatter (.clang-format is the C++ reference,
+# .claude/rules/style.md the rule). Line endings follow .gitattributes.
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{c,cc,cpp,h,hpp,inc,mm,m}]
+max_line_length = 110
+
+[*.{cmake,txt}]
+indent_size = 2
+
+[CMakeLists.txt]
+indent_size = 2
+
+[*.{py,sh}]
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

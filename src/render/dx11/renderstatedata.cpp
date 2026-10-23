@@ -77,7 +77,7 @@
 //  * The original does not bounds-check any of the six enum lookups. Neither do
 //    we: clamping would silently diverge on malformed .rsc data.
 
-#include "foliage_aa/foliage_aa_stage.h"   // EXT SEAM (NOT RETAIL): ext.foliage_aa, VideoDX11::g_extFoliageAA
+#include "better_trees/foliage_aa_stage.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTER-TREES.md, FAA-CORE.md): ext.better_trees' foliage_aa stage, VideoDX11::g_extFoliageAA
 #include <cstring>
 #include <cstdint>
 #include <cstddef>
@@ -299,7 +299,7 @@ DeviceData* ActiveDeviceData() {
 // (B5 W0, src/engine/video/companion_operators.cpp). The body is steps 2-4.
 // ============================================================================
 RenderStateData::~RenderStateData() {
-    // EXT SEAM (NOT RETAIL, ext.foliage_aa): null unless the row is on; the stage drops the clone.
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTER-TREES.md, FAA-CORE.md): ext.better_trees' foliage_aa stage, null unless the row is on; the stage drops the clone.
     if (FaaStage::Stage* faa = g_extFoliageAA.load(std::memory_order_acquire)) faa->RenderStateDestroyed(blendState);
     if (blendState) {
         blendState->Release();
@@ -455,7 +455,7 @@ void RenderStateData::Bind(void* /*videoContext — unused, as in the original*/
     ctx->OMSetDepthStencilState(depthStencilState,
                                 static_cast<UINT>(rs->_stencil.reference));   // byte, RS+0x4c
     ctx->RSSetState(rasterizerState);
-    // EXT SEAM (NOT RETAIL, ext.foliage_aa): null unless the row is on. BindResources binds the
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTER-TREES.md, FAA-CORE.md): ext.better_trees' foliage_aa stage, null unless the row is on. BindResources binds the
     // pixel program BEFORE the render state, so the A2C clone goes on here, over the retail state.
     if (FaaStage::Stage* faa = g_extFoliageAA.load(std::memory_order_acquire)) faa->AfterRenderState(ctx, blendState);
 }

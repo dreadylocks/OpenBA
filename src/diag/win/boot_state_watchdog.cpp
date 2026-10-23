@@ -92,7 +92,7 @@
 #include <cstdarg>
 
 #include "options.h"
-#include "ext/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
+#include "platform/common/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
 
 namespace BootState {
 

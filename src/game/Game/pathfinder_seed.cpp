@@ -30,7 +30,7 @@
 #include <cstdlib>
 #include "system/Thread.h"     // ENDGAME B.3.4b System caller batch (CriticalSection/Thread)
 #include "Object/exe_type.h"     // DEFINE_EXE_VTABLE
-#include "ext/path_workers/path_workers.h"   // EXT SEAM: PathWorkers::Engaged / Dispatch (NOT RETAIL)
+#include "ext/path_workers/path_workers.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): Ext::PathWorkers::Engaged / Dispatch
 
 // A* / pathfinder helpers (reimplemented + registered elsewhere) — called by name through
 // Action/exe_bodies.h: Pf_WorkerApplyCmd_a6430 (0x1400a6430), Pf_EnqueueCmd1_a6a30
@@ -63,9 +63,9 @@
 void PathfinderThread::Run() {
     int count = queueCount;
     while (count > 0) {
-        // EXT SEAM (NOT RETAIL): ext.path_workers -- once per command; the
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): ext.path_workers -- once per command; the
         // dispatcher drains the rest of the queue (src/ext/path_workers/path_workers.h).
-        if (PathWorkers::Engaged()) { PathWorkers::Dispatch(*this); return; }
+        if (Ext::PathWorkers::Engaged()) { Ext::PathWorkers::Dispatch(*this); return; }
         lock.Lock();
         PathCommand* node = queueHead;
         PathCommandArgs cmd = node->args;                  // cmd {type, arg1, arg2, arg3}

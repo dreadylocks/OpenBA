@@ -22,7 +22,7 @@ System::Filename* RtObject_ExternalFactory_GetCompiledPath(System::Filename* ret
 const ::Object::External* RtObject_ExternalFactory_FindOrLoad(ExternalFactory* self,
                                                     const System::Filename* path);
 
-// EXT SEAM (NOT RETAIL; docs/extensions/KITFREE.md section 2). Null by default.
+// EXT SEAM (NOT RETAIL, docs/extensions/KITFREE.md §2): the resource providers' entry, null by default.
 // FindOrLoad's miss branch calls it, with the EXPANDED path, only after
 // External::Load found neither a loose .crs nor a package entry; a non-null
 // result is registered exactly as a loaded object (`_path = expanded`, Add).

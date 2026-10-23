@@ -25,9 +25,15 @@ inline int32_t CompilerSlotOf(PMF pmf) {
     static_assert(sizeof(PMF) == 2 * sizeof(uintptr_t), "Itanium PMF is two words");
     uintptr_t words[2];
     std::memcpy(words, &pmf, sizeof words);
+#if defined(__aarch64__)
+    // The AArch64 C++ ABI (Apple and Linux alike) puts the virtual discriminator in adj's low bit.
+    if (words[1] != 1) return -1; // virtual, with zero this-adjustment
+    return static_cast<int32_t>(words[0] / sizeof(void*));
+#else
     if ((words[0] & 1u) == 0) return -1;
     if (words[1] != 0) return -1;
     return static_cast<int32_t>((words[0] - 1) / sizeof(void*));
+#endif
 }
 
 // The address stored in `obj`'s table for `pmf` (what a diagnostic prints).

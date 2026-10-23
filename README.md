@@ -5,16 +5,16 @@
 
 ---
 
-OpenBA aims to rebuild Banished as a open source, readable, C++ codebase.  
-This project is designed along the lines of OpenRCT2, divilutionX etc where the aim is  
-to have baseline parity with the game's 1.0.7 release, but allowing for under the hood changes that still match retial.
-The project is designed to drop into the game's directory and run, and uses no game assets or code.
-Optional extensions are supported (see below).
+OpenBA aims to rebuild Banished as a open source, readable, C++ codebase.    
+This project is designed along the lines of OpenRCT2, divilutionX etc where the aim is    
+to have baseline parity with the game's 1.0.7 release, but allowing for under the hood changes that still match retial.  
+The project is designed to drop into the game's directory and run, and uses no game assets or code.  
+Optional extensions are supported (see below).  
 
-Project goals: readable C++ with classes, decent comments, and no "function is byte identical" slop.
-The engine also supports basic multithreading, higher performance, and various rendering fixes.
-OpenBA delivers a sharp experience even on 4k displays,
-and the ability to hit 140fps+ at 50x speed with over 2k citizens. (Tested on a 5080/9800x3d)  
+Project goals: readable C++ with classes, decent comments, and no "function is byte identical" slop.  
+The engine also supports basic multithreading, higher performance, and various rendering fixes.  
+OpenBA delivers a sharp experience even on 4k displays,  
+and the ability to hit 140fps+ at 50x speed with over 2k citizens. (Tested on a 5080/9800x3d)    
 <p align="left">  
 <img src="images/fpscomp.jpg">  
 </p>  
@@ -34,19 +34,33 @@ With AO and MSAA enabled on 10x, OpenBA  (left) performs 100fps better than reta
 - **Verification:** OpenBA has a full unit test suite verified against the retail games behavior.
 - **Platforms:** Windows x64 10/11 and Linux x64 using cmake and GCC13.1. DX11 render with DXVK support.
 
+## Versioning
+
+The main menu's build line shows retail's version on the left and OpenBA's on the right, e.g.
+retail: `1.0.7 17Se10` OpenBa: `OpenBA v1.0.0 2424a9093 2026-10-19`:
+
+- **`1.0.7` and `17Se10`** are retail's. `1.0.7` is the game version OpenBA targets.    
+   `17Se10` is retail's build stamp.    
+- **`OpenBA vX.Y.Z`** is this project's release version: the `VERSION` in `CMakeLists.txt`  
+  (`project(banished_reimpl VERSION X.Y.Z ...)`), compiled in as `OPENBA_VERSION`.     
+  Releases are tagged `v<version>` in git (ie `v1.0.0`) and the zip on the releases page matches the tag.    
+- **`2424a9093 2026-10-19`** is the git commit the exe was built from and the build date (UTC).  
+
+Releases bump the CMake `VERSION`, build, tag `v<version>`, and you'll see a new tagged version with zip in the "Releases" link.  
+
 ## Extensions
 
-Extnesions can be enabled in the new **Extensions** button in the main menu.
+Extensions can be enabled in the new **Extensions** button in the main menu.
 
 Types:  
 **Fixes**   Base game bugs: Issues in the base game that are logical or programming errors.  
 **Class A** Basic functionality: Performance, graphics, and basic gameplay changes.  
 **Class B** Advanced/Divergent functionality: Agreessive performance modifications, breaks from base game behavior.  
-Fixes default **on**; non-gameplay changing class A extensions defualt **on**, class B extensions default **off**
+Fixes default **on**; non-gameplay changing class A extensions default **on**, class B extensions default **off**
 
 Extensions include performance tweaks, graphical enhancements, and bug fixes for the base game.  
 (i.e. Advanced graphics settings can be found in the **Enhanced** tab of Options).  
-For a list of extensions see: [docs/extnesions/LIST.md](docs/extensions/LIST.md).  
+For a list of extensions see: [docs/extensions/LIST.md](docs/extensions/LIST.md).  
 For extension design see: [docs/extensions/DESIGN.md](docs/extensions/DESIGN.md).  
 
 ## Building
@@ -97,7 +111,7 @@ OpenBA is not designed for profit, the project is designed as an engineering exe
 If you are the rights holder and have a concern, please open an issue or reach out to me.  
 
 **License:** OpenBA is free software under the **GNU General Public License v3.0**   
-([LICENSE](LICENSE)). The vendored third-party code keeps its own licence: SDL3 (zlib),  
+([LICENSE](LICENSE); full list: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). The vendored third-party code keeps its own licence: SDL3 (zlib),  
 Dear ImGui (MIT), ASSAO (MIT), the FFmpeg WMA v2 decoder (LGPL 2.1+) and FreeType 2.13.3 (the  
 FreeType License; portions copyright (c) The FreeType Project, www.freetype.org), all GPL-compatible.  
 

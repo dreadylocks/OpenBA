@@ -113,3 +113,70 @@ UNIT_TEST(display_geometry_retail_probe_bottom_uses_x_offset) {
     probe.bottom = rect.bottom + offX2;
     CHECK(RectTouchesAnyDisplay(probe, one, 1));
 }
+
+// ---- the windowed opening size (the 1x1-collapse regression) ----------------------------
+using Platform::Window::InitialWindowPoints;
+
+UNIT_TEST(display_geometry_initial_window_unsaved_uses_video_size_as_points) {
+    int32_t w = 0, h = 0;
+    InitialWindowPoints(-1, -1, 1280, 720, 2.0f, 1700, 1000, &w, &h);   // Retina, nothing saved
+    CHECK_EQ(w, 1280);
+    CHECK_EQ(h, 720);
+}
+
+UNIT_TEST(display_geometry_initial_window_saved_pixels_round_trip) {
+    int32_t w = 0, h = 0;
+    InitialWindowPoints(2000, 1200, 1280, 720, 2.0f, 1700, 1000, &w, &h);
+    CHECK_EQ(w, 1000);
+    CHECK_EQ(h, 600);
+}
+
+UNIT_TEST(display_geometry_initial_window_guards) {
+    int32_t w = 0, h = 0;
+    InitialWindowPoints(0, 0, 0, 0, 2.0f, 0, 0, &w, &h);       // nothing at all: default
+    CHECK_EQ(w, 1280);
+    CHECK_EQ(h, 720);
+    InitialWindowPoints(-1, 5, -3, 0, 1.0f, 0, 0, &w, &h);      // negative / zero: default
+    CHECK_EQ(w, 1280);
+    CHECK_EQ(h, 720);
+    InitialWindowPoints(20, 20, 1280, 720, 2.0f, 0, 0, &w, &h); // tiny saved size: the minimum
+    CHECK_EQ(w, 640);
+    CHECK_EQ(h, 360);
+    InitialWindowPoints(-1, -1, 3000, 2000, 2.0f, 1700, 1000, &w, &h);   // larger than the screen
+    CHECK_EQ(w, 1700);
+    CHECK_EQ(h, 1000);
+    InitialWindowPoints(-1, -1, 1280, 720, 2.0f, 500, 300, &w, &h);      // screen under the minimum
+    CHECK_EQ(w, 500);
+    CHECK_EQ(h, 300);
+}
+
+UNIT_TEST(display_geometry_resolution_list_filters_to_the_usable_screen) {
+    int32_t m[32][2];
+    // A 1512x982-point Retina screen: usable about 3024 x 1850 pixels.
+    int32_t n = Platform::Window::BuildResolutionList(3024, 1850, 3024, 1964, m, 32);
+    bool has1080 = false, has2880x1800 = false, hasNative = false, has4k = false;
+    for (int32_t i = 0; i < n; ++i) {
+        CHECK(m[i][0] <= 3024);
+        has1080 |= (m[i][0] == 1920 && m[i][1] == 1080);
+        has2880x1800 |= (m[i][0] == 2880 && m[i][1] == 1800);
+        hasNative |= (m[i][0] == 3024 && m[i][1] == 1964);
+        has4k |= (m[i][0] == 3840);
+    }
+    CHECK(has1080);
+    CHECK(has2880x1800);
+    CHECK(hasNative);   // the display's own size is always offered
+    CHECK(!has4k);      // bigger than the screen: filtered
+}
+
+UNIT_TEST(display_geometry_resolution_list_never_empty_and_no_duplicates) {
+    int32_t m[32][2];
+    int32_t n = Platform::Window::BuildResolutionList(100, 100, 0, 0, m, 32);   // nothing fits
+    CHECK_EQ(n, 1);
+    CHECK_EQ(m[0][0], 1280);
+    n = Platform::Window::BuildResolutionList(0, 0, 1920, 1080, m, 32);          // unknown screen, native in list
+    int32_t count1080 = 0;
+    for (int32_t i = 0; i < n; ++i) count1080 += (m[i][0] == 1920 && m[i][1] == 1080);
+    CHECK_EQ(count1080, 1);
+    n = Platform::Window::BuildResolutionList(0, 0, 0, 0, m, 3);                 // cap respected
+    CHECK_EQ(n, 3);
+}

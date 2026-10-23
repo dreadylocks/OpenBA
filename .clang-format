@@ -1,0 +1,39 @@
+# Reference style for new and contributed code (.claude/rules/style.md). Derived from the
+# existing tree; existing files are NOT reformatted wholesale. Format only the lines you touch:
+#   git clang-format  (or clang-format --lines=<a>:<b> -i file)
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+UseTab: Never
+# 0 = keep the author's line breaks; the tree wraps by hand at about 110 columns (do that in
+# new code). A fixed limit re-wrapped 2x more existing lines for no gain.
+ColumnLimit: 0
+BreakBeforeBraces: Attach
+NamespaceIndentation: None
+PointerAlignment: Left
+DerivePointerAlignment: false
+# Includes carry retail-address comments and their order matters.
+SortIncludes: Never
+ReflowComments: false
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: All
+# The tree aligns some assignment blocks by hand and not others; forcing either way changes
+# more lines than leaving them. Align new blocks by hand when it helps, or not at all.
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignTrailingComments:
+  Kind: Leave
+AlignAfterOpenBracket: Align
+BinPackArguments: true
+BinPackParameters: true
+SpacesBeforeTrailingComments: 2
+MaxEmptyLinesToKeep: 2
+KeepEmptyLinesAtTheStartOfBlocks: true
+FixNamespaceComments: true
+Cpp11BracedListStyle: false

@@ -213,3 +213,30 @@ falls into the common tail at `0x1400d61c3`, which stores R15D into the record's
 No instruction on that arm writes R15.
 
 **Lever.** Return the computed cost on the not-found arm, that is, the value just stored.
+
+## 7. Rocks on a slope float on their downhill side
+
+**Symptom.** A boulder or an iron deposit on sloped ground shows a lit band of ground between
+its bottom edge and its own shadow; from a low camera the downhill edge stands visibly off the
+ground. Reported 2026-10-20 (`rocknotonground.PNG`), confirmed in retail (`rockmshadow.PNG`).
+
+**Retail mechanism.**
+- `NaturalResourceComponent::PlaceAtCell` (`0x140126540`) takes the terrain height at the CELL
+  CENTRE (`0x14009f3e0`), then adds the x / y jitter (`RandFloatTol() * desc+0x60`, the
+  template's `_positionTolerance`, 0.4 for rocks and 0.3 for ore) without sampling again, and
+  builds the transform with pitch 0 (`FromYawPitchOffset`). The worldgen copy in the start town
+  pass does the same.
+- The rock meshes are open shells whose bottom ring sits at the model origin, so on a slope the
+  downhill half of the ring stands above the ground by about the slope times the half width.
+  The sun pass draws the casters with front faces culled and no bias, so the ground under the
+  raised rim is lit (docs/extensions/handins/SHADOWGAP.md section 3, SHADOWCONTACT.md section 3).
+
+**Proof it is retail.** The user's retail capture shows the same band; the placement was read in
+Ghidra and matches the port; a shadow bias cannot close it (SHADOWCONTACT.md section 2).
+
+**Lever.** The mesh's draw transform, not the placement: `ModelComponent::transform` is
+serialized and read by nothing that draws, so the seated transform goes only into the model's
+`Graphics::MeshInstance`.
+
+Fix: `fix.rock_seat` (tier 1), default on, render only; `ext.rock_seat_mode` picks sink (1) or
+tilt (2). `src/ext/rock_seat/`, docs/extensions/handins/ROCKSEAT.md.

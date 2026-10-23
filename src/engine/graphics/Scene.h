@@ -303,7 +303,7 @@ public:
     // ---- NOT RETAIL: the ext.draw_gather seams (scene_ext.h) ----------------
     // Null by default (the faithful build pays one null test at the top of
     // Clean and of AddCulledDrawItems, one in AddObject). Set and cleared only
-    // by src/ext/draw_gather (DrawGather::Sync) when the class A extension is
+    // by src/ext/draw_gather (Ext::DrawGather::Sync) when the class A extension is
     // toggled; static data, so the 0x78-byte layout is untouched.
     using ExtCleanFn        = void (*)(Scene& scene);
     using ExtCulledGatherFn = void (*)(const Scene& scene, Renderer& renderer);

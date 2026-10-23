@@ -1,5 +1,7 @@
 # AOMENU hand-in (2026-10-14)
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `Ext::AO::Current` / `Set` are `Ext::AmbientOcclusion::Current` / `Set`; `EnhancedTab::FindIn` is `Ext::FindElement` (`src/ext/ui/find_element.h`); the Options dialog's `EXT ARM` comments are `EXT SEAM`; `src/ext/ambient_occlusion/ao.{h,cpp}` moved to `ambient_occlusion.{h,cpp}` (namespaces `AmbientOcclusion` / `Ext::AO` / `AoMath` -> `Ext::AmbientOcclusion` / `Ext::AmbientOcclusion::AoMath`), `tests/unit/ext_ao_test.cpp` to `ext_ambient_occlusion_test.cpp`.)
+
 The menu half of `ext.ambient_occlusion` (docs/extensions/AO.md §3 "Settings", §4, §6.3): the
 registry's first **valued keys**, `Ext::AO::Current()` / `Set()` (the `params.h` contract with
 AOCORE, unchanged), and a fifth Options tab **"Enhanced"** added at run time by

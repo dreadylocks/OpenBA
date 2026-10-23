@@ -26,6 +26,7 @@ class Tool;
 namespace Graphics { class Renderer; class Material; }
 namespace Save { class SaveLoad; }
 
+namespace Ext {
 namespace RenderPipe {
 
 struct Packet {
@@ -77,6 +78,9 @@ struct Packet {
 // step; the extension's Ops calls the engine, the unit test's records names.
 // Steps 3, 4, 6 and pass 1 are the main half's; step 9 / 13 (the quicksave and
 // quickload screenshots) never reach a packet: such a frame runs unpipelined.
+// `Released` is not a retail step: it marks the end of what the sim may not
+// overlap (RENDERPIPE_FENCE.md). Nothing after it reads sim, scene, UI or
+// Renderer state -- only the device, the Context and MainLoop's timing fields.
 template <class Ops>
 void Emit(Ops& ops, const Packet& p) {
     ops.FrameTailTime(p);              // MainLoop::Frame: Context::_time, dirty 0x800
@@ -98,6 +102,7 @@ void Emit(Ops& ops, const Packet& p) {
     ops.UIDraw(p);                     // step 12
     ops.PacketEnd();
     ops.PostDraw();                    // MainLoop::Draw: the post-draw callbacks
+    ops.Released(p);                   // (RENDERPIPE_FENCE: the fence may let the steps run from here)
     ops.EndCommands();                 // MainLoop::Draw: EndCommands (resolve)
     ops.FrameUpdateTime();             // MainLoop::Draw: _frameUpdateTime
     ops.IncFrameIndex();               // MainLoop::Draw: ++Context::_frameIndex
@@ -105,3 +110,4 @@ void Emit(Ops& ops, const Packet& p) {
 }
 
 }  // namespace RenderPipe
+}  // namespace Ext

@@ -34,6 +34,7 @@
 
 #include "ui/SharpDraw.h"   // UI::SharpGlyphPlace (standard C++)
 
+namespace Ext {
 namespace SharpUI {
 
 // The layout extent retail derives from a back-buffer extent and _uiScale:
@@ -69,6 +70,35 @@ int VariantCount(int baseHeight);
 // rather than one that touches its neighbour).
 int PickVariantHeight(int baseHeight, float pxPerUnit);
 
+// ---- Retina (density 2) variants -------------------------------------------
+// A 2x window works in device pixels, so the wanted height is base * ratio with
+// the ratio up to twice the slider's (1.33 .. 2.67). Those heights lie above
+// VariantHigh: RetinaHigh(H) = round(H * 8/3) is the top, every VariantStep-th
+// height (a multiple of the step) above VariantHigh(H) is a Retina variant.
+// Nothing here changes IsVariantHeight / PickVariantHeight: a 1x frame never
+// reaches these heights, so its picks are identical to before.
+int RetinaHigh(int baseHeight);
+bool IsRetinaVariantHeight(int baseHeight, int height);
+// PickVariantHeight when that finds a variant or the base is right; else, for
+// a wanted height above the 1x range, the nearest Retina variant; baseHeight
+// when the ratio is beyond RetinaHigh (retail's scaled quads).
+int PickRetinaVariantHeight(int baseHeight, float pxPerUnit);
+
+// True when drawing the base font through the word run (one texel per device
+// pixel) is right at `pxPerUnit`: the wanted height is within half a pixel of
+// the base. PickVariantHeight also returns baseHeight for a ratio OUTSIDE the
+// compiled range (a Retina 2x frame); there the base glyphs must stay retail's
+// scaled quads, or the text is drawn at its layout size in device pixels
+// (half size, letter-spaced by the layout advances).
+bool NativePickFitsRatio(int baseHeight, float pxPerUnit);
+
+// The font height SelectFont draws with, and whether to keep retail's scaled
+// quads instead ("retail(range)"). At `density` <= 1 (every window that is not
+// high-density: Windows, Linux, non-Retina) this is exactly PickVariantHeight
+// and never keeps retail, i.e. upstream's selection. Only above 1 do the Retina
+// variants and the range check apply.
+int PickFontHeight(int baseHeight, float pxPerUnit, float density, bool* keepRetail);
+
 // "Font/Sharp<baseName>_<height>.rsc" (baseName "Font", "FontSmall", ...).
 // False when `cap` is too small.
 bool VariantFontPath(const char* baseName, int height, char* out, size_t cap);
@@ -96,3 +126,4 @@ bool Twin2xPath(const char* path, char* out, size_t cap);
 bool WantTwin2x(float pxPerUnitX, float pxPerUnitY);
 
 }  // namespace SharpUI
+}  // namespace Ext

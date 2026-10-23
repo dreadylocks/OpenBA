@@ -31,6 +31,7 @@
 #include "math/Math.h"
 #include <cstdint>
 #include "Component/still_terrain.h"   // STILLTERRAIN: StillTerrain::Bump (the terrain epoch)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 typedef unsigned int  uint;
 typedef unsigned short ushort;
@@ -123,6 +124,7 @@ void Map::SetTerrainType(int param_2, uint param_3) {
     field_0xA2 = static_cast<uint8_t>(field_0xA2) | bVar2;
     lVar3->terrainType = bVar4;
     TerrainSidecar::NoteWrite(lVar3);   // [terrain sidecar] mirror
+    CellStamp::NoteWrite(lVar3);   // [AMBMEMO] cell write clock
     uVar5 = 1u << (bVar1 & 0x1f);
     if ((((uVar5 & 0xe1f) != 0) && ((1u << (bVar4 & 0x1f) & 0x1e0U) != 0)) ||
         (((uVar5 & 0x1e0) != 0) &&

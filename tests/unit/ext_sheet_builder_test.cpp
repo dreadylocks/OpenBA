@@ -69,7 +69,7 @@ std::vector<uint8_t> ReadFile(const char* path) {
     FILE* f = std::fopen(path, "rb");
     if (f == nullptr) return out;
     std::fseek(f, 0, SEEK_END);
-    const long n = std::ftell(f);
+    const int64_t n = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
     out.resize(static_cast<size_t>(n > 0 ? n : 0));
     if (n > 0 && std::fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
@@ -340,7 +340,7 @@ UNIT_TEST(ext_sheet_kit_crosscheck) {
     CHECK(kit.size() >= bodyStart + 4);
     const uint8_t bb[4] = { 0xbb, 0xbb, 0xbb, 0xbb };
     CHECK(std::memcmp(kit.data() + kit.size() - 4, bb, 4) == 0);
-    std::vector<uint8_t> theirs(kit.begin() + static_cast<long>(bodyStart), kit.end() - 4);
+    std::vector<uint8_t> theirs(kit.begin() + static_cast<std::ptrdiff_t>(bodyStart), kit.end() - 4);
 
     // Blank the uv floats of every record in both streams (the records are
     // parsed from each stream on its own, so a structural difference shows up

@@ -47,8 +47,9 @@
 #include "video/Device.h"   // ENDGAME B.3.9 SS2: Video::Device::_singleton
 #include "Entity/ComponentEntity.h"   // B4 S4 RT2: InternalPtr<ComponentEntity>::Get() needs the class complete
 #include "Player/Tool.h"            // UpdateHotkeys: the current tool's OnKey / OnCancel
-#include "ext/registry.h"             // EXT SEAM: Ext::Ext() (NOT RETAIL)
-#include "ext/eye_camera/eye_camera.h"   // EXT SEAM: ext.eye_camera's zoom (NOT RETAIL)
+#include "ext/registry.h"             // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md, BETTERCAM.md): Ext::Ext()
+#include "ext/eye_camera/eye_camera.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md): ext.eye_camera's zoom
+#include "ext/better_camera/better_camera.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTERCAM.md): ext.better_camera's zoom range + steady tilt
 
 extern "C" bool StartTown_GetSpawnTile(int* x, int* y);   // starttown.cpp (BANISHED_CAMERA_PIN=town)
 
@@ -172,8 +173,8 @@ void PlayerToolManager::UpdateCamera(int inputFlag, int64_t timeTicks) {
     // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md): while
     // ext.eye_camera follows a citizen the zoom moves the eye's own distance
     // and retail's zoom target (+0x3C) is left alone.
-    if (Ext::Ext().eye_camera && EyeCamera::Active())
-        zoomDir = EyeCamera::Zoom(zoomDir);
+    if (Ext::Ext().eye_camera && Ext::EyeCamera::Active())
+        zoomDir = Ext::EyeCamera::Zoom(zoomDir);
 
     // ── manual pitch accumulator +0x44 (0..1) from PitchUp/PitchDown (ids 0x11/0x12) ──
     if (keyMap->Pressed(0, 0x11))
@@ -182,18 +183,28 @@ void PlayerToolManager::UpdateCamera(int inputFlag, int64_t timeTicks) {
         field_0x44 -= kPitchStep;
     field_0x44 = clampf(field_0x44, 0.0f, 1.0f);
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTERCAM.md): ext.better_camera's zoom range and steady
+    // tilt, the toggle read once per frame. Off = retail's own constants (the values below are the same floats).
+    const bool betterCam = Ext::Ext().better_camera;
+    const float zMin  = betterCam ? Ext::BetterCamera::kZoomMin  : kZoomMin;
+    const float zMax  = betterCam ? Ext::BetterCamera::kZoomMax  : kZoomMax;
+    const float zSpan = betterCam ? Ext::BetterCamera::kZoomSpan : kZoomSpan;
+    // Row off: a zoom target outside retail's range (a save, or a camera preset, written with the row on) goes back into
+    // 20 .. 130 before anything reads it. A no-op for every value retail itself can hold; retail's own seeding of a zero
+    // target from the distance (above) has already run.
+    if (!betterCam)
+        field_0x3C = Ext::BetterCamera::ClampToRetailRange(field_0x3C);
+
     // ── apply zoom step to the zoom target, clamp 20..130 ──
     if (zoomDir != 0) {
         float z = field_0x3C + (zoomDir < 1 ? kZoomStep : -kZoomStep);
-        field_0x3C = clampf(z, kZoomMin, kZoomMax);
+        field_0x3C = clampf(z, zMin, zMax);
     }
 
     // ── pitch/distance coupling ──
     const float manual  = field_0x44;                        // 0..1
-    const float normZ   = (field_0x3C - kZoomMin) / kZoomSpan; // 0..1
-    const float pitchTarget =
-        (manual * kPitchFarMan  - (1.0f - manual) * kPitchFarFlat) * normZ +
-        (manual * kPitchNearMan - (1.0f - manual) * kPitchNearFlt) * (1.0f - normZ);
+    const float normZ   = (field_0x3C - zMin) / zSpan;       // 0..1
+    const float pitchTarget = Ext::BetterCamera::PitchTarget(manual, normZ, kPitchFarMan, kPitchFarFlat, kPitchNearMan, kPitchNearFlt, betterCam);
     field_0x40 = pitchTarget;                                // +0x40
 
     // pan speed scales with zoom (near=12, far=70)

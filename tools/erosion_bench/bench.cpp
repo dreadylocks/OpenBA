@@ -5,8 +5,8 @@
 #include "system/MemoryAllocator.h"
 #include "Game/worldgen_erosion_par.h"
 #include "system/parallel_for.h"
-#include "ext/cpu/topology.h"
-#include "ext/cpu/roster.h"
+#include "platform/common/cpu/topology.h"
+#include "platform/common/cpu/roster.h"
 #include "diag/diag_threads.h"
 #include <chrono>
 #include <cstdio>

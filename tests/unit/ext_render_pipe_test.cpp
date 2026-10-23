@@ -33,10 +33,10 @@
 
 namespace {
 
-using RenderPipe::Packet;
-using RenderPipe::PipeState;
-using RenderPipe::TailInputs;
-using RenderPipe::TailPlan;
+using Ext::RenderPipe::Packet;
+using Ext::RenderPipe::PipeState;
+using Ext::RenderPipe::TailInputs;
+using Ext::RenderPipe::TailPlan;
 
 struct RecordOps {
     std::vector<std::string> log;
@@ -58,6 +58,7 @@ struct RecordOps {
     void UIDraw(const Packet&)         { log.push_back("UIDraw"); }
     void PacketEnd()                   { log.push_back("PacketEnd"); }
     void PostDraw()                    { log.push_back("PostDraw"); }
+    void Released(const Packet&)       { log.push_back("Released"); }
     void EndCommands()                 { log.push_back("EndCommands"); }
     void FrameUpdateTime()             { log.push_back("FrameUpdateTime"); }
     void IncFrameIndex()               { log.push_back("IncFrameIndex"); }
@@ -71,7 +72,7 @@ TailInputs Clear() { return TailInputs{}; }
 UNIT_TEST(ext_render_pipe_emit_replays_in_retail_order) {
     RecordOps ops;
     Packet p;
-    RenderPipe::Emit(ops, p);
+    Ext::RenderPipe::Emit(ops, p);
     // Retail's frame from the Frame tail on, minus the main half's steps (3, 4,
     // the sun half of 5, 6 and pass 1): mainloop_frame.cpp tail, loops.cpp
     // MainLoop::Draw, gameupdateloop.cpp Draw steps 2, 5, 7 (pass 2), 8, 10-12.
@@ -79,7 +80,7 @@ UNIT_TEST(ext_render_pipe_emit_replays_in_retail_order) {
         "FrameTailTime", "BeginCommands", "ClearResourcesIfDirty", "ViewportReconcile",
         "PacketBegin", "RenderDocFrame", "SetTime", "WeatherContext", "ForceSnow", "Pass2",
         "SaveLoadDraw", "SetCamera", "ToolDraw", "UIDraw", "PacketEnd",
-        "PostDraw", "EndCommands", "FrameUpdateTime", "IncFrameIndex", "Finish",
+        "PostDraw", "Released", "EndCommands", "FrameUpdateTime", "IncFrameIndex", "Finish",
     };
     CHECK(ops.log == want);
 }
@@ -88,7 +89,7 @@ UNIT_TEST(ext_render_pipe_emit_stops_after_a_failed_begin) {
     RecordOps ops;
     ops.begin = false;
     Packet p;
-    RenderPipe::Emit(ops, p);
+    Ext::RenderPipe::Emit(ops, p);
     const std::vector<std::string> want = { "FrameTailTime", "BeginCommands", "BeginFailed" };
     CHECK(ops.log == want);
 }
@@ -246,10 +247,10 @@ UNIT_TEST(ext_render_pipe_registry_row) {
 // ============================================================================
 namespace {
 
-using RenderPipe::Counters;
-using RenderPipe::Driver;
-using RenderPipe::EmitResult;
-using RenderPipe::Handoff;
+using Ext::RenderPipe::Counters;
+using Ext::RenderPipe::Driver;
+using Ext::RenderPipe::EmitResult;
+using Ext::RenderPipe::Handoff;
 
 struct FakeHost {
     Driver<FakeHost>* driver = nullptr;
@@ -257,9 +258,11 @@ struct FakeHost {
     bool              threaded = false;
     std::mt19937      rngMain{7u};
 
-    std::atomic<int>  ctxIndex{0};      // Context::_frameIndex (the emit increments it)
-    std::atomic<int>  inFlight{0};      // packets being emitted right now
-    std::atomic<bool> emitting{false};
+    std::atomic<int>  ctxIndex{0};      // Context::_frameIndex (the emit's tail increments it)
+    std::atomic<int>  inFlight{0};      // packets being emitted right now (tail included)
+    std::atomic<bool> emitting{false};  // the emit up to its release (pass 2 .. PostDraw)
+    std::atomic<bool> tailing{false};   // RENDERPIPE_FENCE: the tail (EndCommands .. Present)
+    int               stepsInTail = 0;  // steps that ran while a tail was in flight
     std::atomic<int>  errors{0};        // failed checks on the render thread
     std::atomic<int>  emits{0};
     int               loseEvery = 0;    // >0: the Present of every Nth emit fails
@@ -268,10 +271,10 @@ struct FakeHost {
     int               lastModel = -1;   // the render thread's: modelIndex of the last emit kept
 
     int32_t ContextFrameIndex() {
-        if (emitting.load()) ++errors;  // read only with nothing in flight
+        if (emitting.load() || tailing.load()) ++errors;  // read only with nothing in flight
         return ctxIndex.load();
     }
-    void MainHalf(RenderPipe::Packet& next, const RenderPipe::TailPlan& plan) {
+    void MainHalf(Ext::RenderPipe::Packet& next, const Ext::RenderPipe::TailPlan& plan) {
         if (std::this_thread::get_id() != mainId) ++errors;
         if (plan.renderIdle && emitting.load()) ++errors;   // fixes 4 / 5 write only when idle
         if (driver->State().Pending() && next.slot == driver->State().PendingSlot()) ++errors;
@@ -279,8 +282,9 @@ struct FakeHost {
         // Pass 1 takes a while; the emit of the pending packet runs meanwhile.
         for (volatile int i = 0, n = static_cast<int>(rngMain() % 64); i < n; i = i + 1) {}
     }
-    EmitResult Emit(const RenderPipe::Packet& p, bool onThread) {
+    EmitResult Emit(const Ext::RenderPipe::Packet& p, Handoff* release) {
         EmitResult r;
+        const bool onThread = release != nullptr;
         if (onThread != threaded) ++errors;
         if (threaded && std::this_thread::get_id() == mainId) ++errors;
         if (!threaded && std::this_thread::get_id() != mainId) ++errors;
@@ -290,6 +294,12 @@ struct FakeHost {
         if (p.modelIndex != p.frameIndex) ++errors;
         const int n = emits.fetch_add(1) + 1;
         for (volatile int i = 0, k = (n * 37) % 97; i < k; i = i + 1) {}
+        // packet.h's Released: the fence may let the steps run from here.
+        tailing.store(true);
+        emitting.store(false);
+        if (release != nullptr) release->Release();
+        // The tail: EndCommands, ++_frameIndex, Present.
+        for (volatile int i = 0, k = (n * 53) % 211; i < k; i = i + 1) {}
         if (loseEvery > 0 && n % loseEvery == 0) {
             r.lost = true;
             r.recover = threaded;   // threaded: the main thread recovers at the join
@@ -297,19 +307,19 @@ struct FakeHost {
         } else {
             ctxIndex.fetch_add(1);  // ++Context::_frameIndex, Present
         }
-        emitting.store(false);
+        tailing.store(false);
         inFlight.fetch_sub(1);
         return r;
     }
     void Recover(const EmitResult&) {
         if (std::this_thread::get_id() != mainId) ++errors;
-        if (emitting.load()) ++errors;
+        if (emitting.load() || tailing.load() || inFlight.load() != 0) ++errors;   // render thread idle
         ++recoveries;
         // The recreated context counts from where the lost one stopped (the lost
         // emit did not increment it): nothing to do here.
     }
-    void AfterJoin(const RenderPipe::Packet&) {
-        if (emitting.load()) ++errors;   // the camera shadow writes the real camera: render idle
+    void AfterJoin(const Ext::RenderPipe::Packet&) {
+        if (emitting.load() || inFlight.load() != 0) ++errors;   // the camera shadow writes the real camera: render idle
     }
     void FaithfulTail() {
         if (emitting.load() || inFlight.load() != 0) ++errors;
@@ -336,10 +346,12 @@ Counters RunScripted(bool threaded, int frames, int loseEvery, uint32_t seed, Fa
         const bool steps = (rng() % 5) == 0;
         if (steps) {
             driver.BeforeSteps(host);   // THE FENCE
-            // The sim runs: nothing in flight, nothing pending.
+            // The sim runs: nothing pending, no emit before its release. Threaded,
+            // the tail of the released emit may still run (RENDERPIPE_FENCE).
             CHECK(!driver.State().Pending());
-            CHECK(!handoff.Busy());
             CHECK(!host.emitting.load());
+            if (!threaded || !driver.TailInFlight()) CHECK(!handoff.Busy());
+            if (host.tailing.load()) ++host.stepsInTail;
         }
         TailInputs in = Clear();
         const uint32_t r = rng() % 200;
@@ -355,6 +367,8 @@ Counters RunScripted(bool threaded, int frames, int loseEvery, uint32_t seed, Fa
             CHECK(!driver.State().Pending());
             CHECK(!handoff.Busy());
         }
+        // After every tail nothing but the packet just published is in flight.
+        CHECK(!driver.TailInFlight());
         const Counters c = driver.TakeWindow();
         CHECK(c.discarded <= 1);
         CHECK(c.discarded <= c.recoveries + (threaded ? 0 : c.emits));   // a discard only follows a loss
@@ -397,6 +411,45 @@ UNIT_TEST(ext_render_pipe_handoff_parks_and_stops) {
     CHECK(ran.load() == 1000);
 }
 
+// RENDERPIPE_FENCE: WaitReleased returns once the job released itself, before it
+// is done; the job's writes made before the release are visible; Busy stays
+// true until Done; a job that never releases is released by Done, busy first.
+UNIT_TEST(ext_render_pipe_handoff_release_comes_before_idle) {
+    Handoff h;
+    std::atomic<bool> stepped{false};
+    std::atomic<bool> release{true};
+    int before = 0;                    // written by the job before Release, read by main after
+    std::thread t([&] {
+        while (h.WaitJob()) {
+            ++before;
+            if (release.load()) {
+                h.Release();
+                while (!stepped.load()) std::this_thread::yield();   // the tail outlives the step
+            }
+            h.Done();
+        }
+    });
+    CHECK(!h.WaitReleased());          // nothing published: released
+    for (int i = 0; i < 200; ++i) {
+        stepped.store(false);
+        h.Publish();
+        h.WaitReleased();
+        CHECK(before == i + 1);
+        CHECK(h.Busy());               // the tail waits for this "step"
+        stepped.store(true);
+        h.WaitIdle();
+        CHECK(!h.Busy());
+    }
+    release.store(false);              // a job that never releases (a failed BeginCommands)
+    for (int i = 0; i < 200; ++i) {
+        h.Publish();
+        h.WaitReleased();
+        CHECK(!h.Busy());              // released only by Done, and busy was cleared first
+    }
+    h.Stop();
+    t.join();
+}
+
 UNIT_TEST(ext_render_pipe_threaded_100k_frames_keep_the_ownership_rules) {
     FakeHost host;
     const Counters c = RunScripted(true, 100000, 0, 20261014u, host);
@@ -412,6 +465,7 @@ UNIT_TEST(ext_render_pipe_threaded_100k_frames_keep_the_ownership_rules) {
     CHECK(host.mainHalves == static_cast<int>(c.pipelined));
     // Every gathered packet was emitted (none left, none lost): emits == pipelined.
     CHECK(c.emits == c.pipelined);
+    (void)host.stepsInTail;            // timing-dependent: the overlap itself is proven by the handoff test
 }
 
 UNIT_TEST(ext_render_pipe_threaded_device_lost_recovers_on_main_and_discards_one) {
@@ -420,8 +474,9 @@ UNIT_TEST(ext_render_pipe_threaded_device_lost_recovers_on_main_and_discards_one
     CHECK(host.errors.load() == 0);
     CHECK(c.recoveries > 0);
     CHECK(host.recoveries == static_cast<int>(c.recoveries));
-    // A loss joined at the hand-off discards exactly the one packet gathered
-    // meanwhile; one joined at the fence or a drain discards nothing.
+    // A loss joined at the hand-off, or at the settle of a tail a fence
+    // released, discards exactly the one packet gathered meanwhile; one joined
+    // at a drain (or a fence whose tail was already done) discards nothing.
     CHECK(c.discarded > 0);
     CHECK(c.discarded <= c.recoveries);
     // Every gathered packet was emitted or discarded.

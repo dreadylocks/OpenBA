@@ -1,0 +1,52 @@
+counter: GPU Duration CounterUnit.Seconds
+state walk: 1086 rows in 2.0s
+
+== gpu_faithful_zoom130.rdc: 1086 events, GPU total 4.472 ms (sum of per-event durations)
+
+pass       ms     % draws      tris  targets
+   0    0.663  14.8   160    700850  1280x688 B8G8R8A8_UNORM x1 m1 depth 1280x688 D24S8_TYPELESS x1 m1
+            0.182   4.1    45    136056    vs=Vertex Shader 360 ps=Pixel Shader 364
+            0.126   2.8    26     83375    vs=Vertex Shader 594 ps=Pixel Shader 598
+            0.123   2.8    19    215628    vs=Vertex Shader 910 ps=Pixel Shader 914
+            0.109   2.4    20    166450    vs=Vertex Shader 942 ps=Pixel Shader 946
+            0.085   1.9    42     86016    vs=Vertex Shader 1428 ps=Pixel Shader 1445
+   1    0.591  13.2   288   1152696  - depth 2048x2048 D24S8_TYPELESS x1 m1
+            0.153   3.4    66    342960    vs=Vertex Shader 478 ps=Pixel Shader 482
+            0.151   3.4    76    237014    vs=Vertex Shader 374 ps=Pixel Shader 378
+            0.127   2.8   106    217088    vs=Vertex Shader 1440 ps=Pixel Shader 1444
+            0.082   1.8    19    156848    vs=Vertex Shader 953 ps=Pixel Shader 957
+            0.066   1.5    18    198016    vs=Vertex Shader 922 ps=Pixel Shader 926
+   2    3.217  71.9   635   1044003  2560x1377 B8G8R8A8_UNORM x1 m1 depth 2560x1377 D24S8 x1 m1
+            0.858  19.2   207     11302    vs=Vertex Shader 342 ps=Pixel Shader 346
+            0.645  14.4   162     10668    vs=Vertex Shader 575 ps=Pixel Shader 579
+            0.335   7.5    42     86016    vs=Vertex Shader 1431 ps=Pixel Shader 1435
+            0.265   5.9    18    142706    vs=Vertex Shader 945 ps=Pixel Shader 949
+            0.239   5.3    45    129402    vs=Vertex Shader 363 ps=Pixel Shader 367
+            0.236   5.3    53    309244    vs=Vertex Shader 2046 ps=Pixel Shader 601
+
+== top 25 draws
+  eid  2321   0.028 ms  tris=    174 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  2319   0.024 ms  tris=    174 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  2323   0.024 ms  tris=    174 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  4209   0.022 ms  tris=   8960 inst=  0  vp=2560x1377  vs=Vertex Shader 1460 ps=Pixel Shader 1464
+  eid  2317   0.022 ms  tris=    174 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  2325   0.019 ms  tris=    174 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  4218   0.018 ms  tris=   7300 inst=  0  vp=2560x1377  vs=Vertex Shader 1483 ps=Pixel Shader 1464
+  eid  2357   0.016 ms  tris=    240 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  2359   0.016 ms  tris=    240 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  2264   0.016 ms  tris=    238 inst= 52  vp=2560x1377  vs=Vertex Shader 913 ps=Pixel Shader 917
+  eid  2339   0.016 ms  tris=    122 inst= 52  vp=2560x1377  vs=Vertex Shader 945 ps=Pixel Shader 949
+  eid  1631   0.015 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1632   0.015 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1633   0.014 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1635   0.014 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1634   0.014 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1642   0.014 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  2266   0.014 ms  tris=    238 inst= 52  vp=2560x1377  vs=Vertex Shader 913 ps=Pixel Shader 917
+  eid  1644   0.014 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1639   0.013 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1636   0.013 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  2250   0.013 ms  tris=    238 inst= 52  vp=2560x1377  vs=Vertex Shader 913 ps=Pixel Shader 917
+  eid  1641   0.013 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1647   0.013 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435
+  eid  1640   0.013 ms  tris=   2048 inst=  0  vp=2560x1377  vs=Vertex Shader 1431 ps=Pixel Shader 1435

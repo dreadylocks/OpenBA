@@ -1,5 +1,7 @@
 # PERFXTBL -- PerfX's per-model / per-particle bookkeeping becomes one load
 
+> (moved to the DESIGN.md §3 names 2026-10-20, block ext-standard: `src/ext/perfx/` (perfx.{h,cpp}, perfx_rules.h, perfx_table.h) moved to `src/ext/render_culling/` (render_culling.{h,cpp}, render_culling_rules.h, side_table.h; namespaces `PerfX` / `PerfXTbl` -> `Ext::RenderCulling` / `Ext::RenderCulling::SideTable`), ext.anim_batch's seam helpers to `src/ext/anim_batch/anim_batch.h`; tests `ext_perfx_test.cpp` + `perfx_table_test.cpp` -> `tests/unit/ext_render_culling_test.cpp` and `ext_anim_batch_test.cpp`.)
+
 Block PERFXTBL, 2026-10-12. ELPROF section 6, item 2. PerfX is perf-build-only and non-retail;
 its existing kill switches still work (`BANISHED_PERF_ANIM_BATCH_ALL` / `_CULLED`,
 `BANISHED_PERF_PARTICLE_CULL`, `BANISHED_PERF_TREE_SNAPSHOT`: with the snapshot off the side table

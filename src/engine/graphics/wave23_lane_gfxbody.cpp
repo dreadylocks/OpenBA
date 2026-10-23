@@ -351,7 +351,7 @@ Graphics::FrameCopyImageBuffer::~FrameCopyImageBuffer() {
 // LAYOUT, which is what §5.1 pins.
 //
 // The SECOND half of that holdback ("it runs behind a default-on non-retail
-// batching path, src/ext/perfx/perfx.cpp ANIM_BATCH_ALL") was checked
+// batching path, src/ext/render_culling/render_culling.cpp ANIM_BATCH_ALL") was checked
 // too and is NOT a blocker on this body: that path decides which MeshInstances
 // REGISTER a group with the manager, i.e. it changes this function's INPUT, not
 // its contract. A manager with no groups makes this body a single compare and a

@@ -41,6 +41,7 @@
 // ============================================================================
 #include <cstdint>
 
+namespace Ext {
 namespace SpreadWarmth {
 
 // Per frame: region searches (pair-cache misses) and residence candidates the scans may charge.
@@ -49,7 +50,7 @@ constexpr int kCandidateBudget = 4096;
 
 extern bool g_on;   // this frame: ext.spread_warmth (the game's locked value)
 
-// GameUpdateLoop::Update, once per frame beside WalkBatch::BeginFrame.
+// GameUpdateLoop::Update, once per frame beside Ext::WalkBatch::BeginFrame.
 void BeginFrame();
 
 // State_ElderTransition, just before FindElderResidence: true = defer this scan (the caller
@@ -88,3 +89,4 @@ const Stats& GetStats();
 void ResetStats();
 
 }  // namespace SpreadWarmth
+}  // namespace Ext

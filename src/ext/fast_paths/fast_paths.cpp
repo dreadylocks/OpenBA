@@ -23,10 +23,10 @@
 #include "Action/PathSearch.h"   // GridPathSearch (the worker's search, PathfinderThread +0x78)
 
 #include <algorithm>
-#include <x86intrin.h>   // __rdtsc: the stress harness's tick (CompProf_Now)
 #include <cstdio>
 #include <vector>
 
+namespace Ext {
 namespace FastPaths {
 
 std::atomic<uint8_t> g_mode{0};
@@ -97,7 +97,7 @@ SearchResult RunFast(WorkerState& w, const GridPathSearch& grid, int start, int 
     return RunFastWith(w.searcher, grid, start, goal, path, PresentMask(w, grid));
 }
 
-long long Ticks() { return static_cast<long long>(__rdtsc()); }
+long long Ticks() { return CompProf_Now(); }
 
 }  // namespace
 
@@ -217,9 +217,10 @@ ShadowResult Shadow(const Request& req) {
 }
 
 }  // namespace FastPaths
+}  // namespace Ext
 
-void FastPaths_ShadowHook(const FastPaths::Request& req) {
-    const FastPaths::ShadowResult r = FastPaths::Shadow(req);
+void FastPaths_ShadowHook(const Ext::FastPaths::Request& req) {
+    const Ext::FastPaths::ShadowResult r = Ext::FastPaths::Shadow(req);
     if (r.ourUnsupported) return;   // retail ran both: nothing to compare
     StressHarness_PathShadow(r.retailTicks, r.ourTicks, r.retailExpanded, r.ourExpanded,
                              r.retailCost, r.ourCost, r.sameCells ? 1 : 0);

@@ -1,5 +1,5 @@
 // ============================================================================
-// src/ext/ambient_occlusion/settings.cpp -- Ext::AO::Current / Set (block AOMENU)
+// src/ext/ambient_occlusion/settings.cpp -- Ext::AmbientOcclusion::Current / Set (block AOMENU)
 // ============================================================================
 // NOT RETAIL. params.h is the contract with AOCORE. The values live in the
 // registry (src/ext/registry.h, "VALUED KEYS"): the bool row
@@ -16,7 +16,7 @@
 //   p.quality >= 1   ext.ao_quality = clamp(p.quality, 1, 3), the row goes ON
 //   p.opacity        ext.ao_opacity = clamp(p.opacity, 0, 30)
 // The row is written through the registry's own SetAndRecord (so its Sync
-// hooks fire: AOCORE's AmbientOcclusion::Sync rebuilds the readable depth on a
+// hooks fire: AOCORE's Ext::AmbientOcclusion::Sync rebuilds the readable depth on a
 // flip) and only when it actually changes. The caller flushes settings.cfg
 // (Ext::PersistSettings, or retail's own WriteSettings in OnApply).
 // ============================================================================
@@ -26,7 +26,7 @@
 #include "ext/registry.h"
 
 namespace Ext {
-namespace AO {
+namespace AmbientOcclusion {
 
 namespace {
 
@@ -58,5 +58,5 @@ void Set(const Params& p) {
     if (Requested(row) != on) SetAndRecord(row, on);
 }
 
-}  // namespace AO
+}  // namespace AmbientOcclusion
 }  // namespace Ext

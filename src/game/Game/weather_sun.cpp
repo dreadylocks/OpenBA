@@ -29,6 +29,9 @@
 #include "Game/Calendar.h"
 #include "Game/GameSettings.h"
 #include "Component/EnvironmentDescription.h"
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/NOFOG.md): ext.no_fog (class A), Ext::NoFog::kFogMax
+#include "ext/no_fog/no_fog.h"
+#include "ext/registry.h"
 #include "math/Math.h"
 #include "system/Value.h"
 #include <cstdint>
@@ -79,6 +82,11 @@ EnvironmentSetting* WeatherSimulation::BlendLighting(EnvironmentSetting* out) co
             *out = out->Lerp(setting, effect->_intensity, false);   // 0x1400949f0, +0xC0
         }
     }
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/NOFOG.md):
+    // ext.no_fog (class A): the fog maximum of the blended record is zero, so no fog is mixed into the
+    // picture. Every reader of the frame's lighting goes through this function. With the row off
+    // FogMax returns the same bits it was given, so the faithful record is unchanged.
+    out->fogMax = Ext::NoFog::FogMax(out->fogMax, ::Ext::Ext().no_fog);
     return out;
 }
 

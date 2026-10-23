@@ -1,8 +1,8 @@
 // ============================================================================
 // src/ext/neighbour/neighbour.cpp -- NOT RETAIL. ext.neighbour's game side (neighbour.h)
 // ============================================================================
-// Everything here runs on the game's main thread except SavePayload, which the
-// background-save worker may call: it only copies `s_saved` under `s_savedMu`.
+// Everything here runs on the game's main thread. The saved state (save_state.h) is shared with
+// the save tail's codec, which the background-save worker may run: touch it only under `s_savedMu`.
 // ============================================================================
 
 #include "ext/neighbour/neighbour.h"
@@ -17,7 +17,7 @@
 #include "ext/neighbour/town.h"
 #include "ext/neighbour/shared_map.h"
 #include "ext/registry.h"   // Ext::Ext().neighbour
-#include "ext/savetail.h"   // Ext::SaveTail::RegisterPayload
+#include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
 
 #include "Game/EventLog.h"         // EventLogEntry
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
@@ -74,9 +74,9 @@ std::string           s_worldHashNew;     // NoteWorldHash during this Load (a n
 uint64_t              s_parcelCounter = 0;
 constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
 
-std::mutex  s_savedMu;   // SavePayload may run on the background-save worker
-SavedState  s_saved;     // what goes into the save
-bool        s_loadedFromSave = false;
+std::mutex& s_savedMu        = SavedMutex();     // the save-tail codec may run on the save worker
+SavedState& s_saved          = Saved();          // what goes into the save (save_state.cpp)
+bool&       s_loadedFromSave = LoadedFromSave();
 
 // --- settings -------------------------------------------------------------
 
@@ -113,25 +113,6 @@ void Post(const std::string& text, uint32_t colour) {
                               /*popup*/ -1);
     const int count = log->entries.GetSize();
     log->entries.SetSize(count + 1, entry);
-}
-
-// --- the save payload -----------------------------------------------------
-
-std::vector<uint8_t> SavePayload() {
-    std::lock_guard<std::mutex> lock(s_savedMu);
-    return EncodeState(s_saved);
-}
-
-void LoadPayload(int32_t formatVersion, const std::vector<uint8_t>& bytes) {
-    SavedState st;
-    if (!DecodeState(formatVersion, bytes, st)) {
-        fprintf(stderr, "[Neighbour] the save's neighbour record is unreadable (v%d, %u bytes) -- "
-                "starting fresh\n", formatVersion, static_cast<unsigned>(bytes.size()));
-        return;
-    }
-    std::lock_guard<std::mutex> lock(s_savedMu);
-    s_saved = st;
-    s_loadedFromSave = true;
 }
 
 Message Hello() {
@@ -411,7 +392,6 @@ void HangUp() {
 void ResetForGame(const void* owner) {
     HangUp();
     s_owner = owner;
-    Ext::SaveTail::RegisterPayload("neighbour", &SavePayload, &LoadPayload);
     s_lobbyGame = false;
     s_worldHashNew.clear();
     if (s_hasPending) {   // the lobby's room, for this game

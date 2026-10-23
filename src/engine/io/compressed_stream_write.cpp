@@ -389,15 +389,18 @@ inline uint32_t StoredLength(const Header& h) {
 // "store it raw". So the buffer is not undersized — the protocol handles it.
 }  // namespace RtIo
 
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): null by default (Stream.h).
+IO::CompressedStream::ExtAsyncCompressFn IO::CompressedStream::_extAsyncCompress = nullptr;
+
 void IO::CompressedStream::CompressWindow(int i) {
     using RtIo::Window;
     using RtIo::Header;
     using RtIo::kWin;
 
-    if (_extAsyncOwner == this) {   // NOT RETAIL: ext.async_save_compress (compressed_stream_async.cpp)
-        ExtAsyncCompressWindow(i);
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress queues
+    // the attached save's window for its worker.
+    if (_extAsyncCompress != nullptr && _extAsyncCompress(*this, kExtAsyncCompressWindow, i, nullptr))
         return;
-    }
     Window* const w = &_windowData[i];                   // 1800a9829..31
     if (w->start < 0) {                                  // 1800a9835/39/3b  TEST/JS
         return;
@@ -509,8 +512,9 @@ void IO::CompressedStream::Commit() {
         }
     }
 
-    // NOT RETAIL: ext.async_save_compress -- the queued blocks land before PreCommit reads them.
-    if (_extAsyncOwner == this) ExtAsyncEnd();
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress's
+    // queued blocks land before PreCommit reads them.
+    if (_extAsyncCompress != nullptr) _extAsyncCompress(*this, kExtAsyncEnd, 0, nullptr);
 
     // ---- 2. virtual PreCommit --------------------------------------------
     PreCommit();                                         // 1800a9f26..2c  +0x40

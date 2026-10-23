@@ -12,7 +12,8 @@
 // bytes at a retail offset (System::CriticalSection, MemoryAllocator+0x640,
 // Video::Device+0x60, Audio::Stream+0x50). `LockStorage` is those same 40 bytes,
 // constructed IN PLACE by `MutexInit`: no heap object, so the allocator's own lock does
-// not allocate from the allocator it guards. Every lock is RECURSIVE (CRITICAL_SECTION
+// not allocate from the allocator it guards. Darwin stores a pointer to a libc-heap
+// mutex in that slot because its native mutex is larger. Every lock is RECURSIVE (CRITICAL_SECTION
 // is; Video::Device::Lock relies on it). Each impl asserts its native object fits.
 //
 // EVENTS. `EventHandle` is a pointer to an INCOMPLETE type, 8 bytes, so the Thread /

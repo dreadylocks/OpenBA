@@ -11,6 +11,8 @@
 #include "ext/tweak/ext_tweaks.h"   // the debug tweak overlay's values (debug flavour only)
 #endif
 
+namespace Ext {
+namespace AmbientOcclusion {
 namespace AoMath {
 
 bool TierFor(int quality, bool lowIsLowest, Tier& out) {
@@ -65,7 +67,7 @@ void AssaoUnpack(const float lh[16], float& mul, float& add, float& tanX, float&
     tanY = 1.0f / lh[1 * 4 + 1];
 }
 
-bool FrameFor(const Ext::AO::Params& p, float cameraDistance, Graphics::ExtAoFrame& out) {
+bool FrameFor(const Ext::AmbientOcclusion::Params& p, float cameraDistance, Graphics::ExtAoFrame& out) {
     Tier tier;
     if (!TierFor(p.quality, kLowIsLowest, tier)) return false;
     int opacity = p.opacity;
@@ -125,3 +127,5 @@ bool FadeFromFog(float fogParamX, float fogParamY, Graphics::ExtAoFrame& frame) 
 }
 
 }  // namespace AoMath
+}  // namespace AmbientOcclusion
+}  // namespace Ext

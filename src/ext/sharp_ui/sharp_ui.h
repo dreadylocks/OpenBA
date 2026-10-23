@@ -39,6 +39,7 @@
 namespace UI { class UserInterface; }
 namespace Video { class Context; }
 
+namespace Ext {
 namespace SharpUI {
 
 // Once per frame, in place of `ui.Draw(context)`: (re)selects the font
@@ -49,3 +50,4 @@ namespace SharpUI {
 void Draw(UI::UserInterface& ui, Video::Context& context);
 
 }  // namespace SharpUI
+}  // namespace Ext

@@ -19,6 +19,7 @@
 
 #include "Game/exe_constants.h"   // kRdata_* (the exe .rdata floats the bodies read)
 
+namespace Ext {
 namespace WalkBatch {
 
 inline float RdataBits(uint32_t bits) {
@@ -130,3 +131,4 @@ inline Decline DecideWalk(int32_t pathIndex, int32_t pathCount, int curCell, int
 }
 
 }  // namespace WalkBatch
+}  // namespace Ext

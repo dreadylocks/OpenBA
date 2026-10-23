@@ -465,7 +465,7 @@ void ImageBufferData::AttachDepthBuffer() {
     // Null desc: the DSV inherits the resource format. The resource here is the
     // DeviceData depth buffer, created as D24_UNORM_S8_UINT (typed, not
     // typeless), so a default view is legal.
-    // NOT RETAIL -- EXT ARM (ext.ambient_occlusion, AO.md §6.1): when
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOCORE.md): ext.ambient_occlusion (AO.md §6.1): when
     // CreateDepthBuffer built the typeless readable depth, the DSV needs an
     // explicit desc, and the SRV goes into the slot retail leaves null.
     if (AoBackend::DepthReadable())
@@ -656,10 +656,10 @@ void ImageBufferData::Bind(void* context, unsigned slot) {
     (void)context;   // never read by the original either
 
     ID3D11DeviceContext* const ctx = Dx11Context();
-    // EXT SEAM (ext.sharp_ui, NOT RETAIL): ::Video::ImageBufferData::
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SHARPUI.md): ext.sharp_ui -- ::Video::ImageBufferData::
     // _extPointSampling is false by default and in the faithful profile, which
     // takes retail's two lines below untouched. Set only inside a UI pass drawn
-    // at an integer ratio >= 2 (SharpUI::Draw); a comparison (shadow) image
+    // at an integer ratio >= 2 (Ext::SharpUI::Draw); a comparison (shadow) image
     // keeps its own sampler regardless.
     if (::Video::ImageBufferData::_extPointSampling && ((_owner->_flags >> 6) & 1) == 0) {
         if (ID3D11SamplerState* point = AcquirePointSampler(_owner)) {

@@ -23,6 +23,7 @@
 
 #include <cstdint>
 
+namespace Ext {
 namespace RenderPipe {
 
 struct TailInputs {
@@ -89,3 +90,4 @@ private:
 };
 
 }  // namespace RenderPipe
+}  // namespace Ext

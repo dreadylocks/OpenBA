@@ -103,7 +103,8 @@ private:                                                                        
 // by suffix, so the PE bracket above collects nothing there. A section whose name is a C
 // identifier is the ELF spelling of the same thing: GNU ld, gold and lld define
 // __start_exe_type_records / __stop_exe_type_records around it (factory_registration.cpp).
-#define OBJECT_EXE_TYPE_ENTRY __attribute__((used, section("exe_type_records")))
+#include "platform/common/platform_exe_type_section.h"
+#define OBJECT_EXE_TYPE_ENTRY __attribute__((used, section(PLATFORM_EXE_TYPE_SECTION)))
 #endif
 
 // The record's two factory entries: the class's own functions have exactly

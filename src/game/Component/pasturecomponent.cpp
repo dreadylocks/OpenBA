@@ -41,6 +41,8 @@
 #include "Action/exe_bodies.h"   // InteractNodeCount
 #include "Action/PathSearch.h"    // RegionGraph::MarkCellDirty
 #include "Game/PathfinderThread.h"   // PathfinderThread::SetCellTerrain
+#include "Game/terrain_sidecar.h"   // [terrain sidecar] NoteWrite after the +0x29 store (OnEvent)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 
 // The exe helpers this file calls, by retail address:
 //   0x140004680 FindComponent<MapComponent>       0x140005500 FindComponent<AnimalComponent>
@@ -340,11 +342,14 @@ void PastureComponent::OnEvent(int msgId) {
         const bool wasRough = ((1u << (was & 0x1f)) & 0x1e0u) != 0;
         map->field_0xA2 = map->field_0xA2 | wasRough;
         *terrain = 2;
+        TerrainSidecar::NoteWrite(&grid[cell]);   // [terrain sidecar] mirror (missing until AMBMEMO)
+        CellStamp::NoteWrite(&grid[cell]);   // [AMBMEMO] cell write clock
         if (wasRough)
             map->regionGraph->MarkCellDirty(cell % width, cell / width);   // 0x1400a8c90 (Pf_FineCellDirty_a8c90's body)
         // 0x1400a6fe0 reads the cell and the type (EDX, R8D) only.
         map->pathfinder->SetCellTerrain(cell, 2);   // 0x1400a6fe0 (Pf_EnqueueCmd2_a6fe0's body)
         grid[cell].occupant = nullptr;   // +0x08 the entity on the cell
+        CellStamp::NoteWrite(&grid[cell]);   // [AMBMEMO] cell write clock
     }
 }
 

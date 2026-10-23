@@ -3,6 +3,7 @@
 #include "ext/drain_split/drain_split.h"
 #include "ext/registry.h"   // Ext::Ext().drain_split, Ext::LockEpoch
 
+namespace Ext {
 namespace DrainSplit {
 
 bool g_on = false;
@@ -68,3 +69,4 @@ Stats& MutableStats() { return s_stats; }
 void ResetStats() { s_stats = Stats(); }
 
 }  // namespace DrainSplit
+}  // namespace Ext

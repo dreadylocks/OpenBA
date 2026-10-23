@@ -134,3 +134,43 @@ UNIT_TEST(cursor_planes_slot8_texture_round_trip) {
     CHECK(black > 0);
     for (int i = 0; i < 32 * 32; ++i) CHECK(out[i] != kInverted);
 }
+
+// TexelsToPlanes (what the Metal backend feeds the SDL cursor) must equal slot 8's loop
+// byte for byte, on a texel image that exercises all three classes, and on a non-32 width.
+UNIT_TEST(cursor_planes_texels_to_planes_matches_slot8) {
+    uint32_t pixels[32 * 32];
+    for (int i = 0; i < 32 * 32; ++i) {
+        const int k = (i * 7 + i / 32) % 5;
+        pixels[i] = (k == 0) ? 0x00000000u : (k < 3) ? 0xFFFFFFFFu : 0xFF000000u;
+    }
+    uint32_t a32[32], x32[32];
+    BuildLikeSlot8(pixels, a32, x32);
+    uint8_t a[128], x[128];
+    Platform::Cursor::TexelsToPlanes(pixels, 32, 32, 32, a, x);
+    CHECK(std::memcmp(a, a32, 128) == 0);
+    CHECK(std::memcmp(x, x32, 128) == 0);
+
+    // width 10: stride 2, pixel 9 is the second byte's bit 6
+    uint32_t t[10 * 2] = {};
+    for (auto& p : t) p = 0xFF000000u;
+    t[9] = 0x00000000u;           // row 0: transparent -> AND
+    t[10 + 8] = 0xFF0000FFu;      // row 1: white -> XOR
+    uint8_t a2[4], x2[4];
+    Platform::Cursor::TexelsToPlanes(t, 10, 2, 10, a2, x2);
+    CHECK_EQ(a2[0], 0);
+    CHECK_EQ(a2[1], 0x40);
+    CHECK_EQ(a2[2], 0);
+    CHECK_EQ(a2[3], 0);
+    CHECK_EQ(x2[0], 0);
+    CHECK_EQ(x2[1], 0);
+    CHECK_EQ(x2[2], 0);
+    CHECK_EQ(x2[3], 0x80);
+}
+
+UNIT_TEST(cursor_planes_upscale_nearest_2x) {
+    const uint32_t src[2 * 2] = {1, 2, 3, 4};
+    uint32_t dst[4 * 4];
+    Platform::Cursor::UpscaleNearest(src, 2, 2, 2, dst, 4);
+    const uint32_t want[16] = {1,1,2,2, 1,1,2,2, 3,3,4,4, 3,3,4,4};
+    CHECK(std::memcmp(dst, want, sizeof(want)) == 0);
+}

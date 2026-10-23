@@ -42,8 +42,8 @@
 #include "video/Device.h"   // ENDGAME B.3.9 SS2: Video::Device::_singleton
 #include "Entity/ComponentEntity.h"
 #include "Game/WorldGeometry.h"
-#include "ext/registry.h"                 // EXT SEAM: Ext::Ext() (NOT RETAIL)
-#include "ext/eye_camera/eye_camera.h"   // EXT SEAM: ext.eye_camera's followed entity (NOT RETAIL)
+#include "ext/registry.h"                 // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md): Ext::Ext()
+#include "ext/eye_camera/eye_camera.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md): ext.eye_camera's followed entity
 #include "Game/Map.h"
 #include "Game/PlayerController.h"   // PlayerController::WorldToScreen (0x140098210)
 
@@ -365,7 +365,7 @@ void EditTool::Update(const System::Time*, char) {
     // behind the camera and projects to no rect, which retail reads as
     // "off the display" and closes the panel (and with it the FollowDialog).
     // The panel stays where it is; nothing else of the tick changes.
-    if (!gotRect && Ext::Ext().eye_camera && EyeCamera::FollowedEntity() == entityObj)
+    if (!gotRect && Ext::Ext().eye_camera && Ext::EyeCamera::FollowedEntity() == entityObj)
         return;
 
     if (!gotRect) {

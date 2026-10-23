@@ -24,6 +24,7 @@
 
 namespace Video { class Context; class Device; }
 
+namespace Ext {
 namespace RenderPipe {
 
 // Steps 1-4 of Finish: Present(vsync, 0), drop the device lock, the
@@ -39,3 +40,4 @@ int32_t FinishPresent(Video::Context& ctx);
 void FinishRecover(Video::Device& device, int32_t hr);
 
 }  // namespace RenderPipe
+}  // namespace Ext

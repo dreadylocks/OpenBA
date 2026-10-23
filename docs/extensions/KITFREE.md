@@ -28,9 +28,14 @@ A compiled resource is only a serialized object graph whose load ends in
 `ExternalFactory::Add` (src/engine/object/external_add.cpp). The seam is a **provider**: when
 the factory's lookup misses on disk (loose file and every package), `Ext::Resources::Provide`
 is asked for the path; a provider that owns the path builds the `Object::External` in memory,
-sets its path and the factory registers it like any loaded object. Providers are re-run on
-demand, so `ExternalFactory::Clean` dropping an unused object is harmless (the next lookup
-rebuilds it; fonts cache their rasterised glyphs so a rebuild is a copy).
+sets its path and the factory registers it like any loaded object. A provided object lives for
+the process (corrected 2026-10-21): `Provide` stamps it with a usage bit the provider reserves
+and no loop ever cleans, through retail's `Add` and its reference visit, so everything it points
+at is kept too. It used to carry only the bits of the loops that touched it, and a cache hit
+re-stamps a bit only while a loader runs, so the boot menu's `ExtensionsStringTable` /
+`ExtensionsSprites` were cleaned at an in-game reload while the Extensions dialog first opened in
+that game (the game's bit) kept pointing at them: the dialog reopened after an in-game B / C
+change read a freed sprite sheet (a crash) or a freed string table (blank headings).
 
 ```
 src/ext/resources/Resources.h      the provider interface (THIS header is shared; three blocks build on it)

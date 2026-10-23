@@ -33,6 +33,7 @@
 #include "video/Context.h"
 #include "video/Device.h"   // Video::RenderBuffer::width / height
 
+namespace Ext {
 namespace RenderPipe {
 
 using Graphics::Renderer;
@@ -142,7 +143,7 @@ void Pass2(Renderer& r, Video::Context& context, const Graphics::ExtAoFrame* ao)
                 RendererDrawable& d = r._drawables._data[id];
                 d._object->DrawLight(context, r, e->_drawGroupIndex, d._value, k, e->_shader);
             }
-            // EXT SEAM (ext.ambient_occlusion, AOCORE): the faithful loop's test
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOCORE.md): ext.ambient_occlusion after the opaque light pass; the faithful loop's test
             // (wave27_lane_gfxbig.cpp), with the packet's record instead of the static.
             if (k == 0 && ao != nullptr && e->_shader == 0 &&
                 e->_renderBuffer == context._defaultRenderBuffer)
@@ -152,3 +153,4 @@ void Pass2(Renderer& r, Video::Context& context, const Graphics::ExtAoFrame* ao)
 }
 
 }  // namespace RenderPipe
+}  // namespace Ext

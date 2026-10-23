@@ -134,7 +134,16 @@ public:
     void DecodeAtLoad();
     bool IsDecodedAtLoad() const { return _decodedXwma.packetBytes != 0; }
 
-    // EXT SEAM (NOT RETAIL; docs/extensions/DESIGN.md §3 hook rule 5, block SEAMLESS): null by default.
+    // Block SNDPAR (port-only, src/engine/audio/load_decode_batch.h): under an
+    // Object::External::Load the decode above is QUEUED and runs with the load's other
+    // decodes in parallel when the outermost Load ends. Every reader of `_data` /
+    // `_length` / `_format` / `_decodedXwma` calls this first (Serialize, ~SoundBuffer;
+    // PlayPlatform calls LoadDecode::Await on its pointer, the same test): it returns once
+    // this buffer's decode is published, completing it here if its batch has not yet. One
+    // atomic load when nothing is queued.
+    void EnsureDecodedAtLoad() const;
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/SEAMLESS.md): ext.seamless_loops' loop hook, null by default (DESIGN.md §3 hook rule 5).
     // ext.seamless_loops installs it at boot (src/ext/registry_boot.cpp) when the row is on; DecodeAtLoad
     // calls it on a LOOPING buffer's decoded PCM (interleaved S16, `frames` frames) and keeps the frame
     // count it returns (<= frames). The same single null-default pointer shape as

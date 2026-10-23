@@ -41,7 +41,8 @@
 #include "volume/Volume.h"        // RtVolume_Frustum_MulTransform3
 #include "volume/frustum_cull.h"  // CULLROUTE: the prepared table (Contains, retail 0x1800f8e80)
 #include "Game/exe_constants.h"   // kRdata_*
-#include "ext/perfx/perfx.h"
+#include "ext/render_culling/render_culling.h"
+#include "ext/terrain_batch/terrain_batch.h"   // ext.terrain_batch: the row merge + the shadow chunk cull
 #include "Object/exe_type.h"   // DEFINE_EXE_VTABLE
 #include "object/Internal.h"   // Object::detail::InternalMemFree
 #include <atomic>
@@ -69,6 +70,10 @@ constexpr float kChunkZRange =  32.0f;  // exe 0x1401721d0
 std::atomic<bool> s_collectLogged{false};
 std::atomic<bool> s_itemDrawLogged{false};
 }  // namespace
+
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): null unless ext.terrain_batch
+// is registered for this run (registry_boot.cpp); then the row's live bool.
+const bool* WorldGeometry::_extTerrainBatch = nullptr;
 
 
 // ============================================================
@@ -99,6 +104,9 @@ DirtyChunkSet::~DirtyChunkSet() {
 // destructor runs after this body in reverse declaration order, which is
 // retail's order (WorldGeometry.h).
 WorldGeometry::~WorldGeometry() {
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): ext.terrain_batch frees
+    // this geometry's run index buffer.
+    if (_extTerrainBatch != nullptr) Ext::TerrainBatch::Forget(*this);
     // +0x148: the height ImageBuffer, deleted through its own slot 0 with
     // flags 1 (retail: MOV RAX,[RCX]; MOV EDX,1; CALL [RAX]).
     if (_heightImage) {
@@ -126,6 +134,9 @@ void WorldGeometry::OnVideoError() {
     if (_heightImage) {
         delete _heightImage;   // slot 0, free (MOV EDX,1; JMP [RAX]); not nulled
     }
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): ext.terrain_batch's run
+    // index buffer loses its device half too (the restart's BuildTerrainMesh rebuilds it).
+    if (_extTerrainBatch != nullptr) Ext::TerrainBatch::OnVideoError(*this);
 }
 
 // 0x1400b0c50 (read in Ghidra): new companions on the new device through the
@@ -199,7 +210,7 @@ void WorldGeometry::AddDrawItems(const Graphics::Scene& /*scene*/,
     ::Frustum localFrustum = {};
     // worldFrustum = cameraFrustum * cameraTransform3
     RtVolume_Frustum_MulTransform3(&cameraFrustum, &worldFrustum, &cameraTransform3);
-    PerfX::SetWorldFrustum(&worldFrustum);   // [PerfX] the sim-side off-screen test uses this frame's planes
+    Ext::RenderCulling::SetWorldFrustum(&worldFrustum);   // [PerfX] the sim-side off-screen test uses this frame's planes
     // localFrustum = worldFrustum * geometryInverseTransform3
     RtVolume_Frustum_MulTransform3(&worldFrustum, &localFrustum, &selfInvTransform3);
 
@@ -228,18 +239,29 @@ void WorldGeometry::AddDrawItems(const Graphics::Scene& /*scene*/,
     float zMin = kChunkZMin;
     float zMax = kChunkZMin + kChunkZRange;
 
-    for (int i = 0; i < chunkCount; ++i) {
-        for (int j = 0; j < chunkCount; ++j) {
-            float xmin = static_cast<float>(j) * chunkSizeF - fHalfGrid;
-            float ymin = static_cast<float>(i) * chunkSizeF - fHalfGrid;
-            float xmax = xmin + chunkSizeF;
-            float ymax = ymin + chunkSizeF;
-            const ::Box box = { { xmin, ymin, zMin }, { xmax, ymax, zMax } };
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): with ext.terrain_batch on
+    // and its run buffer ready, the same chunk tests emit one item per run of visible chunks in
+    // a row, and the shadow pass also tests each chunk's shadow reach against the view.
+    // Otherwise retail's loop below, unchanged.
+    const bool terrainBatch = _extTerrainBatch != nullptr && *_extTerrainBatch &&
+                              Ext::TerrainBatch::Ready(*this);
+    if (terrainBatch) {
+        Ext::TerrainBatch::AddChunkItems(*this, renderer, localPlanes, cullVerify, localFrustum,
+                                         selfInvTransform3, materialKey, uvScale);
+    } else {
+        for (int i = 0; i < chunkCount; ++i) {
+            for (int j = 0; j < chunkCount; ++j) {
+                float xmin = static_cast<float>(j) * chunkSizeF - fHalfGrid;
+                float ymin = static_cast<float>(i) * chunkSizeF - fHalfGrid;
+                float xmax = xmin + chunkSizeF;
+                float ymax = ymin + chunkSizeF;
+                const ::Box box = { { xmin, ymin, zMin }, { xmax, ymax, zMax } };
 
-            uint32_t r = FrustumCull_Test(&localPlanes, &box, 0x3F, cullVerify);
-            if (r != 0x40) {
-                uint16_t key2 = static_cast<uint16_t>((i << 6) | j);
-                renderer.AddDrawItem(this, matInst0, materialKey, key2, 0.0f, uvScale, 1, nullptr, 0);
+                uint32_t r = FrustumCull_Test(&localPlanes, &box, 0x3F, cullVerify);
+                if (r != 0x40) {
+                    uint16_t key2 = static_cast<uint16_t>((i << 6) | j);
+                    renderer.AddDrawItem(this, matInst0, materialKey, key2, 0.0f, uvScale, 1, nullptr, 0);
+                }
             }
         }
     }
@@ -423,6 +445,14 @@ void WorldGeometry::Draw(Video::Context& context, const Graphics::Camera& /*came
         const GeometryDrawRange* ranges = _contourRangesA.data;   // +0x1C0
         if (!ranges) return;
         DrawContourRange(ranges);
+        return;
+    }
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/TERRAINBATCH.md): a run item of
+    // ext.terrain_batch (key bits 0xC000 set, a draw mode retail never emits): the chunk draw
+    // below for each chunk of one grid row's run, in one DrawIndexed.
+    if (Ext::TerrainBatch::IsRunKey(param6)) {
+        Ext::TerrainBatch::DrawRun(*this, context, param6);
         return;
     }
 

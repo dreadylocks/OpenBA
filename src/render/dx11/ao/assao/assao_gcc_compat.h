@@ -6,7 +6,13 @@
 #pragma once
 
 #include <d3d11.h>
+#include <stddef.h>
 #include <string.h>
+
+// MinGW-w64's stdlib.h defines _countof; glibc (the Linux build over dxvk-native) does not.
+#ifndef _countof
+#define _countof(a) (sizeof(a) / sizeof((a)[0]))
+#endif
 
 #ifndef _MSC_VER
 struct CD3D11_VIEWPORT : public D3D11_VIEWPORT {

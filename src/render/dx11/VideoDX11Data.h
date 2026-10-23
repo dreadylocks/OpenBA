@@ -271,7 +271,7 @@ public:
     void EndInstancedIndexedVertices(int primitiveType) override;           // [19] 0x180002150
 
     int32_t              topology;   // +0x10  last D3D11_PRIMITIVE_TOPOLOGY set; factory writes 0
-    int32_t              pad14;      // +0x14  factory writes 0 (a dword)
+    int32_t              pad14;      // +0x14  factory writes 0; NOT RETAIL: last Dx11ClearStateGeneration() seen (contextdata.cpp)
     ID3D11DeviceContext* d3dContext; // +0x18  cached by slot 1; BORROWED (never AddRef'd / Released)
 
 private:

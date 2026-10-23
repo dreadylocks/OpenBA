@@ -18,7 +18,7 @@
 //                                       std::function, no allocation per call).
 //
 // THE POOL: created lazily by the first call that needs it (or by Workers()), once:
-// Cpu::ParallelWorkers(Cpu::Get().physical) threads (src/ext/cpu/roster.h: the
+// Cpu::ParallelWorkers(Cpu::Get().physical) threads (src/platform/common/cpu/roster.h: the
 // physical cores inside `sys.cpu_limit` minus the caller, at most kMaxWorkers). With
 // 0 workers (one core) every call runs `f(begin, end)` inline on the caller. Workers
 // park on a condition variable between calls (no CPU), register with DiagThreads as

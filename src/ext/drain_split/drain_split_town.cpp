@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+namespace Ext {
 namespace DrainSplit {
 
 namespace {
@@ -106,3 +107,4 @@ void RunDue(PathGraph* pg, bool pathBlockRuns) {
 }
 
 }  // namespace DrainSplit
+}  // namespace Ext

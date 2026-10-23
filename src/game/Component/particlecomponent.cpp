@@ -34,7 +34,7 @@
 #include "system/MemoryAllocator.h"
 #include "system/String.h"
 #include "math/Math.h"
-#include "ext/perfx/perfx.h"   // EXT SEAM: ext.render_culling (PC_Culled)
+#include "ext/render_culling/render_culling.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/PERFXEXT.md): ext.render_culling (PC_Culled)
 #include "stress_harness.h"    // g_verifyOn / StressHarness_Verify (the PerfXSim shadow)
 #include "io/Serializer.h"   // ENDGAME B.3.4 caller batch A
 #include "io/Stream.h"      // ENDGAME B.3.4 callers batch H: IO::Stream::GetDirection
@@ -538,17 +538,17 @@ static void PC_UnstampOwnEmitters(ParticleComponent* self) {
     }
 }
 
-// EXT SEAM ext.render_culling (class A, NOT RETAIL; src/ext/perfx/perfx.h) -- a particle
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/PERFXEXT.md): ext.render_culling (class A, src/ext/render_culling/render_culling.h) -- a particle
 // system nobody can see is FROZEN (not ticked) rather than simulated; when the camera
 // reaches it the plume it had simply continues. Position = the first live emitter
 // geometry's transform translation (+0x94).
 // EXACT (PERFXEXT §3.1): only a component none of whose live emitters is fading is frozen.
 // The tick's StopEmitter (opacity reaching 0) writes sceneId / active[] / flag bit 2, which
 // TornadoComponent::Tick and ParticleComponent::Persist read; a quiet emitter's tick
-// touches presentation only (PerfX::EmitterQuiet). A fade started while frozen unfreezes
+// touches presentation only (Ext::RenderCulling::EmitterQuiet). A fade started while frozen unfreezes
 // the component on its next tick, so every StopEmitter happens on retail's tick.
 static bool PC_Culled(ParticleComponent* self, const System::Time* time) {
-    if (!PerfX::ParticleCull()) return false;
+    if (!Ext::RenderCulling::ParticleCull()) return false;
     int total = self->emitters._size;
     ParticleEmitterSlot* geoArr = self->emitters._data;
     if (total <= 0 || !geoArr) return false;
@@ -556,12 +556,12 @@ static bool PC_Culled(ParticleComponent* self, const System::Time* time) {
     for (int i = 0; i < total; i++) {
         const ParticleEmitterSlot& ge = geoArr[i];
         if (!ge.instance || ge.sceneId < 0) continue;   // not live: the tick does nothing to it
-        if (!PerfX::EmitterQuiet(ge.fadeRate, ge.instance->_opacity)) return false;
+        if (!Ext::RenderCulling::EmitterQuiet(ge.fadeRate, ge.instance->_opacity)) return false;
         if (!pos) pos = &ge.instance->_transform._current.translation.x;
     }
     if (!pos) return false;
     // PERFXTBL: the verdict is kept per Update frame in the owner entity's side-table slot.
-    if (!PerfX::ParticleCullSkip(pos, self->_entity.Get())) return false;
+    if (!Ext::RenderCulling::ParticleCullSkip(pos, self->_entity.Get())) return false;
     if (g_verifyOn) {
         // COMPPROF=4 `PerfXSim`: retail's StopEmitter decision for every live emitter of
         // this skipped tick, from the tick's own arithmetic, must be "no".
@@ -571,7 +571,7 @@ static bool PC_Culled(ParticleComponent* self, const System::Time* time) {
         for (int i = 0; i < total; i++) {
             const ParticleEmitterSlot& ge = geoArr[i];
             if (ge.instance && ge.sceneId >= 0 &&
-                PerfX::RetailStopsEmitter(ge.fadeRate, ge.instance->_opacity, dt, uvScale))
+                Ext::RenderCulling::RetailStopsEmitter(ge.fadeRate, ge.instance->_opacity, dt, uvScale))
                 stops = true;
         }
         StressHarness_Verify("PerfXSim", !stops, stops ? 1 : 0);

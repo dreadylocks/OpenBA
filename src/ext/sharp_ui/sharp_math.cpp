@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+namespace Ext {
 namespace SharpUI {
 
 int32_t LayoutExtent(int32_t backBufferExtent, float uiScale) {
@@ -88,6 +89,33 @@ int PickVariantHeight(int baseHeight, float pxPerUnit) {
     return best;
 }
 
+int RetinaHigh(int baseHeight) { return RoundThirds(baseHeight, 8); }
+
+bool IsRetinaVariantHeight(int baseHeight, int height) {
+    if (baseHeight <= 0) return false;
+    return height > VariantHigh(baseHeight) && height <= RetinaHigh(baseHeight) &&
+           height % VariantStep(baseHeight) == 0;
+}
+
+int PickRetinaVariantHeight(int baseHeight, float pxPerUnit) {
+    const int pick = PickVariantHeight(baseHeight, pxPerUnit);
+    if (pick != baseHeight || baseHeight <= 0 || !(pxPerUnit > 0.0f)) return pick;
+    const int step = VariantStep(baseHeight);
+    const float want = static_cast<float>(baseHeight) * pxPerUnit;
+    if (want <= static_cast<float>(VariantHigh(baseHeight) + step) ||
+        want > static_cast<float>(RetinaHigh(baseHeight) + step))
+        return baseHeight;
+    int h = static_cast<int>(std::floor(want / static_cast<float>(step) + 0.5f)) * step;
+    if (h > RetinaHigh(baseHeight)) h = RetinaHigh(baseHeight) / step * step;
+    if (h <= VariantHigh(baseHeight)) h = (VariantHigh(baseHeight) / step + 1) * step;
+    return IsRetinaVariantHeight(baseHeight, h) ? h : baseHeight;
+}
+
+bool NativePickFitsRatio(int baseHeight, float pxPerUnit) {
+    if (baseHeight <= 0 || !(pxPerUnit > 0.0f)) return false;
+    return std::fabs(static_cast<float>(baseHeight) * pxPerUnit - static_cast<float>(baseHeight)) < 0.5f;
+}
+
 bool VariantFontPath(const char* baseName, int height, char* out, size_t cap) {
     const int n = std::snprintf(out, cap, "Font/Sharp%s_%d.rsc", baseName, height);
     return n > 0 && static_cast<size_t>(n) < cap;
@@ -133,4 +161,13 @@ bool WantTwin2x(float pxPerUnitX, float pxPerUnitY) {
     return pxPerUnitX > 1.0f + kIntegerTolerance && pxPerUnitY > 1.0f + kIntegerTolerance;
 }
 
+int PickFontHeight(int baseHeight, float pxPerUnit, float density, bool* keepRetail) {
+    *keepRetail = false;
+    if (!(density > 1.0f)) return PickVariantHeight(baseHeight, pxPerUnit);
+    const int pick = PickRetinaVariantHeight(baseHeight, pxPerUnit);
+    if (pick == baseHeight && !NativePickFitsRatio(baseHeight, pxPerUnit)) *keepRetail = true;
+    return pick;
+}
+
 }  // namespace SharpUI
+}  // namespace Ext

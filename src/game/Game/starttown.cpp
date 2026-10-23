@@ -27,8 +27,10 @@
 #include "graphics/Camera.h"
 #include "Game/exe_bodies.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
-#include "ext/registry.h"            // Ext::Fix().start_barn_height
+#include "ext/registry.h"            // Ext::Fix().start_barn_height, Ext::Fix().rock_seat
+#include "ext/rock_seat/rock_seat.h"   // fix.rock_seat (docs/extensions/handins/ROCKSEAT.md)
 #include "system/MemoryAllocator.h"   // System::MemoryAllocator::MemAlloc / MemFree
+#include "Game/worldgen_cells.h"     // [PERLINPRE] WgCells_PerlinTable (row-parallel scatter noise)
 #include "math/Math.h"
 #include "system/Filename.h"
 #include "system/String.h"
@@ -112,8 +114,9 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <vector>
 #include <algorithm>
 #include <functional>
-#include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::StartCentre (NOT RETAIL)
-#include "ext/neighbour/shared_map.h"  // EXT SEAM: Neighbour::SharedMap::NoteStructure (NOT RETAIL)
+#include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "ext/neighbour/neighbour.h"   // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::StartCentre
+#include "ext/neighbour/shared_map.h"  // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::SharedMap::NoteStructure
 
 // ============================================================================
 // Economy Brick M-D — live town storage (BANISHED_LIVE_STORAGE, default OFF).
@@ -4457,6 +4460,7 @@ extern "C" void StartTown_UnmarkResourceCellGrid(Map* game, ComponentEntity* own
                 game->SetTerrainType(cellIdx, t);   // 0x14009f2f0
             }
             cell->occupant = nullptr;        // dee0: null the cell entity-link, ALWAYS
+            CellStamp::NoteWrite(cell);   // [AMBMEMO] cell write clock
         }
     }
 }
@@ -4532,8 +4536,14 @@ static void StartTown_PlaceResourceCell(ComponentEntity* entity, int cellIdx, Ma
     const Math::Vector3 off(worldX, worldY, worldZ);
     m->transform = Math::Transform::FromYawPitchOffset(yaw, pitch, off);
     m->yaw = yaw;
-    Graphics::Geometry* geometry = &m->meshInstance;
-    geometry->SetTransform(m->transform);
+    // FIX rock_seat (NOT RETAIL, docs/extensions/handins/ROCKSEAT.md): a rock's mesh is drawn seated on
+    // the slope; m->transform (serialized) stays retail's.
+    if (Ext::Fix().rock_seat) {
+        Ext::RockSeat::SetMeshTransform(m);
+    } else {
+        Graphics::Geometry* geometry = &m->meshInstance;
+        geometry->SetTransform(m->transform);
+    }
 }
 
 // FUN_140120db0 — growth/age + mesh-scale init on the GrowthComponent. Delegates to
@@ -4659,6 +4669,11 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
         }
     }
 
+    // [PERLINPRE] one dim x dim scratch for every pool's scatter noise (dim is fixed for
+    // the call). std::vector, not MemAlloc: it is not a retail allocation, so it stays
+    // off the engine heap the scatter's entity allocations come from.
+    std::vector<float> noiseTable((size_t)dim * (size_t)dim);
+
     int spawned = 0;
     for (int e = 0; e < count; ++e) {
         MapGenerator::ExternalRef* entry = &pool[e];
@@ -4730,9 +4745,17 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
         int poolSpawned = 0;
         int zoneSkips   = 0;   // cells refused by the ZONE-raster test below
         bool capped = false;
+        // [PERLINPRE] The scatter noise of every cell, computed up front in parallel rows
+        // (Game/worldgen_cells.cpp). EXACT: the same Generate call on the same const object
+        // with the same float arguments, (float)x * scale and (float)y * scale; Generate keeps
+        // no state and draws no RNG, so taking it out of the loop moves no RandFloat / Rand
+        // draw and no value. The loop below is unchanged and reads the table in its order
+        // (a `capped` exit only leaves values unread; poolCap is INT_MAX today).
+        float* noise = noiseTable.data();
+        WgCells_PerlinTable(noise, dim, &perlin, scale);
         for (int y = 0; y < dim && !capped; ++y) {
             for (int x = 0; x < dim; ++x) {
-                float p = RtUtility_PerlinNoise_Generate(&perlin, (float)x * scale, (float)y * scale);
+                float p = noise[dim * y + x];   // was RtUtility_PerlinNoise_Generate(&perlin, (float)x * scale, (float)y * scale)
                 if (threshold > p * 0.5f + 0.5f) continue;
                 Neighbour::ScatterCell(e, dim * y + x);   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
                 if (rng->RandFloat() > density) continue;

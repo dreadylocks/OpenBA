@@ -46,6 +46,7 @@
 class GameUpdateLoop;
 namespace System { class Time; }
 
+namespace Ext {
 namespace BackgroundSave {
 
 // Install / remove the Save::SaveLoad seam with the toggle. Ext::InitFromSettings and
@@ -66,3 +67,4 @@ void FrozenUpdate(GameUpdateLoop& loop, const System::Time& time);
 void Join(bool finishSave);
 
 }  // namespace BackgroundSave
+}  // namespace Ext

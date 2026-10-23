@@ -61,7 +61,7 @@ void StressHarness_DrawEnd();
 // RENDERPIPE-1: PipePacket* / PipeEmit* run on the emitting thread (the render
 // thread when it is up): atomics, folded at the CSV row. Two more appended
 // columns, pipe_wait_us (hand-off waits per draw frame) and pipe_latency_us
-// (hand-off -> Present done, mean), from RenderPipe::TakeWindow.
+// (hand-off -> Present done, mean), from Ext::RenderPipe::TakeWindow.
 // StressHarness_Verify is callable from any thread (a lock).
 void StressHarness_PipeMainEnd();
 void StressHarness_PipePacketBegin();
@@ -84,8 +84,16 @@ void CompProf_End(int slot, long long tscTicks);   // ticks from CompProf_Now (R
 // the tick and compares the state after it.
 int  CharProf_Begin(Object::Base* comp, int slot);
 void CharProf_End(int token, long long tscTicks);
+#if defined(__aarch64__)
+static inline long long CompProf_Now() {
+    uint64_t ticks;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(ticks));
+    return static_cast<long long>(ticks);
+}
+#else
 #include <x86intrin.h>
 static inline long long CompProf_Now() { return (long long)__rdtsc(); }
+#endif
 // One line of sim context (world frame, component Update in flight) for diagnostics
 // that fire from another thread (the redzone heap watchdog).
 void StressHarness_Context(char* buf, int n);

@@ -1318,7 +1318,7 @@ Scene::ObjectId Scene::AddObject(Geometry* geometry) {
     // The grid insert reads `MOV RAX,[RSI]`, i.e. a POINTER TO the Geometry*,
     // which is why retail spills its argument to a local first.
     const ObjectId id = RtSceneGridAdd(this, &local);
-    // EXT SEAM (NOT RETAIL; scene_ext.h, docs/extensions/handins/DRAWGATHER.md):
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DRAWGATHER.md): scene_ext.h --
     // null unless ext.draw_gather is on; then the new node's id is logged so the
     // extension refreshes its copy of the node before trusting it.
     if (_extAddLog != nullptr) _extAddLog->Note(this, id);
@@ -1414,7 +1414,7 @@ void Scene::RemoveGlobalObject(Geometry* geometry) {
 // id is still registered is an "EXEC of <heap address>" here.
 // ---------------------------------------------------------------------------
 void Scene::Clean() {
-    // EXT SEAM (NOT RETAIL; scene_ext.h): ext.draw_gather replaces the whole
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DRAWGATHER.md): scene_ext.h -- ext.draw_gather replaces the whole
     // body (the same cleans and re-indexes, plus its side-array upkeep). Null in
     // the faithful build: retail's body below runs unchanged.
     if (_extClean != nullptr) { _extClean(*this); return; }

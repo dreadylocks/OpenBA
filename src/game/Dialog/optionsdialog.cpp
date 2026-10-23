@@ -9,6 +9,7 @@
 // Original source: C:\Projects\Buildy\code\Game\Dialog/OptionsDialog.h
 //                  Dialog\OptionsDialog.cpp
 
+#include "platform/common/display_density.h"
 #include "ui/TextElement.h"   // ENDGAME B.3.6 UI callers (K2)
 #include "ui/ComboElement.h"   // ENDGAME B.3.6 UI callers (K2)
 #include "ui/TabElement.h"   // ENDGAME B.3.6 UI callers (K2)
@@ -47,8 +48,8 @@
 #include "ui/UserInterface.h"
 #include "object/External.h"   // ENDGAME B.3.3 step 6A
 #include "io/Persistence.h"   // ENDGAME B.3.4 caller batch P
-#include "ext/enhanced_tab/enhanced_tab.h"   // EXT ARM (AOMENU): the Enhanced tab
-#include "graphics/SunLight.h"   // EXT ARM (FAA-MENU): ExtRequestMaxShadowResSync
+#include "ext/enhanced_tab/enhanced_tab.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOMENU.md): the Enhanced tab
+#include "graphics/SunLight.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/FAA-MENU.md): ExtRequestMaxShadowResSync
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -664,7 +665,10 @@ void OptionsDialog::OnOpened() {
     // --- UI scale slider ---
     if (s_enableUIScaleSlider) {
         this->sliderUIScale = FindElementAs<UI::SliderElement>(this, "sliderUIScale");
-        SetSliderRange(this->sliderUIScale, 75.0f, 150.0f);
+        float uiScaleMin = 75.0f;
+        float uiScaleMax = 150.0f;
+        Platform::Display::UiScaleSliderRange(&uiScaleMin, &uiScaleMax);   // unchanged at density 1
+        SetSliderRange(this->sliderUIScale, uiScaleMin, uiScaleMax);
         if (g_gameSettings != nullptr)
             SetSliderValue(this->sliderUIScale, (float)g_gameSettings->uiScale);
     }
@@ -707,7 +711,7 @@ void OptionsDialog::OnOpened() {
     if (s_enableTabRestore) {
         this->tabOptions = FindElementAs<UI::TabElement>(this, "tabOptions");
         if (this->tabOptions) {
-            // EXT ARM (ext.ambient_occlusion, block AOMENU): the fifth tab "Enhanced", added
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOMENU.md): ext.ambient_occlusion's fifth tab "Enhanced", added
             // BEFORE the restore below so a saved lastOption of 4 lands on it. Offered whenever
             // the build has the extension (not gated on the row: the tab is where the player
             // turns it on); absent under the gate's /profile:faithful (menus stay retail's).
@@ -727,7 +731,7 @@ void OptionsDialog::OnOpened() {
 // ============================================================
 // No-op shutdown; nothing to clean up.
 void OptionsDialog::OnClosed() {
-    Ext::EnhancedTab::Close(this);   // EXT ARM (AOMENU): forget the Enhanced tab's elements
+    Ext::EnhancedTab::Close(this);   // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOMENU.md): forget the Enhanced tab's elements
 }
 
 // ============================================================
@@ -982,7 +986,7 @@ void OptionsDialog::ApplyVideoSettings() {
     vidCfg->shaderDetail = newShadowQ;
     vidCfg->reflectionDetail = newReflQ;
 
-    // EXT ARM (ext.max_shadow_res, block FAA-MENU): the sun map's descriptors follow the NEW shadowScalar here,
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/FAA-MENU.md): ext.max_shadow_res -- the sun map's descriptors follow the NEW shadowScalar here,
     // on the main thread, so the rebuild ApplyChangedSettings requests lands at the right size. Left to the
     // per-frame sync, the render thread raised settingsChanged a second time and deadlocked in the resize.
     ::Graphics::SunLight::ExtRequestMaxShadowResSync();
@@ -1062,7 +1066,7 @@ void OptionsDialog::OnApply() {
 
     ApplyGameSettings();
 
-    // EXT ARM (AOMENU): the Enhanced tab's values (Ext::AO::Set records ext.ao_quality /
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/AOMENU.md): the Enhanced tab's values (Ext::AmbientOcclusion::Set records ext.ao_quality /
     // ext.ao_opacity / ext.ambient_occlusion into the map the WriteSettings below flushes).
     Ext::EnhancedTab::Apply(this);
 
