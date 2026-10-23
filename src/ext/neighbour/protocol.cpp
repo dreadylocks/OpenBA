@@ -563,6 +563,14 @@ bool ValidParcelId(const std::string& id) {
     return true;
 }
 
+bool ValidToken(const std::string& token) {
+    if (token.empty()) return true;   // none yet
+    if (token.size() < 16 || token.size() > kMaxTokenChars) return false;
+    for (char c : token)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    return true;
+}
+
 namespace {
 
 void PutStr(std::vector<uint8_t>& out, const std::string& s) {
@@ -611,6 +619,8 @@ std::vector<uint8_t> EncodeState(const SavedState& s) {
     PutStr(out, s.pass.substr(0, 128));
     PutStr(out, s.server.substr(0, 256));
     PutStr(out, s.worldHash.substr(0, 32));
+    // v4
+    PutStr(out, s.token.substr(0, kMaxTokenChars));
     return out;
 }
 
@@ -635,6 +645,9 @@ bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, Saved
     if (formatVersion >= 3) {
         if (!r.Str(s.town, kMaxNameChars) || !r.Str(s.pass, 128) || !r.Str(s.server, 256) || !r.Str(s.worldHash, 32))
             return false;
+    }
+    if (formatVersion >= 4) {
+        if (!r.Str(s.token, kMaxTokenChars) || !ValidToken(s.token)) return false;
     }
     if (r.left != 0) return false;
     out = std::move(s);

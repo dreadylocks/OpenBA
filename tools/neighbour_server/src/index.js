@@ -19,9 +19,26 @@
 // the two towns built the same map.
 //
 // Every message is a JSON object with a string "t". Anything malformed, oversized or out of
-// order gets an {"t":"error"} and, for a bad hello, the line is closed.
+// order gets an {"t":"error"} and, for a bad hello, the line is closed ("fatal": the game stops
+// retrying). The messages are listed once in docs/fork/NEIGHBOUR_PROTOCOL.md.
+//
+// PROTOCOL 2 (2026-10-23, the interop spec fran-cap/Banished-Interop-Spec #1):
+//   * SEATS BY TOKEN (layer 0). A town's first join gets a random seat token in its welcome; every
+//     later hello sends it back, and the room seats the town by it, never by its name. The room
+//     keeps only a hash of each token. A room from before tokens hands each named seat its token
+//     once, to the town with that name.
+//   * THE HANDSHAKE (layer 1). A hello / create carries engine, engineVer, simBuild, dataHash,
+//     mods, exts and maxPlayers. The separate-town rules: a different retail data hash REFUSES the
+//     join (both towns need the same land), and so does a different protocol version; a different
+//     sim build, engine or mod list only WARNS ({"t":"compat"} to both towns).
+//   * THE LAND. A town whose world hash differs from the room's is refused (fatal): the two games
+//     built different worlds, and nothing mirrored would line up.
 
-const kProtocolVersion = 1;
+const kProtocolVersion = 2;
+const kTokenHex = /^[0-9a-f]{16,64}$/;
+const kHash64 = /^[0-9a-f]{16}$/;
+const kMaxMods = 256;
+const kMaxModsChars = 12 * 1024;
 const kMaxFrameBytes = 16 * 1024;
 const kMaxNameChars = 24;
 const kMaxRoomChars = 64;
@@ -94,6 +111,100 @@ function clean(text, max) {
   return text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomToken() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function tokenHash(room, token) {
+  return sha256Hex(`openba-neighbour-seat:${room}:${token}`);
+}
+
+// The mod list, as src/ext/neighbour/handshake.cpp EncodeMods writes it: "name|size|hash;..." with
+// '%', '|' and ';' in a name as %25, %7C, %3B and an empty hash for none. null when malformed.
+function decodeMods(text) {
+  if (typeof text !== "string" || text.length > kMaxModsChars) return null;
+  if (text === "") return [];
+  const entries = text.split(";");
+  if (entries.length > kMaxMods) return null;
+  const out = [];
+  for (const e of entries) {
+    const f = e.split("|");
+    if (f.length !== 3) return null;
+    if (/%(?!25|7C|3B)/.test(f[0])) return null;
+    const name = f[0].replace(/%7C/g, "|").replace(/%3B/g, ";").replace(/%25/g, "%");
+    if (!name || name.length > 260 || !/^[0-9]{1,20}$/.test(f[1])) return null;
+    if (f[2] !== "" && !kHash64.test(f[2])) return null;
+    out.push({ name, size: f[1], hash: f[2] });
+  }
+  return out;
+}
+
+// A hello's layer-1 fields -> { compat } or { why } (a refusal).
+function readCompat(msg) {
+  const hex = (v) => (v === "" || (typeof v === "string" && kHash64.test(v)) ? v : null);
+  const c = {
+    engine: clean(msg.engine, 32),
+    engineVer: clean(msg.engineVer, 32),
+    simBuild: hex(msg.simBuild),
+    dataHash: hex(msg.dataHash),
+    mods: typeof msg.mods === "string" ? msg.mods : "",
+    exts: clean(msg.exts, 512),
+  };
+  if (!c.engine) return { why: "the game did not say what it is (update the game)" };
+  if (c.simBuild === null || c.dataHash === null) return { why: "bad build or data hash" };
+  if (decodeMods(c.mods) === null) return { why: "bad mod list" };
+  if (!Number.isInteger(msg.maxPlayers) || msg.maxPlayers < kSeats) {
+    return { why: `this game cannot share a room of ${kSeats} towns` };
+  }
+  return { compat: c };
+}
+
+// The separate-town profile's rules: what refuses `mine` (one string, or null) and what it is warned about.
+function compareCompat(mine, theirs, peer) {
+  if (mine.dataHash && theirs.dataHash && mine.dataHash !== theirs.dataHash) {
+    return {
+      refuse: `your Banished game data is not the same as ${peer}'s, so your maps would not match. ` +
+        "Both games need the same Banished 1.0.7 files (copy the WinData folder from one computer to the other).",
+      warn: [],
+    };
+  }
+  const warn = [];
+  if (mine.engine !== theirs.engine || mine.engineVer !== theirs.engineVer) {
+    warn.push(`${peer} plays ${theirs.engine} ${theirs.engineVer}; you play ${mine.engine} ${mine.engineVer}.`);
+  }
+  if (mine.simBuild && theirs.simBuild && mine.simBuild !== theirs.simBuild) {
+    warn.push(`${peer}'s game is another build (for example Windows and Mac). The towns can still play; ` +
+      "say so if something looks out of place.");
+  }
+  if (mine.mods !== theirs.mods) {
+    const a = decodeMods(mine.mods) || [];
+    const b = decodeMods(theirs.mods) || [];
+    const key = (m) => m.name.toLowerCase();
+    const inB = new Map(b.map((m) => [key(m), m]));
+    const inA = new Map(a.map((m) => [key(m), m]));
+    const onlyMine = a.filter((m) => !inB.has(key(m))).map((m) => m.name);
+    const onlyTheirs = b.filter((m) => !inA.has(key(m))).map((m) => m.name);
+    const other = a.filter((m) => {
+      const t = inB.get(key(m));
+      return t && (t.size !== m.size || (t.hash && m.hash && t.hash !== m.hash));
+    }).map((m) => m.name);
+    const parts = [];
+    if (onlyMine.length) parts.push(`only yours: ${onlyMine.slice(0, 5).join(", ")}`);
+    if (onlyTheirs.length) parts.push(`only ${peer}'s: ${onlyTheirs.slice(0, 5).join(", ")}`);
+    if (other.length) parts.push(`another version: ${other.slice(0, 5).join(", ")}`);
+    if (!parts.length) parts.push("the same mods in another order");
+    warn.push(`Your mods and ${peer}'s differ (${parts.join("; ")}).`);
+  }
+  return { refuse: null, warn };
+}
+
 async function passwordHash(room, pass) {
   const bytes = new TextEncoder().encode(`openba-neighbour:${room}:${pass}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -154,8 +265,9 @@ export class Room {
     try { ws.send(JSON.stringify(msg)); } catch { /* the line is gone */ }
   }
 
+  // close = a refusal: the line is closed and the game told not to retry ("fatal").
   fail(ws, why, close) {
-    this.send(ws, { t: "error", why });
+    this.send(ws, close ? { t: "error", why, fatal: true } : { t: "error", why });
     if (close) { try { ws.close(4000, why.slice(0, 120)); } catch { /* already closed */ } }
   }
 
@@ -401,11 +513,20 @@ export class Room {
     if (typeof msg.hash !== "string" || !/^[0-9a-fA-F]{1,32}$/.test(msg.hash)) return this.fail(ws, "bad world hash", false);
     const meta = await this.meta();
     meta.hashes = meta.hashes || [null, null];
-    meta.hashes[a.seat] = msg.hash.toLowerCase();
-    await this.ctx.storage.put("meta", meta);
+    const mine = msg.hash.toLowerCase();
     const other = meta.hashes[1 - a.seat];
+    if (other && other !== mine) {
+      // Another land: refused (the room's land is the one the other town already built).
+      const peer = meta.seats[1 - a.seat] || "your neighbour";
+      this.send(ws, { t: "hashCheck", same: false, mine, theirs: other });
+      for (const p of this.socketsFor(1 - a.seat)) this.send(p, { t: "hashCheck", same: false, mine: other, theirs: mine });
+      return this.fail(ws, `your map is not the same land as ${peer}'s: the two games built different worlds ` +
+        "from the same seed, so nothing shared would line up. This town cannot play in this room.", true);
+    }
+    meta.hashes[a.seat] = mine;
+    await this.ctx.storage.put("meta", meta);
     if (!other) return;   // the neighbour has not built its map yet; it will be told when it does
-    const same = other === meta.hashes[a.seat];
+    const same = true;
     const report = (seat) => ({ t: "hashCheck", same, mine: meta.hashes[seat], theirs: meta.hashes[1 - seat] });
     this.send(ws, report(a.seat));
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, report(1 - a.seat));
@@ -419,15 +540,40 @@ export class Room {
     if (!name) return this.fail(ws, "set neighbour.name in settings.cfg", true);
 
     const meta = await this.meta();
+    meta.tokens = meta.tokens || new Array(kSeats).fill(null);
+    meta.compat = meta.compat || new Array(kSeats).fill(null);
     if (msg.join === true && !meta.created) return this.fail(ws, `there is no room called "${a.room}"`, true);
     const hash = await passwordHash(a.room, pass);
     if (meta.passHash === null) meta.passHash = hash;              // the first town sets it
     else if (meta.passHash !== hash) return this.fail(ws, "wrong room password", true);
+    const read = readCompat(msg);
+    if (read.why) return this.fail(ws, read.why, true);
 
-    let seat = meta.seats.indexOf(name);                            // a town coming back
-    if (seat < 0) seat = meta.seats.indexOf(null);                  // a new town
-    if (seat < 0) return this.fail(ws, `room "${a.room}" already has two towns`, true);
+    // The seat: by the town's token, never by its name (interop spec layer 0).
+    let seat = -1;
+    if (typeof msg.token === "string" && kTokenHex.test(msg.token)) {
+      seat = meta.tokens.indexOf(await tokenHash(a.room, msg.token));   // a town coming back
+    }
+    let issue = false;
+    if (seat < 0) {
+      // A room from before seat tokens knows its towns by name: each named seat is handed its token once.
+      seat = meta.seats.findIndex((n, i) => n === name && meta.tokens[i] === null);
+      if (seat < 0) seat = meta.seats.findIndex((n, i) => n === null && meta.tokens[i] === null);   // a new town
+      if (seat < 0) return this.fail(ws, `room "${a.room}" already has two towns`, true);
+      issue = true;
+    }
+    const other = 1 - seat;
+    const otherName = meta.seats[other] || "your neighbour";
+    const theirs = meta.compat[other];
+    const verdict = theirs ? compareCompat(read.compat, theirs, otherName) : { refuse: null, warn: [] };
+    if (verdict.refuse) return this.fail(ws, verdict.refuse, true);
+    let token = null;
+    if (issue) {
+      token = randomToken();
+      meta.tokens[seat] = await tokenHash(a.room, token);
+    }
     meta.seats[seat] = name;
+    meta.compat[seat] = read.compat;
     await this.ctx.storage.put("meta", meta);
 
     // The same town connecting again (a reconnect): the older line goes.
@@ -438,10 +584,10 @@ export class Room {
     a.name = name;
     ws.serializeAttachment(a);
 
-    const other = 1 - seat;
     const peerName = meta.seats[other] || "";
     const peerOnline = this.socketsFor(other).length > 0;
     const welcome = { t: "welcome", seat, peer: peerName, online: peerOnline, created: !!meta.created };
+    if (token) welcome.token = token;   // keep it: the next hello sends it back
     if (meta.created) {
       welcome.seed = meta.seed;
       welcome.creator = meta.creator;
@@ -449,6 +595,12 @@ export class Room {
     }
     this.send(ws, welcome);
     await this.publish(a.room, meta);
+    // What only warns (another build, other mods): told to both towns.
+    for (const w of verdict.warn) this.send(ws, { t: "compat", warn: w });
+    if (theirs && verdict.warn.length) {
+      const back = compareCompat(theirs, read.compat, name);
+      for (const peer of this.socketsFor(other)) for (const w of back.warn) this.send(peer, { t: "compat", warn: w });
+    }
 
     // What it missed: the neighbour's lines newer than the last one it saw.
     const lastSeq = Number.isInteger(msg.lastSeq) && msg.lastSeq > 0 ? msg.lastSeq : 0;

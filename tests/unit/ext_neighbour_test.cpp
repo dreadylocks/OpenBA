@@ -7,8 +7,11 @@
 // ============================================================================
 #include "unit.h"
 
+#include "ext/neighbour/handshake.h"
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
+#include "ext/neighbour/save_state.h"
+#include "ext/savetail.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -99,6 +102,7 @@ UNIT_TEST(ext_neighbour_saved_state) {
     s.outbox.push_back({"a-1", "goods", "Template/Fish.rsc:25", ""});
     s.received = {"x-1", "x-2"};
     s.waiting.push_back({"x-3", "family", "30.0/1/0;6.5/0/1", "Ann"});
+    s.token = "0123456789abcdef0123456789abcdef";
     const std::vector<uint8_t> bytes = Neighbour::EncodeState(s);
     Neighbour::SavedState back;
     CHECK(Neighbour::DecodeState(Neighbour::kPayloadFormat, bytes, back));
@@ -107,6 +111,7 @@ UNIT_TEST(ext_neighbour_saved_state) {
     CHECK_EQ(static_cast<int>(back.outbox.size()), 1);
     CHECK_EQ(static_cast<int>(back.received.size()), 2);
     CHECK_EQ(static_cast<int>(back.waiting.size()), 1);
+    CHECK_STREQ(back.token.c_str(), "0123456789abcdef0123456789abcdef");
     if (back.waiting.size() == 1) {
         CHECK_STREQ(back.waiting[0].body.c_str(), "30.0/1/0;6.5/0/1");
         CHECK_STREQ(back.waiting[0].from.c_str(), "Ann");
@@ -405,21 +410,41 @@ UNIT_TEST(ext_neighbour_lobby_list_and_join) {
     net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"peer\":\"Ann\",\"online\":true,\"created\":true,\"creator\":\"Ann\","
                             "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
     Neighbour::RoomJoin j;
-    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", j, why, 3000));
+    Neighbour::LocalInfo info;
+    info.engineVersion = "1.0.0";
+    info.simBuild = "00000000000000aa";
+    info.dataHash = "00000000000000bb";
+    info.mods.push_back({"Fields.pkm", 1234, true, 0xc0ffee});
+    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
     CHECK_EQ(j.seat, 1);
+    CHECK(j.token.empty());   // this relay gave none
     CHECK_EQ(j.settings.seed, 77);
     CHECK_STREQ(j.creator.c_str(), "Ann");
     {
         std::lock_guard<std::mutex> lock(net.mu);
         CHECK(!net.sent.empty() && net.sent[0].find("\"join\":true") != std::string::npos);
+        // The layer-1 fields went with it (handshake.h).
+        CHECK(!net.sent.empty() && net.sent[0].find("\"v\":2") != std::string::npos);
+        CHECK(!net.sent.empty() && net.sent[0].find("\"dataHash\":\"00000000000000bb\"") != std::string::npos);
+        CHECK(!net.sent.empty() && net.sent[0].find("\"mods\":\"Fields.pkm|1234|0000000000c0ffee\"") != std::string::npos);
+        CHECK(!net.sent.empty() && net.sent[0].find("\"maxPlayers\":2") != std::string::npos);
+        net.sent.clear();
     }
+    // A welcome with a seat token: kept; a malformed one refuses the answer.
+    net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"token\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\",\"created\":true,"
+                            "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
+    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
+    CHECK_STREQ(j.token.c_str(), "a1b2c3d4e5f60718293a4b5c6d7e8f90");
+    net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"token\":\"NOT-HEX\",\"created\":true,"
+                            "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
 
     // A refusal ends the conversation with the relay's reason; a room without settings is refused too.
     net.toReceive.push_back("{\"t\":\"error\",\"why\":\"wrong room password\"}");
-    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "bad", "Bob", j, why, 3000));
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "bad", "Bob", info, j, why, 3000));
     CHECK_STREQ(why.c_str(), "wrong room password");
     net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":0,\"peer\":\"\",\"online\":false,\"created\":false}");
-    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "old", "pw", "Bob", j, why, 3000));
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "old", "pw", "Bob", info, j, why, 3000));
     CHECK(why.find("lobby") != std::string::npos);
 
     // No answer: a timeout, not a hang.
@@ -442,4 +467,95 @@ UNIT_TEST(ext_neighbour_tile_rects) {
     std::string many;
     for (int i = 0; i < Neighbour::kMaxRects + 1; ++i) many += (i ? ";" : "") + std::string("1,1,1,1");
     CHECK(!Neighbour::DecodeRects(many, r));
+}
+
+// handshake.h: xxHash64 against the reference implementation's values (python-xxhash 3.x), whole and
+// fed in pieces; the mod list's wire form; the layer-1 fields of a hello.
+UNIT_TEST(ext_neighbour_xxh64) {
+    CHECK(Neighbour::Xxh64Of("", 0) == 0xef46db3751d8e999ull);
+    CHECK(Neighbour::Xxh64Of("a", 1) == 0xd24ec4f1a98c6e5bull);
+    CHECK(Neighbour::Xxh64Of("abc", 3) == 0x44bc2cf5ad770999ull);
+    CHECK(Neighbour::Xxh64Of("abc", 3, 1) == 0xbea9ca8199328908ull);
+    const char* fox = "The quick brown fox jumps over the lazy dog";
+    CHECK(Neighbour::Xxh64Of(fox, 43) == 0x0b242d361fda71bcull);
+    std::vector<uint8_t> big;
+    for (int r = 0; r < 3; ++r)
+        for (int i = 0; i < 256; ++i) big.push_back(static_cast<uint8_t>(i));
+    CHECK(Neighbour::Xxh64Of(big.data(), big.size()) == 0x8e03c838c596036full);
+    // Streaming in odd pieces gives the same digest.
+    for (size_t piece : {1u, 7u, 31u, 32u, 33u, 100u}) {
+        Neighbour::Xxh64 x(0);
+        for (size_t at = 0; at < big.size(); at += piece)
+            x.Update(big.data() + at, at + piece <= big.size() ? piece : big.size() - at);
+        CHECK(x.Digest() == 0x8e03c838c596036full);
+    }
+    CHECK_STREQ(Neighbour::Hex64(0x0b242d361fda71bcull).c_str(), "0b242d361fda71bc");
+}
+
+UNIT_TEST(ext_neighbour_mod_list) {
+    std::vector<Neighbour::ModEntry> mods = {{"Fields.pkm", 1234, true, 0xc0ffee},
+                                             {"odd|name;100%.pkm", 9, false, 0}};
+    const std::string wire = Neighbour::EncodeMods(mods);
+    CHECK_STREQ(wire.c_str(), "Fields.pkm|1234|0000000000c0ffee;odd%7Cname%3B100%25.pkm|9|");
+    std::vector<Neighbour::ModEntry> back;
+    CHECK(Neighbour::DecodeMods(wire, back));
+    CHECK_EQ(static_cast<int>(back.size()), 2);
+    if (back.size() == 2) {
+        CHECK_STREQ(back[1].name.c_str(), "odd|name;100%.pkm");
+        CHECK(back[0].hasHash && back[0].hash == 0xc0ffeeull && back[0].size == 1234);
+        CHECK(!back[1].hasHash && back[1].size == 9);
+    }
+    CHECK(Neighbour::DecodeMods("", back) && back.empty());
+    const char* bad[] = {"a.pkm|12", "a.pkm|x|", "a.pkm|12|zz", "|12|", "a.pkm|12|123", "a%41.pkm|1|",
+                         "a.pkm|99999999999999999999999|"};
+    for (const char* b : bad) CHECK(!Neighbour::DecodeMods(b, back));
+    CHECK_STREQ(Neighbour::EncodeExts({{"neighbour", 4}, {"fast_paths", 1}}).c_str(), "neighbour:4,fast_paths:1");
+
+    Neighbour::LocalInfo info;
+    info.engineVersion = "1.0.0";
+    info.simBuild = "1111111111111111";
+    info.dataHash = "";
+    info.exts = {{"neighbour", 4}};
+    Message hello("hello");
+    Neighbour::AddHandshake(hello, info);
+    std::string v;
+    CHECK(hello.Get("engine", v) && v == "openba");
+    CHECK(hello.Get("simBuild", v) && v == "1111111111111111");
+    CHECK(hello.Get("dataHash", v) && v.empty());
+    CHECK(hello.Get("exts", v) && v == "neighbour:4");
+    int64_t n = 0;
+    CHECK(hello.GetInt("maxPlayers", n) && n == 2);
+    CHECK(Neighbour::ValidToken("") && Neighbour::ValidToken("0123456789abcdef"));
+    CHECK(!Neighbour::ValidToken("0123456789abcde") && !Neighbour::ValidToken("0123456789ABCDEF"));
+}
+
+// save_state.h: the save tail's codec for ext.neighbour round-trips the state, refuses a damaged
+// payload (the save tail then refuses the save), and its reset empties it.
+UNIT_TEST(ext_neighbour_save_codec) {
+    const Ext::SaveTail::StateCodec& c = Neighbour::Codec();
+    CHECK_STREQ(c.id, "neighbour");
+    CHECK(Ext::SaveTail::FindCodec("neighbour") == &c);   // registered in state_codecs.cpp
+    {
+        std::lock_guard<std::mutex> lock(Neighbour::SavedMutex());
+        Neighbour::Saved() = Neighbour::SavedState();
+        Neighbour::Saved().room = "hill";
+        Neighbour::Saved().token = "feedfacefeedface";
+    }
+    std::vector<uint8_t> payload;
+    c.encode(payload);
+    c.reset();
+    {
+        std::lock_guard<std::mutex> lock(Neighbour::SavedMutex());
+        CHECK(Neighbour::Saved().room.empty() && !Neighbour::LoadedFromSave());
+    }
+    CHECK(c.decode(payload.data(), payload.size(), Neighbour::kPayloadFormat));
+    {
+        std::lock_guard<std::mutex> lock(Neighbour::SavedMutex());
+        CHECK_STREQ(Neighbour::Saved().room.c_str(), "hill");
+        CHECK_STREQ(Neighbour::Saved().token.c_str(), "feedfacefeedface");
+        CHECK(Neighbour::LoadedFromSave());
+    }
+    std::vector<uint8_t> cut(payload.begin(), payload.end() - 1);
+    CHECK(!c.decode(cut.data(), cut.size(), Neighbour::kPayloadFormat));
+    c.reset();
 }

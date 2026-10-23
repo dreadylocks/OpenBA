@@ -245,7 +245,7 @@ const Entry kEntries[] = {
       "Connects this town to a friend's town through a relay server (set neighbour.server, "
       "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
       "appear in the event log. Press N in game for the Neighbour panel: chat, send goods, send a family.",
-      3, [](State& s) -> bool& { return s.ext.neighbour; } },
+      4, [](State& s) -> bool& { return s.ext.neighbour; } },   // = Neighbour::kPayloadFormat (protocol.h)
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.

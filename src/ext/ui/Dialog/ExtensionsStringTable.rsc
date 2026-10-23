@@ -68,6 +68,7 @@ StringTable resource
 		{ String _name = "LobbyRoom";			String _text = "Room name"; }
 		{ String _name = "LobbyPassword";		String _text = "Password"; }
 		{ String _name = "LobbyTown";			String _text = "Your town"; }
+		{ String _name = "LobbyRelay";			String _text = "Relay"; }
 		{ String _name = "LobbyRefresh";		String _text = "Refresh"; }
 		{ String _name = "LobbyCreate";			String _text = "Create room"; }
 		{ String _name = "LobbyJoin";			String _text = "Join"; }

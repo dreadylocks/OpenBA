@@ -8,6 +8,12 @@
 //                           [--pass secret] [--name "Fake Town"]
 //                           [--say "hello"]... [--every 30 "a line repeated every 30 s"]
 //                           [--quit-after 10] [--send-goods "path:count"] [--send-family "30/1/0;28/0/0;6/0/1"]
+//                           [--token <seat token>] [--data-hash <16 hex>] [--mods "name|size|;..."]
+//
+// Protocol 2 (docs/fork/NEIGHBOUR_PROTOCOL.md): the relay seats a town by its token, not its name.
+// The first join prints the token it was given; pass it with --token to come back to the same seat.
+// --data-hash defaults to empty ("unknown"), so the relay cannot refuse this pretend town for other
+// retail data; give the game's (its log prints it) to test that refusal.
 //
 // --say lines are sent right after joining. --quit-after leaves after that many seconds
 // (handy in scripts). Ctrl+C leaves. Parcels it receives (goods, families) are printed and
@@ -17,7 +23,8 @@
 import readline from "node:readline";
 
 function parseArgs(argv) {
-  const o = { server: "ws://127.0.0.1:8787", room: "neighbours", pass: "", name: "Fake Town", say: [], every: null, quitAfter: 0, lastSeq: 0, parcels: [] };
+  const o = { server: "ws://127.0.0.1:8787", room: "neighbours", pass: "", name: "Fake Town", say: [], every: null, quitAfter: 0, lastSeq: 0, parcels: [],
+              token: "", dataHash: "", mods: "" };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${k} needs a value`); return argv[++i]; };
@@ -31,6 +38,9 @@ function parseArgs(argv) {
     else if (k === "--last-seq") o.lastSeq = Number(next());
     else if (k === "--send-goods") o.parcels.push({ kind: "goods", body: next() });
     else if (k === "--send-family") o.parcels.push({ kind: "family", body: next() });
+    else if (k === "--token") o.token = next();
+    else if (k === "--data-hash") o.dataHash = next();
+    else if (k === "--mods") o.mods = next();
     else if (k === "--help" || k === "-h") { console.log("see the comment at the top of fake_neighbour.mjs"); process.exit(0); }
     else throw new Error(`unknown argument ${k}`);
   }
@@ -59,7 +69,11 @@ const sendParcel = (kind, body) => {
 };
 
 ws.addEventListener("open", () => {
-  send({ t: "hello", v: 1, room: opt.room, pass: opt.pass, name: opt.name, lastSeq: opt.lastSeq });
+  const hello = { t: "hello", v: 2, room: opt.room, pass: opt.pass, name: opt.name, lastSeq: opt.lastSeq,
+                  engine: "fake_neighbour", engineVer: "2", simBuild: "", dataHash: opt.dataHash, mods: opt.mods,
+                  exts: "", maxPlayers: 2 };
+  if (opt.token) hello.token = opt.token;
+  send(hello);
 });
 
 ws.addEventListener("message", (ev) => {
@@ -69,6 +83,7 @@ ws.addEventListener("message", (ev) => {
     case "welcome":
       joined = true;
       log(`joined room "${opt.room}" in seat ${m.seat}; neighbour: ${m.peer ? `${m.peer} (${m.online ? "here" : "away"})` : "nobody yet"}`);
+      if (m.token) log(`seat token: ${m.token}  (come back to this seat with --token ${m.token})`);
       for (const text of opt.say) { send({ t: "chat", text }); log(`me: ${text}`); }
       for (const p of opt.parcels) sendParcel(p.kind, p.body);
       if (opt.every && opt.every.seconds > 0) {
@@ -77,7 +92,8 @@ ws.addEventListener("message", (ev) => {
       break;
     case "chat": log(`${m.from} (#${m.seq}): ${m.text}`); break;
     case "peer": log(`${m.name} has ${m.online ? "arrived" : "left"}`); break;
-    case "error": log(`relay error: ${m.why}`); break;
+    case "error": log(`relay error: ${m.why}${m.fatal ? " (refused)" : ""}`); break;
+    case "compat": log(`warning: ${m.warn}`); break;
     case "parcel":
       log(`${m.from} sent a parcel ${m.id} (${m.kind}): ${m.body}`);
       send({ t: "ack", id: m.id });

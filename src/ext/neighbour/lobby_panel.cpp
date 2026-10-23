@@ -73,8 +73,9 @@ std::string Trim(const std::string& s) {
     return s.substr(a, b - a);
 }
 
-// The relay: settings.cfg neighbour.server when set, else the built-in one.
-std::string Server() {
+// settings.cfg neighbour.server: the relay box's starting text. There is no built-in relay
+// (interop spec layer 0: no default address tied to one person's account).
+std::string SettingsServer() {
     const ::IO::Persistence* p = ::IO::Persistence::_singleton;
     if (p != nullptr) {
         System::String k("neighbour.server");
@@ -82,8 +83,11 @@ std::string Server() {
         if (node != nullptr && node->element.value._data != nullptr && node->element.value._data[0] != '\0')
             return node->element.value._data;
     }
-    return DefaultServer();
+    return std::string();
 }
+
+// What the player last typed in the relay box this session (the box starts from it next time).
+std::string s_typedRelay;
 
 template <class T>
 T* LoadAs(const std::string& path) {
@@ -108,6 +112,9 @@ public:
         if (UI::Element* e = Find(this, "buttonCreate")) e->SetElementId(kIdCreate);
         if (UI::Element* e = Find(this, "buttonJoin")) e->SetElementId(kIdJoin);
         _list = FindElement(System::String("roomList"));
+        // The relay: what was typed earlier this session, else settings.cfg's.
+        const std::string relay = s_typedRelay.empty() ? SettingsServer() : s_typedRelay;
+        if (UI::EditElement* r = AsEdit(Find(this, "editRelay"))) r->SetText(System::String(relay.c_str()));
         // Your town: what settings.cfg names, as a starting point.
         const ::IO::Persistence* p = ::IO::Persistence::_singleton;
         if (p != nullptr) {
@@ -143,10 +150,22 @@ private:
 
     void Status(const std::string& s) { SetText(Find(this, "textStatus"), s); }
 
+    // The relay box (wss://... or ws://...), remembered for this session; "" with a hint when empty.
+    std::string Server() {
+        const std::string relay = Trim(EditText(Find(this, "editRelay")));
+        s_typedRelay = relay;
+        if (relay.empty())
+            Status("Type the relay's address in the Relay box (wss://... for an internet relay, "
+                   "ws://<address>:8787 for a test relay), then Refresh.");
+        return relay;
+    }
+
     void Refresh() {
         std::string why;
         std::vector<RoomInfo> rooms;
-        const bool ok = ListRooms(&MakePlatformTransport, Server(), rooms, why);
+        const std::string server = Server();
+        if (server.empty()) return;
+        const bool ok = ListRooms(&MakePlatformTransport, server, rooms, why);
         if (ok) _rooms = rooms;
         Rebuild();
         std::string line = ok ? (_rooms.empty() ? std::string("No rooms yet: create one.")
@@ -207,9 +226,11 @@ private:
         if (!Fields(room, pass, town)) return false;
         for (const RoomInfo& r : _rooms)
             if (r.name == room) { Status("A room called \"" + room + "\" already exists: pick another name, or Join it."); return false; }
+        const std::string server = Server();
+        if (server.empty()) return false;
         LobbyStart s;
         s.create = true;
-        s.server = Server();
+        s.server = server;
         s.room = room;
         s.pass = pass;
         s.town = town;
@@ -225,10 +246,12 @@ private:
     bool Join() {
         std::string room, pass, town;
         if (!Fields(room, pass, town)) return false;
+        const std::string server = Server();
+        if (server.empty()) return false;
         Status("Joining \"" + room + "\"...");
         RoomJoin j;
         std::string why;
-        if (!JoinRoom(&MakePlatformTransport, Server(), room, pass, town, j, why)) {
+        if (!JoinRoom(&MakePlatformTransport, server, room, pass, town, LocalInfoNow(), j, why)) {
             Status("Could not join \"" + room + "\": " + why);
             return false;
         }
@@ -242,11 +265,12 @@ private:
         }
         LobbyStart s;
         s.create = false;
-        s.server = Server();
+        s.server = server;
         s.room = room;
         s.pass = pass;
         s.town = town;
         s.seat = j.seat;
+        s.token = j.token;
         s.settings = j.settings;
         SetLobbyStart(s);
         fprintf(stderr, "[Neighbour] lobby: joining room \"%s\" as \"%s\" (seat %d, seed %lld, %s)\n", room.c_str(),

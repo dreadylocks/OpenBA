@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "ext/neighbour/handshake.h"
 #include "ext/neighbour/link.h"
 
 namespace Neighbour {
@@ -37,24 +38,27 @@ struct RoomInfo {
 // The result of a create or a join.
 struct RoomJoin {
     int          seat = -1;          // 0 = the creator's town, 1 = the joiner's
+    std::string  token;              // this town's seat token (protocol.h ValidToken); keep it
     std::string  creator, peer;      // the neighbour town, if any
     RoomSettings settings;
     bool         created = false;    // the room carries settings (a lobby room)
 };
 
-// The default relay (the user's Cloudflare Worker); settings.cfg neighbour.server overrides it.
-const char* DefaultServer();
+// There is no built-in relay (interop spec layer 0: no default address tied to one person's
+// account): the relay is settings.cfg neighbour.server or what the player types in the lobby.
 
 // `server` is a ws:// or wss:// base (RoomUrl / LobbyUrl add the path). Each returns false with
 // a short reason in `why` on any failure: no answer, a refusal from the relay, a bad reply.
+// `info` is this game's layer-1 facts (handshake.h), sent with the create / hello: the relay
+// refuses a join whose retail data differs from the room's.
 bool ListRooms(TransportFactory factory, const std::string& server, std::vector<RoomInfo>& out,
                std::string& why, uint32_t timeoutMs = 8000);
 bool CreateRoom(TransportFactory factory, const std::string& server, const std::string& room,
                 const std::string& pass, const std::string& town, const RoomSettings& settings,
-                RoomJoin& out, std::string& why, uint32_t timeoutMs = 8000);
+                const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs = 8000);
 bool JoinRoom(TransportFactory factory, const std::string& server, const std::string& room,
-              const std::string& pass, const std::string& town, RoomJoin& out, std::string& why,
-              uint32_t timeoutMs = 8000);
+              const std::string& pass, const std::string& town, const LocalInfo& info, RoomJoin& out,
+              std::string& why, uint32_t timeoutMs = 8000);
 
 std::string LobbyUrl(const std::string& server);
 // The settings read back from a welcome or a room line; false when they are missing or bad.

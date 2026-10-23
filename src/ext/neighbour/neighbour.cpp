@@ -12,6 +12,7 @@
 #include <mutex>
 #include <vector>
 
+#include "ext/neighbour/handshake.h"   // the layer-1 hello fields, LocalInfoNow
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/town.h"
@@ -57,6 +58,7 @@ std::unique_ptr<Link> s_link;
 Config                s_config;
 bool                  s_announcedOffline = false;   // one "cannot reach" line per outage
 bool                  s_everConnected = false;
+bool                  s_refused = false;   // the relay refused this town for good (a "fatal" error)
 bool                  s_joined = false;      // a welcome arrived on the current line
 std::string           s_peerName;            // the neighbour town, as the relay names it
 bool                  s_peerOnline = false;
@@ -91,8 +93,7 @@ std::string Setting(const char* key) {
 
 Config ReadConfig() {
     Config c;
-    c.server   = Setting("neighbour.server");
-    if (c.server.empty()) c.server = DefaultServer();
+    c.server   = Setting("neighbour.server");   // no default: interop spec layer 0
     c.room     = Sanitize(Setting("neighbour.room"), 64);
     c.password = Setting("neighbour.password");
     c.name     = Sanitize(Setting("neighbour.name"), kMaxNameChars);
@@ -117,9 +118,11 @@ void Post(const std::string& text, uint32_t colour) {
 
 Message Hello() {
     int64_t lastSeq = 0;
+    std::string token;
     {
         std::lock_guard<std::mutex> lock(s_savedMu);
         lastSeq = s_saved.lastSeq;
+        token = s_saved.token;
     }
     Message m("hello");
     m.SetInt("v", kProtocolVersion)
@@ -127,6 +130,8 @@ Message Hello() {
      .Set("pass", s_config.password)
      .Set("name", s_config.name)
      .SetInt("lastSeq", lastSeq);
+    if (!token.empty()) m.Set("token", token);   // our seat (the relay never seats a town by name)
+    AddHandshake(m, LocalInfoNow());
     return m;
 }
 
@@ -297,6 +302,16 @@ void OnMessage(const Message& m) {
         const std::string peer = Sanitize(m.GetOr("peer", ""), kMaxNameChars);
         bool online = false;
         m.GetBool("online", online);
+        const std::string token = m.GetOr("token", "");
+        if (!token.empty() && ValidToken(token)) {   // a first join: keep the seat's token (saved)
+            bool changed = false;
+            {
+                std::lock_guard<std::mutex> lock(s_savedMu);
+                changed = s_saved.token != token;
+                s_saved.token = token;
+            }
+            if (changed && s_link) s_link->SetHello(Hello());
+        }
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
@@ -341,9 +356,20 @@ void OnMessage(const Message& m) {
             for (size_t i = 0; i < out.size(); ++i)
                 if (out[i].id == id) { out.erase(out.begin() + static_cast<long>(i)); break; }
         }
+    } else if (m.type == "compat") {
+        // A difference the separate-town profile only warns about (a different build or mod list).
+        Post(Sanitize(m.GetOr("warn", "Your game and your neighbour's differ."), kMaxChatChars), kColourProblem);
     } else if (m.type == "error") {
+        bool fatal = false;
+        m.GetBool("fatal", fatal);
         Post("The neighbour server says: " + Sanitize(m.GetOr("why", "an unknown problem"), kMaxChatChars),
              kColourProblem);
+        if (fatal && s_link) {   // refused for good (another game's data, another land): stop retrying
+            s_refused = true;
+            SharedMap::End();
+            s_link->Stop();
+            Post("Neighbour towns stopped for this game.", kColourProblem);
+        }
     }
     // "pong" and anything newer: ignored.
 }
@@ -442,12 +468,14 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
     rs.terrain = path(terrainGen);
     rs.climate = path(climateGen);
     RoomJoin j;
-    if (!CreateRoom(&MakePlatformTransport, s_pending.server, s_pending.room, s_pending.pass, s_pending.town, rs, j, why)) {
+    if (!CreateRoom(&MakePlatformTransport, s_pending.server, s_pending.room, s_pending.pass, s_pending.town, rs,
+                    LocalInfoNow(), j, why)) {
         fprintf(stderr, "[Neighbour] creating room \"%s\" refused: %s\n", s_pending.room.c_str(), why.c_str());
         ClearLobbyStart();
         return false;
     }
     s_pending.seat = j.seat;
+    s_pending.token = j.token;
     s_pending.settings = rs;
     fprintf(stderr, "[Neighbour] room \"%s\" created (seed %u, %s)\n", s_pending.room.c_str(), seed,
             DescribeSettings(rs).c_str());
@@ -580,10 +608,11 @@ void SelectForGame() {
     {
         std::lock_guard<std::mutex> lock(s_savedMu);
         if (s_lobbyGame) {   // a new game from the lobby: its room, its password, its name
-            s_config.server = s_lobby.server.empty() ? std::string(DefaultServer()) : s_lobby.server;
+            s_config.server = s_lobby.server;
             s_config.room = s_lobby.room;
             s_config.password = s_lobby.pass;
             s_config.name = s_lobby.town;
+            s_saved.token = s_lobby.token;
         } else if (s_loadedFromSave && !s_saved.pass.empty() && !s_saved.room.empty()) {
             // A lobby game loaded from its save: it knows its own way back in.
             if (!s_saved.server.empty()) s_config.server = s_saved.server;
@@ -609,12 +638,14 @@ void SelectForGame() {
                     s_saved.room.c_str(), s_config.room.c_str(), static_cast<unsigned>(s_saved.outbox.size()));
             s_saved.lastSeq = 0;   // another room's sequence numbers mean nothing here
             s_saved.outbox.clear();
+            s_saved.token.clear();   // and its seat token is the old room's
         }
         s_saved.room = s_config.room;
     }
     s_active = true;
     s_announcedOffline = false;
     s_everConnected = false;
+    s_refused = false;
     s_joined = false;
     s_peerName.clear();
     s_peerOnline = false;

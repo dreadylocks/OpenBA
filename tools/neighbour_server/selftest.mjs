@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // An end-to-end check of the relay (no game needed): two pretend towns join a fresh room,
 // swap chat lines, one leaves and misses a line, comes back and gets it replayed; a wrong
-// password and a third town are refused. Exit 0 = everything held.
+// password and a third town are refused. Protocol 2: seats by token, the layer-1 handshake (a
+// different retail data hash or land refused, a different build or mod list warned). Exit 0 =
+// everything held.
 //
 //   npm run dev            (in one terminal: the local relay on 127.0.0.1:8787)
 //   node selftest.mjs ws://127.0.0.1:8787
@@ -9,15 +11,26 @@
 const server = (process.argv[2] || "ws://127.0.0.1:8787").replace(/\/+$/, "");
 const room = `selftest-${Date.now()}`;
 let failures = 0;
+// Every hello / create carries the layer-1 fields (docs/fork/NEIGHBOUR_PROTOCOL.md "hello").
+const HS = { v: 2, engine: "openba", engineVer: "1.0.0", simBuild: "1111111111111111", dataHash: "2222222222222222",
+             mods: "", exts: "neighbour:4", maxPlayers: 2 };
+// The seat tokens the relay hands out, by room and town name, sent back on the next hello like a game does.
+const tokens = new Map();
+const keep = (roomName, name, m) => { if (m.t === "welcome" && m.token) tokens.set(`${roomName}/${name}`, m.token); };
+const withToken = (roomName, first) => {
+  const t = tokens.get(`${roomName}/${first.name}`);
+  return t && first.t === "hello" && !("token" in first) ? { ...first, token: t } : first;   // an explicit token stays
+};
 const check = (ok, what) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) failures++; };
 
 function town(name, pass, lastSeq = 0) {
   const ws = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
   const inbox = [];
   const waiters = [];
-  ws.addEventListener("open", () => ws.send(JSON.stringify({ t: "hello", v: 1, room, pass, name, lastSeq })));
+  ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(room, { ...HS, t: "hello", room, pass, name, lastSeq }))));
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
+    keep(room, name, m);
     inbox.push(m);
     for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
   });
@@ -43,6 +56,7 @@ const tryWait = async (p) => { try { return await p; } catch { return null; } };
 const a = town("Ashford", "pw");
 const wa = await tryWait(a.wait((m) => m.t === "welcome"));
 check(wa && wa.seat === 0 && wa.peer === "", "the first town gets seat 0 and an empty room");
+check(wa && /^[0-9a-f]{32}$/.test(wa.token || ""), "the first join hands the town a seat token");
 
 const b = town("Brookvale", "pw");
 const wb = await tryWait(b.wait((m) => m.t === "welcome"));
@@ -108,14 +122,16 @@ function opener(roomName, first) {
   const ws = new WebSocket(`${server}/room/${encodeURIComponent(roomName)}`);
   const inbox = [];
   const waiters = [];
-  ws.addEventListener("open", () => ws.send(JSON.stringify(first)));
+  ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(roomName, { ...HS, ...first }))));
+  const closed = new Promise((r) => ws.addEventListener("close", (ev) => r(ev)));
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
+    keep(roomName, first.name, m);
     inbox.push(m);
     for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
   });
   return {
-    ws, inbox,
+    ws, inbox, closed,
     wait: (pred, ms = 5000) => {
       const hit = inbox.find(pred);
       if (hit) return Promise.resolve(hit);
@@ -123,17 +139,17 @@ function opener(roomName, first) {
     },
   };
 }
-const creator = opener(lobbyRoom, { t: "create", v: 1, pass: "pw2", name: "Creatorville", ...settings });
+const creator = opener(lobbyRoom, { t: "create", pass: "pw2", name: "Creatorville", ...settings });
 const cw = await tryWait(creator.wait((m) => m.t === "welcome"));
 check(cw && cw.created === true && cw.seed === settings.seed && cw.size === 1 && cw.terrain === settings.terrain && cw.seat === 0,
       "creating a room keeps its seed and settings");
-const dup = opener(lobbyRoom, { t: "create", v: 1, pass: "x", name: "Copycat", ...settings });
+const dup = opener(lobbyRoom, { t: "create", pass: "x", name: "Copycat", ...settings });
 const de = await tryWait(dup.wait((m) => m.t === "error"));
 check(de && /already exists/.test(de.why), "a taken room name is refused");
-const missing = opener(`nosuchroom-${Date.now()}`, { t: "hello", v: 1, pass: "x", name: "Lost", join: true });
+const missing = opener(`nosuchroom-${Date.now()}`, { t: "hello", pass: "x", name: "Lost", join: true });
 const me = await tryWait(missing.wait((m) => m.t === "error"));
 check(me && /no room/.test(me.why), "joining a room that does not exist is refused");
-const joiner = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true });
+const joiner = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true });
 const jw = await tryWait(joiner.wait((m) => m.t === "welcome"));
 check(jw && jw.seed === settings.seed && jw.climate === settings.climate && jw.start === settings.start && jw.disasters === 1 && jw.creator === "Creatorville",
       "the joiner gets the room's seed and settings");
@@ -159,9 +175,6 @@ creator.ws.send(JSON.stringify({ t: "hash", hash: "abcdef12" }));
 joiner.ws.send(JSON.stringify({ t: "hash", hash: "ABCDEF12" }));
 const h1 = await tryWait(creator.wait((m) => m.t === "hashCheck"));
 check(h1 && h1.same === true, "two towns with the same world hash are told the maps match");
-joiner.ws.send(JSON.stringify({ t: "hash", hash: "00000001" }));
-const h2 = await tryWait(joiner.wait((m) => m.t === "hashCheck" && m.same === false));
-check(h2 && h2.theirs === "abcdef12", "a different world hash is reported to both towns");
 // Land claims: first come first served, the neighbour told, released land free again.
 creator.ws.send(JSON.stringify({ t: "claim", id: "cl1", rects: "10,10,3,3" }));
 const cl1 = await tryWait(creator.wait((m) => m.t === "claimed" && m.id === "cl1"));
@@ -185,7 +198,7 @@ creator.ws.send(JSON.stringify({ t: "build", id: "b1", tmpl: "Template\\WoodHous
 await tryWait(joiner.wait((m) => m.t === "build" && m.id === "b1" && m.built === 100));
 joiner.ws.close();
 await new Promise((r) => setTimeout(r, 300));
-const rejoin = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
+const rejoin = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const blk = await tryWait(rejoin.wait((m) => m.t === "claimBlock"));
 check(blk && blk.bx === 0 && blk.by === 0 && blk.owner[10 * 32 + 10] === "0" && blk.owner[40 * 32 + 40] !== "1",
       "a town joining gets the neighbour's land (and only the neighbour's)");
@@ -220,7 +233,7 @@ rejoin.ws.close();
 await new Promise((r) => setTimeout(r, 300));
 creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\Tree.rsc" }));
 await new Promise((r) => setTimeout(r, 300));
-const rejoin2 = opener(lobbyRoom, { t: "hello", v: 1, pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
+const rejoin2 = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));
 check(queued && queued.op === "add", "a resource change waits for a town that is away");
 const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
@@ -228,6 +241,36 @@ check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001), "
 rejoin2.ws.close();
 
 creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();
+
+// Protocol 2: seats by token, the handshake's refusals and warnings, another land refused.
+const name2 = town("Brookvale", "pw", 2);   // b4 holds Brookvale's seat with its token; this one has it too
+await tryWait(name2.wait((m) => m.t === "welcome"));
+const tokenless = opener(room, { t: "hello", pass: "pw", name: "Brookvale", token: "" });   // the name, no token
+const tl = await tryWait(tokenless.wait((m) => m.t === "error"));
+check(tl && tl.fatal === true && /two towns/.test(tl.why), "a town with another town's name but not its token gets no seat");
+name2.ws.close();
+const v1 = opener(`v1-${Date.now()}`, { t: "hello", v: 1, pass: "x", name: "Oldtown" });
+const ev1 = await tryWait(v1.wait((m) => m.t === "error"));
+check(ev1 && ev1.fatal === true && /protocol 2/.test(ev1.why), "a protocol 1 game is refused, and told not to retry");
+const hsRoom = `hstest-${Date.now()}`;
+const hsA = opener(hsRoom, { t: "create", pass: "pw3", name: "Alpha", ...settings, mods: "Fields.pkm|10|" });
+await tryWait(hsA.wait((m) => m.t === "welcome"));
+const hsData = opener(hsRoom, { t: "hello", pass: "pw3", name: "Delta", join: true, dataHash: "3333333333333333" });
+const ed = await tryWait(hsData.wait((m) => m.t === "error"));
+check(ed && ed.fatal === true && /game data/.test(ed.why), "a town with other retail data is refused");
+const hsB = opener(hsRoom, { t: "hello", pass: "pw3", name: "Beta", join: true, simBuild: "4444444444444444",
+                             mods: "Fields.pkm|10|;Roads.pkm|5|" });
+const bw = await tryWait(hsB.wait((m) => m.t === "welcome"));
+const bwarn = await tryWait(hsB.wait((m) => m.t === "compat" && /mods/.test(m.warn)));
+const bbuild = await tryWait(hsB.wait((m) => m.t === "compat" && /build/.test(m.warn)));
+check(bw && bw.seat === 1 && !!bbuild && bwarn && /Roads\.pkm/.test(bwarn.warn), "another build and other mods only warn the joiner");
+check(!!(await tryWait(hsA.wait((m) => m.t === "compat" && /Roads\.pkm/.test(m.warn)))), "and the neighbour is warned too");
+hsA.ws.send(JSON.stringify({ t: "hash", hash: "1234abcd" }));
+hsB.ws.send(JSON.stringify({ t: "hash", hash: "9999aaaa" }));
+const el = await tryWait(hsB.wait((m) => m.t === "error"));
+check(el && el.fatal === true && /same land/.test(el.why), "a town that built other land is refused");
+check(!!(await tryWait(hsA.wait((m) => m.t === "hashCheck" && m.same === false))), "and the neighbour is told the lands differ");
+for (const x of [tokenless, v1, hsA, hsData, hsB]) x.ws.close();
 
 const bad = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
 await new Promise((r) => bad.addEventListener("open", r));

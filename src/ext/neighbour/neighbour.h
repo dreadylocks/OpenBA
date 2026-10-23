@@ -75,6 +75,7 @@ struct LobbyStart {
     bool         create = false;   // true: the room is created when the game starts (BeforeNewGame)
     std::string  server, room, pass, town;
     int          seat = -1;        // a join knows its seat at once; a create learns 0
+    std::string  token;            // the seat token the relay gave the lobby's create / join
     RoomSettings settings;         // a join: the room's (StartNewGame is called with them)
 };
 void SetLobbyStart(const LobbyStart& start);

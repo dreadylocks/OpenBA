@@ -75,6 +75,8 @@ bool ReadJoin(const Message& m, RoomJoin& out) {
     int64_t seat = -1;
     if (!m.GetInt("seat", seat) || seat < 0 || seat > 1) return false;
     out.seat = static_cast<int>(seat);
+    out.token = m.GetOr("token", "");
+    if (!ValidToken(out.token)) return false;
     out.peer = Sanitize(m.GetOr("peer", ""), kMaxNameChars);
     out.creator = Sanitize(m.GetOr("creator", ""), kMaxNameChars);
     bool created = false;
@@ -84,8 +86,6 @@ bool ReadJoin(const Message& m, RoomJoin& out) {
 }
 
 }  // namespace
-
-const char* DefaultServer() { return "wss://openba-neighbour.spellpress.workers.dev"; }
 
 std::string LobbyUrl(const std::string& server) {
     std::string out = server;
@@ -140,11 +140,12 @@ bool ListRooms(TransportFactory factory, const std::string& server, std::vector<
 
 bool CreateRoom(TransportFactory factory, const std::string& server, const std::string& room,
                 const std::string& pass, const std::string& town, const RoomSettings& settings,
-                RoomJoin& out, std::string& why, uint32_t timeoutMs) {
+                const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs) {
     Message create("create");
     create.SetInt("v", kProtocolVersion).Set("pass", pass).Set("name", town).SetInt("seed", settings.seed)
           .SetInt("size", settings.size).SetInt("disasters", settings.disasters ? 1 : 0)
           .Set("start", settings.start).Set("terrain", settings.terrain).Set("climate", settings.climate);
+    AddHandshake(create, info);
     RoomJoin j;
     bool bad = false;
     const bool ok = Converse(factory, RoomUrl(server, room), create, timeoutMs, why, [&](const Message& m) {
@@ -158,11 +159,12 @@ bool CreateRoom(TransportFactory factory, const std::string& server, const std::
 }
 
 bool JoinRoom(TransportFactory factory, const std::string& server, const std::string& room,
-              const std::string& pass, const std::string& town, RoomJoin& out, std::string& why,
-              uint32_t timeoutMs) {
+              const std::string& pass, const std::string& town, const LocalInfo& info, RoomJoin& out,
+              std::string& why, uint32_t timeoutMs) {
     Message hello("hello");
     hello.SetInt("v", kProtocolVersion).Set("room", room).Set("pass", pass).Set("name", town)
          .SetInt("lastSeq", 0).SetBool("join", true);
+    AddHandshake(hello, info);
     RoomJoin j;
     bool bad = false;
     const bool ok = Converse(factory, RoomUrl(server, room), hello, timeoutMs, why, [&](const Message& m) {

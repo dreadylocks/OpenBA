@@ -5,11 +5,8 @@
 // docs/fork/NEIGHBOUR_TOWNS.md §3. The game and the relay (tools/neighbour_server/) swap
 // small JSON objects, one per WebSocket text frame. Every object has a string "t" (its
 // type); the rest are flat fields: strings, integers, booleans. Nested values from a newer
-// server are skipped, never trusted.
-//
-// The client sends:   hello {v, room, pass, name}    chat {text}
-// The server sends:   welcome {seat, peer, online}   peer {name, online}
-//                     chat {from, text, seq}         error {why}
+// server are skipped, never trusted. EVERY MESSAGE, with its fields and types, is listed once in
+// docs/fork/NEIGHBOUR_PROTOCOL.md; the layer-1 hello fields are handshake.h's.
 //
 // Everything here is standard C++ with no game or socket code: tests/unit/ext_neighbour_test.cpp
 // links it alone. EVERY incoming byte is untrusted (a bad message must never crash a town):
@@ -23,7 +20,7 @@
 
 namespace Neighbour {
 
-constexpr int      kProtocolVersion = 1;
+constexpr int      kProtocolVersion = 2;   // 2: the layer-1 hello (handshake.h) and seat tokens
 constexpr size_t   kMaxMessageBytes = 16 * 1024;  // a frame larger than this is dropped
 constexpr size_t   kMaxChatChars    = 200;        // after Sanitize
 constexpr size_t   kMaxNameChars    = 24;
@@ -108,6 +105,10 @@ struct Parcel {
 };
 constexpr size_t kMaxParcelIdChars = 40;
 bool ValidParcelId(const std::string& id);
+// A seat token: what the relay hands a town on its first join (welcome "token") and the town sends
+// back in every later hello. 16..64 characters of [0-9a-f]; empty = none yet.
+constexpr size_t kMaxTokenChars = 64;
+bool ValidToken(const std::string& token);
 
 // The class C save payload (save_state.h, the save tail's codec): what a town remembers about its
 // room between sessions.
@@ -119,6 +120,8 @@ bool ValidParcelId(const std::string& id);
 //   v3: + how to get back in: the town's name, the room password and the relay address (a game
 //       started from the Multiplayer lobby has no settings.cfg keys), and the world hash its map
 //       was built with (empty when unknown).
+//   v4: + the seat token the relay gave this town on its first join (empty before that). A hello
+//       carries it; the relay seats the town by it, never by its name.
 struct SavedState {
     std::string              room;
     int64_t                  lastSeq = 0;
@@ -126,8 +129,9 @@ struct SavedState {
     std::vector<std::string> received;
     std::vector<Parcel>      waiting;
     std::string              town, pass, server, worldHash;
+    std::string              token;
 };
-constexpr int32_t kPayloadFormat   = 3;   // the registry row's formatVersion
+constexpr int32_t kPayloadFormat   = 4;   // the registry row's formatVersion
 constexpr size_t  kKeepReceivedIds = 128;
 constexpr size_t  kMaxSavedParcels = 64;   // per list
 std::vector<uint8_t> EncodeState(const SavedState& s);
