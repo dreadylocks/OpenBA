@@ -361,6 +361,8 @@ if(RENDER_BACKEND_READY)
   if(APPLE)
     # Metal needs no dlopened SDL: SDL3 is static, and libairconv.dylib is found beside the exe.
     target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+    # Network.framework: the WebSocket seam (src/platform/darwin/websocket_darwin.cpp) for ext.neighbour.
+    target_link_libraries(OpenBA PRIVATE "-framework Network")
   else()
     target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
   endif()

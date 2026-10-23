@@ -1,9 +1,9 @@
 // ============================================================================
 // src/platform/posix/websocket_posix.cpp -- NOT RETAIL. The WebSocket seam off Windows
 // ============================================================================
-// platform_websocket.h. Not implemented yet: ext.neighbour is played on Windows (the
-// fork's PC). Connect fails with a reason, so the extension reports "offline" and the
-// game carries on.
+// platform_websocket.h. Not implemented yet on Linux (Windows has WinHTTP, macOS its
+// Network.framework twin, src/platform/darwin/websocket_darwin.cpp). Connect fails with a
+// reason, so the extension reports "offline" and the game carries on.
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"

@@ -6,7 +6,9 @@
 // (src/ext/neighbour/, docs/fork/NEIGHBOUR_TOWNS.md §3): text frames to the relay.
 //   Windows: src/platform/win/websocket_win.cpp, the OS's own WinHTTP client (ws:// and
 //            wss://, TLS from the OS; no third-party library).
-//   POSIX:   src/platform/posix/websocket_posix.cpp, not implemented yet (Connect fails).
+//   macOS:   src/platform/darwin/websocket_darwin.cpp, the OS's Network.framework client (ws:// and
+//            wss://, TLS from the OS).
+//   Linux:   src/platform/posix/websocket_posix.cpp, not implemented yet (Connect fails).
 //
 // THREADING. One thread may block in WebSocketReceiveText while another calls
 // WebSocketSendText; WebSocketCancel may be called from any thread and makes a blocked
