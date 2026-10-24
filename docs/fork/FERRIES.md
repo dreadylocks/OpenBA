@@ -273,8 +273,9 @@ standard C++), `test_docks.{h,cpp}` (the test aid), `tests/unit/ext_ferries_test
   71-cell crossing between zones 5 and 1.
 - With ext.ferries off: no `[Ferries]` line, the ordinary seed-12345 land
   (`[WorldHash] height f32=627a733aa4109739`), no crash. `tools/acceptance/acceptance.sh`: 0 off target.
-- Not run: the faithful gate and the Windows build (the PC; CI builds Windows and Linux); a
-  Multiplayer room with ferries; a Continents map; a player placing a dock by hand (the button was
+- CI on the branch (run 40115573084, started by hand: CI runs on pull requests): Windows (MSYS2
+  UCRT64), Linux, macOS and Acceptance all passed.
+- Not run: the faithful gate (the PC); the game on Windows; a Multiplayer room with ferries; a Continents map; a player placing a dock by hand (the button was
   not clicked); a trader boat sailing through a lane.
 
 ### Open
