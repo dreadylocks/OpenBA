@@ -641,4 +641,8 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   room and saved; with the relay down it loaded, played (citizens felled trees) and saved; with the
   relay back it loaded, logged "8 change(s) ... from the save wait for the relay" and sent them, and a
   second town joining then received all 13 felled trees and the town's 8 buildings.
+- **The lobby remembers the relay**: a relay typed under Change relay that answers is written to
+  `settings.cfg` (`neighbour.server`) at once (`lobby_panel.cpp` `RememberRelay`, the settings map's own
+  insert and `WriteSettings`), so each machine types it once. Test aid `neighbour.lobbyrelay=<url>` fills
+  the box as if typed; checked on the Mac (a run with no relay saved ended with it in settings.cfg).
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.
