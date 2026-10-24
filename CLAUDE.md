@@ -119,6 +119,7 @@ see this file's context — put the relevant hard rules in the prompt.
 | Retail binary facts, import table, modding toolkit | `docs/reference/binaries.md` |
 | Main loop, launcher dialog, threading, address resolution | `docs/reference/engine_architecture.md` |
 | Toolchain versions, VS Code / MCP debugging | `docs/reference/environment.md` |
+| Releases, CI artifacts, Windows code signing | `CHANGELOG.md`, `docs/reference/code_signing.md` |
 | Per-binary function inventories | `decomp/README.md` |
 | Known retail bugs | `docs/retail_bugs.md` |
 | Known / suspected bugs in OUR port, not yet fixed | `docs/known_port_issues.md` |
