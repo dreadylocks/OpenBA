@@ -28,27 +28,38 @@ that changes the terrain would make the two maps differ.
   The unit test `ext_neighbour_world_maths_same_bits_everywhere` must pass on the PC: it proves the PC
   computes the shared map's maths exactly as the Mac does.
 
-## 3. Start the relay on the Mac
+## 3. The relay: your Cloudflare Worker (no port to open)
 
-In Terminal on the Mac (leave the window open while you play):
+Your relay already runs on Cloudflare at `wss://openba-neighbour.spellpress.workers.dev` (account
+"Samanthatwoelevens@gmail.com's Account", deployed 2026-10-20). It still runs the previous protocol,
+so it refuses these new builds ("this relay speaks protocol 1") until it gets this branch's relay. On
+the Mac, which is already logged in to that account, run once:
 
 ```bash
-cd /Volumes/DevSSD/dev/repos/OpenBA/.claude/worktrees/neighbour-towns-0cd35d/tools/neighbour_server
-npx wrangler dev --ip 0.0.0.0 --port 8791
+cd /Volumes/DevSSD/dev/repos/OpenBA/.claude/worktrees/neighbour-towns-0cd35d/tools/neighbour_server && npx wrangler deploy
 ```
 
-When it says `Ready on`, the relay is at `ws://192.168.0.168:8791` for the PC and
-`ws://127.0.0.1:8791` for the Mac. Only devices on your home network can reach it, and it stops when
-you close the window. (Port 8787 is used by another tool on your Mac, so this uses 8791.)
+Both machines then use `wss://openba-neighbour.spellpress.workers.dev`: secure, reachable from
+anywhere, nothing to open on either machine. Rooms made under the old relay keep working; their towns
+get seat keys on the next join.
+
+(Fallback without Cloudflare: a relay on your home network, `npx wrangler dev --ip 0.0.0.0 --port 8791`
+in the same folder, reached at `ws://192.168.0.168:8791` from the PC and `ws://127.0.0.1:8791` on the
+Mac. That one does open a port to your home network while it runs.)
 
 ## 4. Start the game
 
-1. **Mac**: open `OpenBA.app`, then **Multiplayer**. In **Relay** type `ws://127.0.0.1:8791`, then
-   press **Refresh**. Type a room name, a password and your town's name, then press **Create room**.
-   Choose the map in New Game and press Ok.
-2. **PC**: start OpenBA, then **Multiplayer**. In **Relay** type `ws://192.168.0.168:8791`, then press
-   **Refresh**. Pick the room, type the password and your town's name, then press **Join**.
+1. **Mac**: open `OpenBA.app`, then **Multiplayer**. In **Relay** type
+   `wss://openba-neighbour.spellpress.workers.dev`, then press **Refresh**. Type a room name, a password
+   and your town's name, then press **Create room**. Choose the map in New Game and press Ok.
+2. **PC**: start OpenBA (normally, not with `tools/build.sh run`, which switches extensions off), then
+   **Multiplayer**. Same **Relay**, press **Refresh**, pick the room, type the password and your
+   town's name, then press **Join**.
 3. The PC builds the same map from the same seed and starts on the other side of it.
+
+Tip: put `neighbour.server=wss://openba-neighbour.spellpress.workers.dev` in each machine's
+`settings.cfg` and the Relay box starts with it (Mac: `~/Documents/Banished/settings.cfg`; PC:
+`Documents/Banished/settings.cfg`).
 
 ## 5. What to look for
 
@@ -73,10 +84,3 @@ With `BANISHED_AUTOSTART=1`, a game can create or join the room on its own: in i
 `neighbour.password` and `neighbour.name`. A joining game takes the room's seed and settings itself.
 This is how the two-Mac test ran (`docs/fork/NEIGHBOUR_TOWNS.md` §11). The gate's faithful run
 (`tools/build.sh run`) switches every extension off, so test with a plain autostart instead.
-
-## Playing from anywhere (later)
-
-The Cloudflare Worker relay works across the internet with secure `wss://`. Any Worker deployed before
-2026-10-23 speaks the previous protocol and refuses these games, so deploy this branch's relay first
-(`npx wrangler login`, then `npm run deploy` in `tools/neighbour_server`). Both machines then use
-`wss://openba-neighbour.<your-subdomain>.workers.dev`.
