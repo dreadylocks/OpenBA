@@ -80,6 +80,11 @@ jobs:
     needs: version
     runs-on: windows-latest
     timeout-minutes: 120   # a signed release waits up to an hour for its SignPath approval
+    # actions: read lets SignPath read this job and download the unsigned-exe artifact with the
+    # run's token (the action's github-token); the workflow default grants contents only.
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: msys2 {0}

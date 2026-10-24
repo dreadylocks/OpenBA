@@ -49,7 +49,8 @@ retail: `1.0.7 17Se10` OpenBa: `OpenBA v1.0.0 2424a9093 2026-10-19`:
 A release bumps the CMake `VERSION`, adds its section to `CHANGELOG.md` and pushes the tag `v<version>`;   
 the Release workflow (`.github/workflows/release.yml`) then builds the Windows zip, the Linux tarball and the   
 macOS app zip and publishes them under the "Releases" link with that section as the notes.  
-Every push to `main` also leaves the latest Windows build as an artifact of its CI run (unsigned, kept 30 days).  
+Every push to `main` also leaves the latest Windows build as an artifact of its CI run  
+(unsigned, kept 30 days, downloadable when signed in to GitHub).  
 
 **[Code signing policy](CODE_SIGNING.md):** signing the Windows exe through SignPath Foundation is set up but  
 not active yet, so current releases are unsigned.  

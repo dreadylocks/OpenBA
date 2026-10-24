@@ -28,7 +28,7 @@ Signatures. Each release also lists a `.sha256` checksum for every package.
 - **Approvers:** [fran-cap](https://github.com/fran-cap) approves each signing request in SignPath
   before a release is signed.
 
-Every team member uses multi-factor authentication on GitHub and on SignPath.
+Every team member must use multi-factor authentication on GitHub and on SignPath.
 
 ## Privacy policy
 
