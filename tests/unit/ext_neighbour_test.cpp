@@ -12,9 +12,12 @@
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/save_state.h"
 #include "ext/neighbour/seat_store.h"
+#include "crt/msvc_libm.h"
 #include "ext/savetail.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -592,4 +595,28 @@ UNIT_TEST(ext_neighbour_seat_store) {
     CHECK_EQ(many.size(), Neighbour::kMaxSeats);
     CHECK(Neighbour::FindSeat(many, "ws://h", "room0", "T").empty());
     CHECK(!Neighbour::FindSeat(many, "ws://h", "room204", "T").empty());
+}
+
+// world_maths.h: a lobby room's shared map is built with the engine's ported MSVC powf / sinf / cosf so
+// a Windows PC and a Mac build the same land. This digest of their results over the ranges worldgen and
+// the start spiral use was taken on an arm64 Mac (clang); the same digest on Windows (GCC, x86-64 SSE2)
+// and Linux proves the two builds round every one of these the same.
+UNIT_TEST(ext_neighbour_world_maths_same_bits_everywhere) {
+    Neighbour::Xxh64 x(0);
+    auto feed = [&x](float f) {
+        uint32_t u = 0;
+        std::memcpy(&u, &f, 4);
+        x.Update(&u, 4);
+    };
+    for (int i = -30000; i <= 30000; ++i) feed(MsvcLibm::Powf(1.1f, static_cast<float>(i) * 0.01f));   // e5d0's falloff
+    for (float b : {1.25f, 1.75f, 2.0f, 2.25f, 16.0f, 4.0f})                                            // the eee0 brushes
+        for (int i = -4000; i <= 4000; ++i) feed(MsvcLibm::Powf(b, static_cast<float>(i) * 0.01f));
+    for (int i = 0; i < 4096; ++i) {                                                                    // the start spiral
+        const float a = static_cast<float>(i) * (360.0f / 4096.0f) * 0.0174532925f;
+        feed(MsvcLibm::Sinf(a));
+        feed(MsvcLibm::Cosf(a));
+    }
+    const uint64_t h = x.Digest();
+    std::printf("  world maths digest %016llx\n", static_cast<unsigned long long>(h));
+    CHECK(h == 0xdddeb20c8806872bull);   // arm64 Mac, clang (2026-10-23)
 }

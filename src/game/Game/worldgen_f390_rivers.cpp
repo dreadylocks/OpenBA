@@ -59,6 +59,8 @@
 #include <cmath>
 #include "system/Value.h"      // ENDGAME B.3.4b System caller batch (Random/Time/Color)
 #include "Game/worldgen_brush_curve.h"   // [WGPAR] the exact falloff memo of the eee0 brush
+#include "crt/msvc_libm.h"          // EXT SEAM (NOT RETAIL): MsvcLibm::Powf for ext.neighbour's shared map
+#include "ext/neighbour/world_maths.h"   // EXT SEAM (NOT RETAIL): Neighbour::PortableWorldMaths
 
 // ============================================================
 // The heightfield is TerrainHeightfield (TerrainHeightfield.h). The originals
@@ -93,6 +95,9 @@ static constexpr uint32_t kSignBit = 0x80000000u;// 0x1401722c0               fl
 
 // CRT libm leaves (verified: sub_1460 = powf, FUN_140132010 = sqrtf).
 static inline float wg_powf(float b, float e) { return powf(b, e); }
+// EXT SEAM (NOT RETAIL): the ported MSVC powf for a lobby room's shared map, with its own curve memo
+// (see worldgen_f390_erosion.cpp's twin).
+static inline float wg_powf_portable(float b, float e) { return MsvcLibm::Powf(b, e); }
 static inline float wg_sqrtf(float v)         { return sqrtf(v); }
 
 // negate a float via the XOR sign-bit mask (matches the original codegen).
@@ -210,7 +215,9 @@ static void wg_StampBrush_eee0(const TerrainHeightfield* hf, const float* center
     // each distinct (brush, s) computed once instead of once per cell. One cache per
     // process: worldgen runs on one thread at a time (the loader).
     static WgBrushCurveCache s_curves(&wg_powf, &wg_sqrtf, kOne, kRadiusThr);
-    WgBrushCurveCache::Curve& curve = s_curves.Get(falloffPow, radiusParam);
+    static WgBrushCurveCache s_curvesPortable(&wg_powf_portable, &wg_sqrtf, kOne, kRadiusThr);
+    WgBrushCurveCache& curves = Neighbour::PortableWorldMaths() ? s_curvesPortable : s_curves;   // EXT SEAM
+    WgBrushCurveCache::Curve& curve = curves.Get(falloffPow, radiusParam);
 
     int   ri  = curve.span;              // integer radius bound (inclusive): (int)r + 1
     int   cxC = (int)center[0] + half;   // center col in grid space
@@ -222,7 +229,7 @@ static void wg_StampBrush_eee0(const TerrainHeightfield* hf, const float* center
         for (int dx = -ri; dx <= ri; ++dx) {
             int col = dx + cxC;
             if (col < 0 || col >= edge) continue;
-            float w    = s_curves.Weight(curve, dx * dx + dy * dy);   // (0,1]
+            float w    = curves.Weight(curve, dx * dx + dy * dy);   // (0,1]
             float* cell = &mask[(size_t)row * edge + col];
             if (mode == 0) {                   // MIN blend (carve-down weight)
                 float v = w * strength;

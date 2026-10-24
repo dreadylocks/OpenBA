@@ -8,6 +8,7 @@
 
 #include "system/parallel_for.h"   // System::ParallelFor
 #include "utility/PerlinNoise.h"   // RtUtility_PerlinNoise_Generate (const, stateless)
+#include "crt/msvc_libm.h"          // EXT SEAM (NOT RETAIL): MsvcLibm::Powf for ext.neighbour's shared map
 
 #include <cmath>
 #include <cstddef>
@@ -36,7 +37,8 @@ static constexpr float kGLower    = 0.85f;        // 0x140172130  grass slope lo
 static constexpr float kGBandDiv  = 0.149047f;    // 0x1401720f0  grass slope band divisor
 
 void WgCells_BaseHeightmap(float* heightmap, int dim,
-                           const RtUtility::PerlinNoise* pn1, const RtUtility::PerlinNoise* pn2) {
+                           const RtUtility::PerlinNoise* pn1, const RtUtility::PerlinNoise* pn2,
+                           bool portableMaths) {
     int edge = dim + 1;                          // (dim+1) vertices per side
     int half = dim >> 1;
     float distBias = (float)dim * kQuarter + kFalloffBias;      // dim*0.25 + 16
@@ -53,7 +55,9 @@ void WgCells_BaseHeightmap(float* heightmap, int dim,
             for (int col = 0; col < edge; ++col) {
                 int dx = col - half;
                 float dist  = sqrtf((float)(dx * dx + dz * dz));
-                float curve = powf(kFalloffBase, distBias - dist);  // 1.1 ^ ((dim*0.25+16) - dist)
+                // 1.1 ^ ((dim*0.25+16) - dist); the ported MSVC powf on a shared map (EXT SEAM, NOT RETAIL)
+                float curve = portableMaths ? MsvcLibm::Powf(kFalloffBase, distBias - dist)
+                                            : powf(kFalloffBase, distBias - dist);
                 float w     = kOne / (curve + kOne);
 
                 float pn1s = RtUtility_PerlinNoise_Generate(pn1, (float)col * kQuarter, (float)row * kQuarter);

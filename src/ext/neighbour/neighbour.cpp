@@ -20,6 +20,7 @@
 #include "ext/registry.h"   // Ext::Ext().neighbour
 #include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
 #include "ext/neighbour/seat_store.h"   // seat tokens kept beside settings.cfg
+#include "ext/neighbour/world_maths.h"  // SetPortableWorldMaths: a shared map is built with the ported maths
 
 #include "Game/EventLog.h"         // EventLogEntry
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
@@ -469,6 +470,7 @@ void ResetForGame(const void* owner) {
         s_restoreRequested = true;
         s_restoreTo = s_pendingPrevRequested;
     }
+    SetPortableWorldMaths(s_lobbyGame);   // before this Load generates the world (world_maths.h)
     // A lobby game is a shared map from its first structure on (the start town is built during
     // this Load, before SelectForGame).
     SharedMap::Begin(s_lobbyGame);
@@ -487,6 +489,12 @@ void SetLobbyStart(const LobbyStart& start) {
 }
 
 bool HasLobbyStart() { return s_hasPending; }
+
+bool PendingJoinSettings(RoomSettings& out) {
+    if (!s_hasPending || s_pending.create) return false;
+    out = s_pending.settings;
+    return true;
+}
 
 void ClearLobbyStart() {
     if (!s_hasPending) return;

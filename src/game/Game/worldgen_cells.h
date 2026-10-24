@@ -16,8 +16,11 @@
 namespace RtUtility { struct PerlinNoise; }
 
 // e5d0's loop: fills the (dim+1)^2 float heightmap from the two noise fields.
+// portableMaths (EXT SEAM, NOT RETAIL; ext.neighbour's shared map): the falloff's powf is the engine's
+// ported MSVC one (MsvcLibm::Powf), the same bits on every platform; false = the platform's, as retail.
 void WgCells_BaseHeightmap(float* heightmap, int dim,
-                           const RtUtility::PerlinNoise* pn1, const RtUtility::PerlinNoise* pn2);
+                           const RtUtility::PerlinNoise* pn1, const RtUtility::PerlinNoise* pn2,
+                           bool portableMaths = false);
 
 // cf440's three passes over the dim x dim texels. `scratch` holds dim*dim records of
 // 6 floats {x, y, h, nx, ny, nz}; `out` dim*dim RGBA bytes. Call in this order.

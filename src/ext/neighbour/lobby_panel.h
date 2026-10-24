@@ -12,6 +12,9 @@
 #include <string>
 
 class MainMenuDialog;
+class MapGenerator;
+class TerrainGenerator;
+class ClimateGenerator;
 
 namespace Neighbour {
 
@@ -23,5 +26,12 @@ void Lobby_AttachMenuButton(MainMenuDialog* menu);
 // The button's click (MainMenuDialog::OnElementEvent, id 14), or a refused create coming back:
 // `note` (when not empty) is shown in the lobby's status line.
 void Lobby_Open(MainMenuDialog* menu, const std::string& note);
+
+// EXT SEAM, MainMenuDialog::StartNewGame (its first lines): a game joining a lobby room starts with the
+// ROOM's seed and settings whoever asked for the new game (the lobby's Join already passes them; an
+// unattended join, neighbour.autolobby=join with BANISHED_AUTOSTART, comes through the New Game dialog's
+// defaults). No pending join, or settings this game cannot resolve: nothing changes.
+void Lobby_RoomSettingsForJoin(uint32_t* seed, uint32_t* terrainSize, bool* disastersOff, MapGenerator** mapGen,
+                               TerrainGenerator** terrainGen, ClimateGenerator** climateGen);
 
 }  // namespace Neighbour

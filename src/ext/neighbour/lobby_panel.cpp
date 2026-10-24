@@ -310,6 +310,88 @@ void Lobby_Open(MainMenuDialog* menu, const std::string& note) {
     menu->_ui->AddDialog(&ref);   // dispatches OnOpened
 }
 
+namespace {
+
+std::string Setting(const char* key) {
+    const ::IO::Persistence* p = ::IO::Persistence::_singleton;
+    if (p == nullptr) return std::string();
+    System::String k(key);
+    const RtIo::SettingsNode* node = p->_settingsMap.Find(k._data);
+    if (node == nullptr || node->element.value._data == nullptr) return std::string();
+    return node->element.value._data;
+}
+
+// TEST AID (NOT RETAIL; settings.cfg neighbour.autolobby=create|join, with BANISHED_AUTOSTART): a game
+// creates or joins the settings' lobby room by itself (neighbour.server / room / password / name), so a
+// shared-map game between two games -- two on one machine, or a Mac and a PC -- runs unattended.
+// create: the autostarted New Game makes the room (BeforeNewGame), exactly as the lobby's Create.
+// join: the room is joined here, on the menu, as the lobby's Join; StartNewGame then takes the room's
+// settings (Lobby_RoomSettingsForJoin). Once per process; absent or anything else: nothing.
+void AutoLobby() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const std::string mode = Setting("neighbour.autolobby");
+    if (mode != "create" && mode != "join") return;
+    const std::string server = SettingsServer();
+    const std::string room = Trim(Setting("neighbour.room"));
+    const std::string pass = Setting("neighbour.password");
+    const std::string town = Sanitize(Setting("neighbour.name"), kMaxNameChars);
+    if (server.empty() || room.empty() || pass.empty() || town.empty()) {
+        fprintf(stderr, "[Neighbour] autolobby=%s needs neighbour.server, room, password and name\n", mode.c_str());
+        return;
+    }
+    LobbyStart s;
+    s.server = server;
+    s.room = room;
+    s.pass = pass;
+    s.town = town;
+    if (mode == "create") {
+        s.create = true;
+        SetLobbyStart(s);
+        fprintf(stderr, "[Neighbour] autolobby: the next new game creates room \"%s\" as \"%s\"\n", room.c_str(),
+                town.c_str());
+        return;
+    }
+    const std::string kept = LoadSeatToken(server, room, town);
+    RoomJoin j;
+    std::string why;
+    if (!JoinRoom(&MakePlatformTransport, server, room, pass, town, kept, LocalInfoNow(), j, why)) {
+        fprintf(stderr, "[Neighbour] autolobby: could not join room \"%s\": %s\n", room.c_str(), why.c_str());
+        return;
+    }
+    s.create = false;
+    s.seat = j.seat;
+    s.token = j.token.empty() ? kept : j.token;
+    s.settings = j.settings;
+    if (!j.token.empty()) RememberSeat(server, room, town, j.token);
+    SetLobbyStart(s);
+    fprintf(stderr, "[Neighbour] autolobby: joined room \"%s\" as \"%s\" (seat %d, seed %lld, %s)\n", room.c_str(),
+            town.c_str(), j.seat, static_cast<long long>(j.settings.seed), DescribeSettings(j.settings).c_str());
+}
+
+}  // namespace
+
+void Lobby_RoomSettingsForJoin(uint32_t* seed, uint32_t* terrainSize, bool* disastersOff, MapGenerator** mapGen,
+                               TerrainGenerator** terrainGen, ClimateGenerator** climateGen) {
+    RoomSettings rs;
+    if (!PendingJoinSettings(rs)) return;
+    MapGenerator* mg = LoadAs<MapGenerator>(rs.start);
+    TerrainGenerator* tg = LoadAs<TerrainGenerator>(rs.terrain);
+    ClimateGenerator* cg = LoadAs<ClimateGenerator>(rs.climate);
+    if (mg == nullptr || tg == nullptr || cg == nullptr) {
+        fprintf(stderr, "[Neighbour] this game does not have the room's map settings (%s)\n",
+                DescribeSettings(rs).c_str());
+        return;
+    }
+    *seed = static_cast<uint32_t>(rs.seed);
+    *terrainSize = static_cast<uint32_t>(rs.size);
+    *disastersOff = !rs.disasters;
+    *mapGen = mg;
+    *terrainGen = tg;
+    *climateGen = cg;
+}
+
 void Lobby_AttachMenuButton(MainMenuDialog* menu) {
     if (menu == nullptr || menu->_ui == nullptr || menu->_dialog == nullptr) return;
     if (menu->game != nullptr) return;            // the pause menu: no lobby in a running game
@@ -340,6 +422,7 @@ void Lobby_AttachMenuButton(MainMenuDialog* menu) {
         kids[at + 1] = added;
     }
     fprintf(stderr, "[Neighbour] Multiplayer button added (id %d)\n", kMultiplayerMenuButtonId);
+    AutoLobby();
 }
 
 }  // namespace Neighbour

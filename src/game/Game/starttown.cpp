@@ -116,6 +116,8 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <functional>
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 #include "ext/neighbour/neighbour.h"   // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::StartCentre
+#include "crt/msvc_libm.h"             // EXT SEAM (NOT RETAIL): MsvcLibm::Sinf / Cosf for ext.neighbour's shared map
+#include "ext/neighbour/world_maths.h"  // EXT SEAM (NOT RETAIL): Neighbour::PortableWorldMaths
 #include "ext/neighbour/shared_map.h"  // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::SharedMap::NoteStructure
 
 // ============================================================================
@@ -383,11 +385,16 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
     float radius = 0.0f;
     int   points = 4;
     const int kMaxRings = 4096;                // defensive cap (original loops forever)
+    // EXT SEAM (NOT RETAIL): a lobby room's shared map takes the ported MSVC sinf / cosf, so both towns'
+    // games find the same start sites on any platform (Neighbour::PortableWorldMaths).
+    const bool portable = Neighbour::PortableWorldMaths();
     for (int ring = 0; ring < kMaxRings; ++ring) {
         for (int i = 0; i < points; ++i) {
             const float ang = (float)i * (fullCircle / (float)points) * kDeg2Rad;
-            const int tx = (int)(cosf(ang) * radius) + cx;   // local_res8 (cos) * r + dim/2
-            const int ty = (int)(sinf(ang) * radius) + cy;   // local_res10 (sin) * r + dim/2
+            const float c = portable ? MsvcLibm::Cosf(ang) : cosf(ang);
+            const float s = portable ? MsvcLibm::Sinf(ang) : sinf(ang);
+            const int tx = (int)(c * radius) + cx;   // local_res8 (cos) * r + dim/2
+            const int ty = (int)(s * radius) + cy;   // local_res10 (sin) * r + dim/2
             if (StartTown_DiskBuildable(game, tx, ty, size, sizeSq)) {
                 *outX = tx; *outY = ty;
                 return true;

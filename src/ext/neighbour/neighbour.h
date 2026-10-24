@@ -81,6 +81,8 @@ struct LobbyStart {
 void SetLobbyStart(const LobbyStart& start);
 bool HasLobbyStart();
 void ClearLobbyStart();
+// A pending JOIN's room settings (false for none, or a pending create).
+bool PendingJoinSettings(RoomSettings& out);
 
 // EXT SEAM, MainMenuDialog::StartNewGame (its first line): a lobby create registers the room with
 // the settings the player chose before anything is built. False = refused (`why` says why); the

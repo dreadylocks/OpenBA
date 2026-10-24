@@ -674,6 +674,9 @@ void* MainMenuDialog::StartNewGame(const System::String& name, uint32_t seed, ui
                                    ClimateGenerator* climateGen,
                                    uint32_t scenarioResIdx,
                                    const Object::InternalPtr<Achievement::AchievementInstance>* savedStateIBP) {
+    // EXT SEAM (NOT RETAIL, ext.neighbour): a game joining a lobby room starts with the ROOM's seed
+    // and settings (the parameters are this call's own copies). Any other game: nothing changes.
+    Neighbour::Lobby_RoomSettingsForJoin(&seed, &terrainSize, &disastersOff, &mapGen, &terrainGen, &climateGen);
     // EXT SEAM (NOT RETAIL, ext.neighbour M2): a game the Multiplayer lobby is creating a room for
     // registers the room with these settings first; a refusal (a taken name, no network) goes back
     // to the lobby with the reason and starts nothing. Any other game: nothing happens here.
