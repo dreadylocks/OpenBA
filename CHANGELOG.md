@@ -29,7 +29,7 @@ the Multiplayer screen.
 **Platforms**
 - Linux can join neighbor towns (a WebSocket client on OpenSSL); the Linux package now needs
   OpenSSL 3 (`libssl.so.3`), which current distributions ship.
-- macOS: trackpad tap-to-click works; the WebSocket client accepts the relay's upgrade.
+- macOS: trackpad tap-to-click works, and Macs reach the relay (it had refused their connection).
 
 **Fixes**
 - Demolishing a building in a neighbor game no longer crashes it.
