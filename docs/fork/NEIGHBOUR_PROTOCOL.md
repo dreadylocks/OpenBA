@@ -95,6 +95,20 @@ The sender resends it on every join until it gets `stored`.
 | `road` | `cell`, `type`, `tt` (ints), `tmpl` (path); or `cell`, `off: true` | a finished road tile, or one taken up |
 | `nat` | `op` (`rm` \| `add`), `cell` (int), `tmpl` (path) | a natural resource felled / mined out, or a sapling planted |
 
+### `pause`
+`on` (bool): this town paused (`true`) or carried on (`false`): the toolbar's pause / play or the pause
+key. The relay passes it to the neighbour, whose game does the same (shared pause: either town pausing
+pauses both). Sent again on arriving or joining while paused. Nothing is kept.
+
+### `walkers`
+This town's villagers, once a second while the neighbour is online (`walkers.h`): `tmpl` (the citizen
+template's path) and `list` = `id,x,y,z,yaw,clip,grp,scale,cloth;...`, integers: a small id per villager
+while it lives, the render position x 100, the yaw in degrees x 10, the animation clip it plays (0
+standing, 1-4 walking, others working), the mesh group (0 man, 1 woman), the size x 100 (100 adult, 83
+student, 66 child) and the clothes index. At most 12,000 characters a message (more villagers: more
+messages). The relay passes it on and keeps nothing; the neighbour draws each villager see-through and
+lets one no message names for 4 s go.
+
 ### `ping`
 Every 25 s of silence; answered `pong` (without waking the room).
 
@@ -109,6 +123,8 @@ Every 25 s of silence; answered `pong` (without waking the room).
 | `stored` | `id` | the relay holds this town's parcel |
 | `hashCheck` | `same` (bool), `mine`, `theirs` | the two towns' land compared |
 | `compat` | `warn` (a sentence for the event log) | a difference that only warns (another build, other mods) |
+| `pause` | `on`, `from` | the neighbour paused (`true`) or carried on (`false`): do the same |
+| `walkers` | `tmpl`, `list` | the neighbour's villagers, as above |
 | `claimed` | `id`, `ok` (bool), `why` | the answer to a `claim` |
 | `claims` / `released` | `seat`, `rects` | the neighbour claimed / released land |
 | `claimBlock` | `bx`, `by`, `size`, `owner` (one char per tile: the neighbour's seat digit or `.`) | the neighbour's land, on join |

@@ -17,6 +17,7 @@
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/town.h"
 #include "ext/neighbour/shared_map.h"
+#include "ext/neighbour/walkers.h"      // the neighbour's villagers, seen
 #include "ext/registry.h"   // Ext::Ext().neighbour
 #include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
 #include "ext/neighbour/seat_store.h"   // seat tokens kept beside settings.cfg
@@ -25,6 +26,7 @@
 
 #include "Game/EventLog.h"         // EventLogEntry
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
+#include "Game/PlayerToolManager.h"   // PlayerToolManager::paused: the shared pause
 #include "io/Persistence.h"        // the settings map (neighbour.* keys)
 #include "io/settings_store.h"      // SettingsStore::DefaultPath: where settings.cfg (and the seat file) live
 #include "platform/common/platform_settings.h"   // ReadWholeFile / WriteFileAtomic
@@ -151,6 +153,60 @@ Message Hello() {
 // --- parcels --------------------------------------------------------------
 
 std::string PeerLabel() { return s_peerName.empty() ? std::string("your neighbor") : s_peerName; }
+
+// --- the shared pause -----------------------------------------------------
+// Either town pausing pauses both, and either carrying on resumes both (the user's call). The toolbar's
+// pause / play buttons and the TogglePause key all write PlayerToolManager::paused; the frame reads it,
+// and a change the player made here goes to the neighbour. One the neighbour made is applied here and
+// is not sent back.
+bool s_pauseSeen = false;    // PlayerToolManager::paused at the last look
+bool s_pauseKnown = false;   // s_pauseSeen is this game's (a game's first frame reads it)
+
+PlayerToolManager* ToolManager() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    return g != nullptr ? g->m_toolManager : nullptr;
+}
+
+void SendPause(bool on) {
+    if (!s_link || !s_joined) return;
+    Message m("pause");
+    m.SetBool("on", on);
+    s_link->Send(m);
+}
+
+void PollPause() {
+    PlayerToolManager* t = ToolManager();
+    if (t == nullptr) return;
+    const bool now = t->paused;
+    if (!s_pauseKnown) {
+        s_pauseSeen = now;
+        s_pauseKnown = true;
+        return;
+    }
+    if (now == s_pauseSeen) return;
+    s_pauseSeen = now;
+    SendPause(now);
+}
+
+void ApplyPause(const Message& m) {
+    bool on = false;
+    if (!m.GetBool("on", on)) return;
+    PlayerToolManager* t = ToolManager();
+    if (t == nullptr) return;
+    const std::string from = Sanitize(m.GetOr("from", ""), kMaxNameChars);
+    if (t->paused != on) {
+        t->paused = on;
+        Post((from.empty() ? PeerLabel() : from) + (on ? " paused the game." : " carried on."), kColourStatus);
+    }
+    s_pauseSeen = on;   // the neighbour's change: not news to send back
+    s_pauseKnown = true;
+}
+
+// A neighbour arriving, or this town joining, while this game is paused: the other pauses too.
+void ShareCurrentPause() {
+    PlayerToolManager* t = ToolManager();
+    if (t != nullptr && t->paused) SendPause(true);
+}
 
 // A fresh parcel id: this town's clock and a counter, in base 36 (ValidParcelId's alphabet).
 std::string NewParcelId() {
@@ -293,6 +349,7 @@ void RetryWaiting() {
 // --- incoming -------------------------------------------------------------
 
 void OnMessage(const Message& m) {
+    if (Walkers::OnMessage(m)) return;   // the neighbour's villagers (lobby games)
     {
         std::string notice;
         if (SharedMap::OnMessage(m, &notice)) {   // claims and mirrors (lobby games)
@@ -346,6 +403,7 @@ void OnMessage(const Message& m) {
             h.Set("hash", hash);
             s_link->Send(h);
         }
+        if (online) ShareCurrentPause();
         std::string line = "Joined the room \"" + s_config.room + "\".";
         if (peer.empty())  line += " No neighbor has joined yet.";
         else if (online)   line += " " + peer + " is here.";
@@ -358,6 +416,10 @@ void OnMessage(const Message& m) {
         s_peerName = peer;
         s_peerOnline = online;
         Post(peer + (online ? " has arrived." : " has left."), kColourStatus);
+        if (online) ShareCurrentPause();
+        else Walkers::Clear();
+    } else if (m.type == "pause") {
+        ApplyPause(m);
     } else if (m.type == "parcel") {
         OnParcel(m);
     } else if (m.type == "hashCheck") {
@@ -385,7 +447,9 @@ void OnMessage(const Message& m) {
              kColourProblem);
         if (fatal && s_link) {   // refused for good (another game's data, another land): stop retrying
             s_refused = true;
-            SharedMap::End();
+            SharedMap::Stop();   // the game goes on: the mirrors and villagers leave its scene
+            Walkers::Clear();
+            Walkers::End();
             s_link->Stop();
             Post("Neighbor towns stopped for this game.", kColourProblem);
         }
@@ -425,6 +489,7 @@ namespace {
 void HangUp() {
     PanelClose();
     SharedMap::End();
+    Walkers::End();
     if (s_link) {
         s_link->Stop();
         s_link.reset();
@@ -495,7 +560,9 @@ void ResetForGame(const void* owner) {
     // A lobby game is a shared map from its first structure on (the start town is built during
     // this Load, before SelectForGame).
     SharedMap::Begin(s_lobbyGame);
+    Walkers::Begin(s_lobbyGame);
     s_freshGame = true;   // until the save (if this Load is one) says otherwise
+    s_pauseKnown = false;
     s_waitingSynced = 0;
     std::lock_guard<std::mutex> lock(s_savedMu);
     s_saved = SavedState();
@@ -716,6 +783,7 @@ void SelectForGame() {
         if (!s_worldHashNew.empty()) s_saved.worldHash = s_worldHashNew;   // a new game's map
         if (!s_lobbyGame && s_loadedFromSave && !s_saved.pass.empty()) {   // a lobby save: its structures again
             SharedMap::Begin(true);
+            Walkers::Begin(true);
             SharedMap::ScanExisting();
             SharedMap::RestoreWaiting(s_saved);   // and what it had not sent yet
         }
@@ -768,6 +836,10 @@ void BeginFrame() {
     if (s_frame % kRetryWaitingFrames == 0) RetryWaiting();
     if (!s_link) return;
     SharedMap::Tick(s_link.get(), s_frame);
+    {
+        PlayerToolManager* t = ToolManager();
+        Walkers::Tick(s_link.get(), s_peerOnline, t != nullptr && t->paused);
+    }
     if (s_frame % kWaitingSyncFrames == 0) {
         const uint64_t gen = SharedMap::WaitingGeneration();
         if (gen != s_waitingSynced) {
@@ -784,6 +856,7 @@ void BeginFrame() {
     std::vector<Incoming> got;
     s_link->Poll(got);
     for (Incoming& in : got) OnIncoming(in);
+    PollPause();
 }
 
 void EndGame(const void* owner) {

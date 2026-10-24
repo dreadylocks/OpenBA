@@ -275,6 +275,24 @@ check(el && el.fatal === true && /same land/.test(el.why), "a town that built ot
 check(!!(await tryWait(hsA.wait((m) => m.t === "hashCheck" && m.same === false))), "and the neighbour is told the lands differ");
 for (const x of [tokenless, v1, hsA, hsData, hsB]) x.ws.close();
 
+// Shared pause: one town's pause reaches the other, with its name.
+const pauseRoom = `pausetest-${Date.now()}`;
+const pa = opener(pauseRoom, { t: "hello", pass: "pw5", name: "Pauser" });
+await tryWait(pa.wait((m) => m.t === "welcome"));
+const pb = opener(pauseRoom, { t: "hello", pass: "pw5", name: "Waiter" });
+await tryWait(pb.wait((m) => m.t === "welcome"));
+pa.ws.send(JSON.stringify({ t: "pause", on: true }));
+const paused = await tryWait(pb.wait((m) => m.t === "pause" && m.on === true));
+pa.ws.send(JSON.stringify({ t: "pause", on: false }));
+const resumed = await tryWait(pb.wait((m) => m.t === "pause" && m.on === false));
+check(paused && paused.from === "Pauser" && !!resumed, "a pause and its end reach the neighbour, with the town's name");
+pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,100,-200,300,450,1,0,100,3;2,0,0,0,0,0,1,66,5" }));
+const walkers = await tryWait(pb.wait((m) => m.t === "walkers"));
+pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,a,b" }));
+const badWalkers = await tryWait(pa.wait((m) => m.t === "error" && /walkers/.test(m.why)));
+check(walkers && walkers.list.startsWith("1,100,-200") && !!badWalkers, "villagers reach the neighbour; a bad list is refused");
+for (const x of [pa, pb]) x.ws.close();
+
 // Starting over: a town back in its seat with a new game (hello `fresh`) takes its old buildings,
 // roads and land with it, and the neighbour is told.
 const freshRoom = `freshtest-${Date.now()}`;

@@ -476,6 +476,12 @@ void Begin(bool on) {
     s_live = false;
 }
 
+void Stop() {
+    for (auto& kv : s_mirrors) FreeMirror(kv.second, true);
+    s_mirrors.clear();
+    End();
+}
+
 void End() {
     // The scene goes with the game: forget the mirrors without touching it (EndGame runs in the
     // loop's destructor), but free our MeshInstances.

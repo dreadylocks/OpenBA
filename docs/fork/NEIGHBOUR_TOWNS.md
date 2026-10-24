@@ -338,8 +338,8 @@ there, which the old 20 s watchdog budget killed). The upstream v1.0.0 exe also 
     pings every 25 s and reconnects (2 s doubling to 30 s); a reader thread fills the incoming
     queue. The main thread only queues and polls.
   - `link_platform.cpp` + `src/platform/{common/platform_websocket.h, win/websocket_win.cpp,
-    posix/websocket_posix.cpp}`: WinHTTP's WebSocket client (`winhttp` linked); POSIX is a stub
-    that reports "not available".
+    posix/websocket_posix.cpp}`: WinHTTP's WebSocket client (`winhttp` linked); macOS has
+    Network.framework's (`darwin/websocket_darwin.cpp`), Linux sockets + OpenSSL (2026-10-24).
   - `neighbour.*`: settings, the four seams (`ResetForGame(this)` / `SelectForGame()` in Load,
     `BeginFrame()` in Update, `EndGame(this)` in ~GameUpdateLoop, owner-checked like the class
     lock), and the event log rows.
@@ -660,6 +660,26 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   `EntityList::DrainRemovals`), before the free, through a pointer -> id map; the neighbour gets the
   `unbuild` and the land back, which never happened before. Checked on the Mac: a neighbour's house
   mirrored and then unbuilt, no crash.
+- **Shared pause** (the user's ask after the first game): the toolbar's pause / play and the pause key
+  write `PlayerToolManager::paused`; the frame watches it and sends `pause` on a change, and the
+  neighbour's game does the same (event log: "<town> paused the game." / "carried on."). Sent again on
+  arriving or joining while paused. Game speed is not shared.
+- **The neighbour's villagers, seen** (`walkers.{h,cpp}`, the user's ask): once a second while the
+  neighbour is online, each town sends its citizens' render position, yaw, the clip on their newest
+  animation layer, mesh group, size and clothes (`walkers`, passed on by the relay, kept nowhere); the
+  neighbour draws each as a see-through `MeshInstance` of the citizen model, its clip on a layer of its
+  own (not the instanced pose pool, which moves with the town's sim clock), gliding to each sample over
+  a second, standing still while paused, gone 4 s after the last sample or when the neighbour leaves.
+  Checked on the Mac with a scripted neighbour: the game sent 20 villagers a second, drew the 20 it was
+  sent ("villagers: 20 of the neighbour's shown"), applied a pause and its end, ran on with an empty
+  crash log. Not yet seen on screen.
+- **Fixed: a refusal mid-game freed the mirrors without taking them out of the scene** (a use after
+  free on the next draw). `SharedMap::Stop` removes them from the scene first; the refusal path calls it.
+- **Linux joins** (for a player on Linux): `src/platform/posix/websocket_posix.cpp` is a real client now
+  (sockets + OpenSSL, TLS 1.2+, the system CA store; pure parts in
+  `src/platform/common/websocket_frames.{h,cpp}`, unit tested). Tested on the Mac against the live relay
+  (room list only), a local relay, a scripted server and TLS refusal hosts, under ASan / UBSan / TSan;
+  not yet run on Linux. The Linux build now needs OpenSSL 3 (`libssl.so.3`) to start.
 
 ---------------------------------------------------------------------------------------------
 
