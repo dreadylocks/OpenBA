@@ -1,0 +1,31 @@
+// Version resource for the standalone OpenBA.exe: the Details tab of the file's Properties, and
+// the product name / version the code-signing service checks before it signs (CODE_SIGNING.md,
+// docs/reference/code_signing.md). CMakeLists.txt configures it into <build>/gen/version.rc from
+// project(... VERSION); edit the VERSION there, not here.
+1 VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   0x3F
+FILEFLAGS       0x0
+FILEOS          0x40004   // VOS_NT_WINDOWS32
+FILETYPE        0x1       // VFT_APP
+FILESUBTYPE     0x0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"      // US English, Unicode
+    BEGIN
+      VALUE "FileDescription",  "OpenBA"
+      VALUE "FileVersion",      "@PROJECT_VERSION@"
+      VALUE "InternalName",     "OpenBA"
+      VALUE "LegalCopyright",   "OpenBA contributors, GNU General Public License v3"
+      VALUE "OriginalFilename", "OpenBA.exe"
+      VALUE "ProductName",      "OpenBA"
+      VALUE "ProductVersion",   "@PROJECT_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
