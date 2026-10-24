@@ -9,6 +9,11 @@ name: Release
 #
 # Nothing here needs the game (AGENTS.md section 1): the Windows gate and the serializer check stay
 # the maintainer's steps before the tag is pushed.
+#
+# Code signing (CODE_SIGNING.md, setup in docs/reference/code_signing.md): on a `v*` tag the Windows
+# exe goes to SignPath and the signed copy is packaged. Off until the repository variable
+# SIGNPATH_ORGANIZATION_ID is set; until then every package is unsigned, as before. A manual
+# dispatch with test_sign signs with SignPath's test-signing policy, to check the setup.
 on:
   push:
     tags: ['v*']
@@ -20,6 +25,11 @@ on:
       - packaging/**
       - CHANGELOG.md
   workflow_dispatch:
+    inputs:
+      test_sign:
+        description: Sign the Windows exe with SignPath's test-signing policy (checks the signing setup)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -69,10 +79,18 @@ jobs:
     name: Windows x64 package
     needs: version
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120   # a signed release waits up to an hour for its SignPath approval
+    # actions: read lets SignPath read this job and download the unsigned-exe artifact with the
+    # run's token (the action's github-token); the workflow default grants contents only.
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: msys2 {0}
+    env:
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.test_sign == true) }}
+      SIGNING_POLICY: ${{ startsWith(github.ref, 'refs/tags/v') && (vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing') || 'test-signing' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -93,6 +111,46 @@ jobs:
         run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
       - name: Unit tests (release)
         run: tools/build.sh unit release
+      # SignPath's origin verification takes the exe from this run's own artifact, so it must be
+      # uploaded by actions/upload-artifact from this GitHub-hosted job. The artifact configuration
+      # (tools/release/signpath/artifact-configuration.xml) signs OpenBA.exe at the artifact's root
+      # and refuses it unless its VERSIONINFO says ProductName OpenBA and this version.
+      - name: Upload the unsigned exe
+        id: unsigned
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: build/cmake-release/OpenBA.exe
+          if-no-files-found: error
+          retention-days: 7
+      - name: Sign (SignPath)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'OpenBA' }}
+          signing-policy-slug: ${{ env.SIGNING_POLICY }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}   # empty: the project's default
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+          parameters: |
+            version: "${{ needs.version.outputs.version }}"
+      - name: Use the signed exe
+        if: env.SIGN == 'true'
+        run: cp -f signed/OpenBA.exe build/cmake-release/OpenBA.exe
+      - name: Check the signature
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature build/cmake-release/OpenBA.exe
+          "Status: $($sig.Status)  Signer: $($sig.SignerCertificate.Subject)  Timestamp: $($sig.TimeStamperCertificate.Subject)"
+          # test-signing uses a certificate no Windows machine trusts: it is signed, not Valid.
+          $ok = if ($env:SIGNING_POLICY -eq 'test-signing') { [bool]$sig.SignerCertificate } else { $sig.Status -eq 'Valid' }
+          if (-not $ok) { exit 1 }
       - name: Package
         run: tools/release/package.sh windows "${{ needs.version.outputs.version }}" dist
       - name: ccache statistics
@@ -207,6 +265,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # SignPath Foundation's terms ask every release page that carries a signed exe to link the
+      # code signing policy.
+      - name: Code signing policy link
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        run: |
+          printf '\n---\n[Code signing policy](%s/%s/blob/%s/CODE_SIGNING.md): free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> artifacts/release-notes/notes.md
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,5 +1,6 @@
 name: CI
-# Build + unit tests on the three platforms, and the no-doors acceptance check. Nothing here needs
+# Build + unit tests on the three platforms, the no-doors acceptance check and, on a push to main,
+# the latest Windows package as an artifact (job windows-latest). Nothing here needs
 # the game: retail data is never on a runner (AGENTS.md section 1), so the gameplay gate
 # (tools/build.sh run) and the serializer check (tools/resave_gate/) stay maintainer steps.
 # Unit tests that read the user's install (xwma_decode_test) skip when it is absent.
@@ -62,6 +63,57 @@ jobs:
       - name: ccache statistics
         if: always()
         run: ccache -s
+
+  # The newest Windows build, for testers: every push to main packages the release flavour the way
+  # a release does (tools/release/package.sh) and keeps it as this run's artifact for 30 days, with
+  # the files at the artifact's root like the release zip. Unsigned (only a tagged release goes to
+  # SignPath, release.yml), and named <version>+<commit> so it is not mistaken for that release.
+  # The ccache key is release.yml's, so a tag pushed on a built commit starts warm.
+  windows-latest:
+    name: Windows x64 latest build
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CCACHE_MAXSIZE: 400M    # the release object set
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: git
+          pacboy: gcc:p cmake:p ninja:p python:p ccache:p
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-release-windows-${{ github.sha }}
+          restore-keys: ccache-release-windows-
+      - name: Build OpenBA (release)
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
+      - name: Unit tests (release)
+        run: tools/build.sh unit release
+      - name: Package
+        run: |
+          VER="$(sed -nE 's/^project\([^)]*VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          tools/release/package.sh windows "$VER+${GITHUB_SHA::9}" dist
+          mkdir -p dist/latest
+          python3 -m zipfile -e dist/OpenBA-v*.zip dist/latest || python -m zipfile -e dist/OpenBA-v*.zip dist/latest
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenBA-latest-windows
+          path: dist/latest/
+          retention-days: 30
+          if-no-files-found: error
 
   linux:
     name: Linux (Ubuntu 24.04, dxvk-native)

@@ -29,7 +29,7 @@ project(banished_reimpl VERSION 1.0.1 LANGUAGES CXX)
 # overlay (src/game/Dialog/mainmenudialog.cpp). Bump here to cut a release (README "Versioning").
 add_compile_definitions(OPENBA_VERSION="${PROJECT_VERSION}")
 if(WIN32)
-  enable_language(RC)   # src/app/icon.rc
+  enable_language(RC)   # src/app/icon.rc, src/app/version.rc.in
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -272,9 +272,12 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(WIN32)
+# gen/version.rc: the VERSIONINFO resource (product name + this project's VERSION), which the
+# code-signing service checks before it signs the exe (docs/reference/code_signing.md).
+configure_file(${CMAKE_SOURCE_DIR}/src/app/version.rc.in ${EXT_RSC_GEN_DIR}/version.rc @ONLY)
 add_executable(OpenBA WIN32
   ${GAME_SRCS} ${ENGINE_SRCS} ${PLATFORM_SRCS} ${RENDER_SRCS} ${APP_SRCS} ${DIAG_SRCS}
-  ${CMAKE_SOURCE_DIR}/src/app/icon.rc)
+  ${CMAKE_SOURCE_DIR}/src/app/icon.rc ${EXT_RSC_GEN_DIR}/version.rc)
 set_target_properties(OpenBA PROPERTIES OUTPUT_NAME OpenBA RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 target_include_directories(OpenBA PRIVATE ${BANISHED_INCLUDES})
 target_compile_options(OpenBA PRIVATE ${BANISHED_CXX_FLAGS} ${BANISHED_ONE_WRITE_STDIO} ${FLAVOUR_FLAGS})
