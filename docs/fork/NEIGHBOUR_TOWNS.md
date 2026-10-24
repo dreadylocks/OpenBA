@@ -580,8 +580,9 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   worldgen and the start spiral call libm (`worldgen_cells.cpp` falloff, the eee0 brushes in
   `worldgen_f390_erosion.cpp` / `worldgen_f390_rivers.cpp`, `StartTown_FindSpawnTile`); every other game
   keeps the platform's (an ordinary seed-12345 game still builds `627a733aa4109739`). The unit test
-  `ext_neighbour_world_maths_same_bits_everywhere` pins a digest taken on the Mac: passing on Windows
-  proves the PC rounds the same.
+  `ext_neighbour_world_maths_same_bits_everywhere` pins a digest taken on the Mac, and CI on the fork
+  (run 40050809557, 2026-10-24, all four checks green) printed the same `dddeb20c8806872b` on Windows
+  (MSYS2 UCRT64 GCC) and Linux (x86-64 GCC): the PC computes a shared map exactly as the Mac does.
 - **An unattended lobby (test aid)**: `neighbour.autolobby=create|join` in `settings.cfg` with
   `BANISHED_AUTOSTART`; a joining game takes the room's settings (`Lobby_RoomSettingsForJoin`, a new EXT
   SEAM at the top of `MainMenuDialog::StartNewGame`).
@@ -592,6 +593,7 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   trees left the joiner's copy; both ran 70+ s, empty crash logs. Odd but harmless so far: the creator
   counted 224 solid tiles from the joiner's buildings, the joiner 112 from the creator's (the counter
   may count a re-sent building twice); worth a look.
+- **Upstream 1.0.1 merged** (`ce433466d`, 122 more commits; 4 small conflicts, see its message).
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`). The relay must be started by the user on the
   home network (`npx wrangler dev --ip 0.0.0.0 --port 8791`); this session's tooling may not open a
   port to the network itself. Worldgen

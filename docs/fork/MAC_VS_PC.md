@@ -6,8 +6,8 @@ No Steam account or login is involved.
 What is already proven (on the Mac, 2026-10-23): the Mac game boots and plays; it trades chat, goods
 and families with a pretend town; and two Mac games on one shared map build the same land, see each
 other's buildings and share felled trees. A shared map is built with the same maths code on Windows
-and Mac, so the PC should build the same land too. The first real Mac-against-PC game is what is
-left to test.
+and Mac, and GitHub's Windows, Linux and Mac test runs all compute it to the same bits, so the PC
+should build the same land too. The first real Mac-against-PC game is what is left to test.
 
 Your machines (home network): Mac `192.168.0.168`, PC `DESKTOP-3I0OFRD` = `192.168.0.177`.
 
