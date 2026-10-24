@@ -552,7 +552,22 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   against `wrangler dev` (seat tokens, a v1 game refused, other retail data refused, another build and
   other mods warned on both sides, other land refused); the Mac app and the Windows exe build. Not
   run in game on either machine yet (the Mac has no game data yet).
-- **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. Worldgen
+- **First runs on the Mac** (2026-10-23, `WinData` copied from the PC's share to
+  `/Volumes/DevSSD/dev/games/Banished`, a throwaway `--run-dir build/mac-run`): `dist/OpenBA.app`
+  boots, autostarts a new game and runs (21 citizens, 2000+ frames, empty crash log). With
+  `ext.neighbour=1` against the local relay and `fake_neighbour.mjs`, the Mac game connected through
+  the Network.framework client, joined with protocol 2, both sides got the engine `compat` warning,
+  the chat line arrived, 30 Potato went into storage and a family of 3 arrived. Mac facts for the PC
+  to compare: data hash `72222e615f7910e3` (no mods enabled); seed 12345, Easy / Valleys / small /
+  Fair (the autostart defaults): `[WorldHash] height f32=627a733aa4109739`,
+  `tiles=f904233e641d5efa`.
+- **Found**: a received family member older than the receiving citizen's rolled `maxAge` dies of old
+  age on arrival (the fake town's example ages 31 / 29.5 are far past the game's ~13). Two real games
+  send real ages, but a very old migrant would still die at once. Proposed: clamp a received age below
+  the new citizen's `maxAge` (or give it a short grace), and fix the script's example ages. Not done.
+- **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. A cheaper
+  check first, with no relay: start a new game on the PC with `BANISHED_SEED=12345`, mods off and the
+  same defaults, and compare its `[WorldHash] height f32=` line with the Mac's above. Worldgen
   calls the platform's `powf` (`worldgen_cells.cpp:56`, `worldgen_f390_erosion.cpp:84`,
   `worldgen_f390_rivers.cpp:95`): Apple's libm and the PC's may differ in the last bit for some inputs,
   and then the land hashes differ and the relay refuses the join. If so, the fix is a portable `powf`
