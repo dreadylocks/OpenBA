@@ -26,6 +26,7 @@
 #include "Game/MapGenerator.h"
 #include "Game/TerrainGenerator.h"
 #include "io/Persistence.h"
+#include "collection/avl_trees.h"   // rtavl::StringMapInsert: the settings map's insert
 #include "ext/registry.h"
 
 #include "ext/neighbour/lobby_panel.h"
@@ -100,6 +101,20 @@ std::string SettingsServer() {
 // What the player last typed in the relay box this session (the box starts from it next time).
 std::string s_typedRelay;
 
+// A relay that answered becomes settings.cfg's neighbour.server, so the box starts with it next time.
+// Persistence::Set's insert-or-replace (persistence.cpp), with a text value; written at once.
+void RememberRelay(const std::string& relay) {
+    ::IO::Persistence* p = ::IO::Persistence::_singleton;
+    if (p == nullptr || relay.empty() || relay == SettingsServer()) return;
+    System::String key("neighbour.server");
+    System::String value(relay.c_str());
+    RtIo::SettingsNode* node = nullptr;
+    rtavl::StringMapInsert(&p->_settingsMap, &node, &key._data, &value._data);
+    if (node != nullptr && node->element.value._data != value._data) node->element.value = value;
+    p->WriteSettings();
+    fprintf(stderr, "[Neighbour] lobby: relay %s kept in settings.cfg\n", relay.c_str());
+}
+
 std::string Setting(const char* key);   // below: a settings.cfg value, "" when unset
 
 template <class T>
@@ -129,7 +144,11 @@ public:
         if (UI::Element* e = Find(this, "buttonLoad")) e->SetElementId(kIdLoad);
         _table = FindElement(System::String("roomTable"));
         // The relay: what was typed earlier this session, else settings.cfg's.
-        const std::string relay = s_typedRelay.empty() ? SettingsServer() : s_typedRelay;
+        std::string relay = s_typedRelay.empty() ? SettingsServer() : s_typedRelay;
+        // TEST AID (settings.cfg neighbour.lobbyrelay=<url>): the box starts with this, as if the player
+        // had typed it, so an unattended run can check that a relay that answers is kept (RememberRelay).
+        const std::string typed = Setting("neighbour.lobbyrelay");
+        if (!typed.empty()) relay = typed;
         if (UI::EditElement* r = AsEdit(Find(this, "editRelay"))) r->SetText(System::String(relay.c_str()));
         // Your town: what settings.cfg names, as a starting point.
         const ::IO::Persistence* p = ::IO::Persistence::_singleton;
@@ -244,6 +263,7 @@ private:
             });
             _rooms = rooms;
             _listed = true;
+            RememberRelay(server);
             Paint(connection, "Connected to your relay", kColourGood);
             Status("");
         } else {

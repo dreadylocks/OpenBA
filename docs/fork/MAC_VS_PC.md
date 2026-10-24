@@ -59,9 +59,9 @@ Mac. That one does open a port to your home network while it runs.)
    (type in **Search** to find it), type its password and your town's name, then press **Join room**.
 3. The PC builds the same map from the same seed and starts on the other side of it.
 
-Tip: put `neighbour.server=wss://openba-neighbour.spellpress.workers.dev` in each machine's
-`settings.cfg` and the Relay box starts with it (Mac: `~/Documents/Banished/settings.cfg`; PC:
-`Documents/Banished/settings.cfg`).
+The relay only needs typing once per machine: as soon as it answers, the game keeps it in
+`settings.cfg` (`neighbour.server`; Mac: `~/Documents/Banished/settings.cfg`, PC:
+`Documents/Banished/settings.cfg`) and the next Multiplayer screen starts connected.
 
 ## 5. What to look for
 
