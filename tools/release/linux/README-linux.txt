@@ -29,4 +29,4 @@ Logs
 ----
 standalone_debug.log / standalone_error.log / standalone_crash.log are written to the
 folder the game runs from. Settings and saves are under ~/.local/share/Banished.
-Please report problems at https://github.com/fran-cap/OpenBA/issues with the logs attached.
+Please report problems at https://github.com/dreadylocks/OpenBA/issues with the logs attached.

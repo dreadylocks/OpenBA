@@ -4,6 +4,41 @@ One section per release, newest first. The section of the version being tagged i
 release's notes (`.github/workflows/release.yml` reads it with `tools/release/changelog_section.py`).
 Headings are `## vX.Y.Z (YYYY-MM-DD)`; the version is the CMake `VERSION` in `CMakeLists.txt`.
 
+## v1.1.0 (2026-10-24)
+
+This fork's first release (dreadylocks/OpenBA): **neighbor towns**, a two-player mode where each of
+you builds your own town on one shared map, each on your own computer, talking through a small relay.
+Ordinary single-player games are unchanged: the mode is an extension, off unless you start a game from
+the Multiplayer screen.
+
+**Neighbor towns**
+- **Multiplayer** on the main menu: a searchable list of rooms, New room (one land, or Continents:
+  experimental), Join room with a password, your own rooms marked "yours" (Load saved game, or Start
+  over). The relay you connect to is remembered.
+- The same map on every machine: Windows, macOS and Linux build identical land from a room's seed.
+- You see each other's buildings (see-through), roads and felled or planted trees, and each other's
+  villagers walking about. Pausing pauses both games.
+- Chat, send goods and send a family to your neighbor (press N in game).
+- Your seat in a room is kept, so you can come back to your town; changes made while the relay was
+  unreachable are saved and sent on the next connect.
+- Both players need the same Banished data and the same mods (or none); a room that needs a mod's map
+  size does not show in the list yet.
+- Relay: `tools/neighbour_server` (a Cloudflare Worker); you can run your own. How to play:
+  `docs/fork/MAC_VS_PC.md`; how it works: `docs/fork/NEIGHBOUR_TOWNS.md`, `docs/fork/NEIGHBOUR_PROTOCOL.md`.
+
+**Platforms**
+- Linux can join neighbor towns (a WebSocket client on OpenSSL); the Linux package now needs
+  OpenSSL 3 (`libssl.so.3`), which current distributions ship.
+- macOS: trackpad tap-to-click works, and Macs reach the relay (it had refused their connection).
+
+**Fixes**
+- Demolishing a building in a neighbor game no longer crashes it.
+
+**Known**
+- Continents maps are experimental and look wrong in places (mountainous coasts, cut-off lakes).
+- Villagers of your neighbor are drawn about a second late; a town of more than ~300 shows its first ~300.
+- The packages are not code-signed yet: Windows asks before running it ("More info", "Run anyway").
+
 ## v1.0.1 (2026-10-23)
 
 Second release of OpenBA, five days after v1.0.0: Linux and macOS packages for the first time,
