@@ -80,6 +80,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/seat_store.cpp            #   the seat-token file format
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/link.cpp                  # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/lobby.cpp                 # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS M2)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/continents.cpp            #   the Continents map's shape (§12)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/dxbc.cpp            # ext_better_trees_test.cpp (block FAA-CORE)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/cutout_rewrite.cpp
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/receiver_rewrite.cpp   # ext_better_trees_test.cpp (block TS-CORE)

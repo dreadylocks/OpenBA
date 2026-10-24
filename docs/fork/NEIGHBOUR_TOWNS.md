@@ -13,7 +13,8 @@ Ground rules (from the user, 2026-10-19):
 - Explain things to the user in plain words (simple analogies), not jargon.
 - Never push or add remotes without asking.
 
-Status (2026-10-23): M0 to M3 done, except a colour tint on the neighbour's buildings. A
+Status (2026-10-24): M0 to M3 done, except a colour tint on the neighbour's buildings; a lobby room can
+be a Continents map, a land each with sea between and all round (§12). A
 Multiplayer lobby on the main menu creates and joins rooms; both towns build the same map with the
 same forests; the neighbour's land is claimed, their buildings are drawn in your game and are solid,
 their roads are real roads, and a tree felled or planted in one town is felled or planted in the
@@ -53,6 +54,8 @@ PC: `MAC_VS_PC.md`. Next steps: §6.
 ---------------------------------------------------------------------------------------------
 
 ## 1. Island maps (later, optional)
+
+(What was built instead, for lobby rooms: the Continents map, §12. This section is the background.)
 
 ### How a Banished map is made
 
@@ -646,3 +649,87 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   insert and `WriteSettings`), so each machine types it once. Test aid `neighbour.lobbyrelay=<url>` fills
   the box as if typed; checked on the Mac (a run with no relay saved ended with it in settings.cfg).
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.
+
+---------------------------------------------------------------------------------------------
+
+## 12. Continents (2026-10-24)
+
+The user asked for an island map, then settled on "continents": big separate lands, not small
+islands. Two mockups were shown (a sea down the middle; then the sea all round); the user picked
+**two lands each ringed by sea, the wide sea** (about 45 tiles between them on a small map, 90 on a
+large one), with nomads landing on the coast.
+
+### The map
+- **Shape** (`src/ext/neighbour/continents.{h,cpp}`, standard C++): two lands side by side, west and
+  east, or north and south (the seed picks), each a rounded rectangle whose coast wanders (four
+  octaves of value noise from integer hashes of the seed; up to 30 tiles on the outer side, 14 on
+  the side facing the other land). Two smooth limits keep the sea between them at least 20 tiles
+  wide and the playable map's edge always 4 tiles out at sea. `LandDistance` is the signed distance
+  to the nearest coast. Each land is a quarter to a third of the playable map. Only `+ - * /` and
+  `sqrt` on floats, no libm: the bits are the same on every platform.
+- **Worldgen** (`continents_world.cpp`, EXT SEAMs in `wg_HeightmapPipeline_f390`): the coastline
+  stage is replaced by the **sea lane**, a straight path 0 down the middle of the sea from one edge
+  of the terrain to the other (the trader boats' route: `boatcomponent_route.cpp` sails in along
+  path 0 and A*s through water to the dock, and the sea joins every coast). The rest of retail's
+  stages run as usual and make the lands' hills, valleys, rivers and lakes; after the paths stage,
+  rivers are cut to their longest stretch on land and lakes whose middle is at sea are dropped
+  (`KeepRiversOnLand`); after the last smoothing, `ShapeCoasts` gives every vertex
+  `CoastHeight(h, d)`: land more than 18 tiles inland is untouched, hills near the coast come down
+  to a flat buildable beach (0.3) for 6 tiles, anything lower than the beach (a river, a lake)
+  stays, and at sea the floor drops to -2.5 within 5 tiles.
+- **The sea's water** (`AddSea`, EXT SEAM in `WorldGeometry::BuildWaterMesh`): Banished draws
+  water only along paths and round lakes, so the sea is added as more lake ranges (mode 0x8000, the
+  lakes' material): every underwater cell at sea (b260 phase 2's test, corner <= -0.75), at the next
+  lake's level, full water (weight 255), in pieces of 128 cells (16-bit indices), an all-sea 8x8
+  block as one quad. Lakes' own boxes are left to them. The sea lane's river strip (body 0) is
+  emptied: it is a route, not a river. The water mesh is saved with the map, so a loaded game
+  needs nothing new.
+- **Starts**: `StartCentre` puts each town's spiral in the middle of its own land (town 1, the
+  room's maker: west / north), and `StartTileAllowed` (EXT SEAM in the spiral) refuses tiles on the
+  other land, so the search never crosses the sea. `[Neighbour] continents: town 1 starts on its
+  own land: yes, town 2 on its own: yes` follows the `start sites:` line.
+- **Nomads** (`NomadLanding`, EXT SEAM in `ImmigrationComponent::Spawn`): on a map whose corners
+  and edge middles are all water (no retail map: its rim is >= 2.0) in a game with ext.neighbour,
+  a group comes ashore on the town's own coast: a random direction from the Town Hall, walked to
+  the open sea (12 water tiles in a row), the last walkable tile before it; `FindSpawnCell` then
+  looks round it as it looks round an edge point. It works from the map alone, so a loaded game
+  needs no saved state.
+- **The room**: New room has a **Map** row, One land / Continents (`ExtensionsLobby.rsc` `fieldMap`).
+  The choice rides in the room's `terrain` setting as a prefix, `continents:<the TerrainGenerator's
+  path>` (`Continents::JoinMap` / `SplitMap`; `RoomSettings::map`), so neither the relay nor the
+  protocol changed. A game that does not know the prefix cannot load that path and refuses the room
+  ("doesn't have the room's map") instead of building other land. The list shows "Continents
+  (Valleys)". Test aid: `neighbour.map=continents` in settings.cfg makes an autolobby create (and
+  `neighbour.lobbyview=new`) pick it.
+- Single-player and one-land rooms are untouched: every seam does nothing unless the new game is a
+  Continents room's (`Continents::SetForGame` from `ResetForGame`), and `NomadLanding` needs
+  ext.neighbour on and a map ringed by sea.
+
+### Tested
+- Unit tests on the Mac (release tree): 1416, 0 failures, 17 skipped. New
+  (`tests/unit/ext_neighbour_continents_test.cpp`): the map type in the terrain setting; two lands
+  ringed by sea for 8 seeds x 3 map sizes (the playable edge at sea all round, the boats' lane in
+  deep water edge to edge, the middle of the sea never land, each start on its own land and not the
+  other, each land 15-40% of the map); the coast profile; nomads coming ashore on a made-up map
+  (over a river, round a coastal mountain, none from the open sea, a retail rim is not "ringed");
+  `ext_neighbour_continents_same_bits_everywhere`, digest `fc32ec476b6efe5c` on an arm64 Mac. CI on
+  the fork (run 40107857180, 2026-10-24, all four checks green) printed the same digest on Windows
+  (MSYS2 UCRT64 GCC) and Linux: a PC builds a Continents room's land exactly as the Mac does.
+- **Two Mac games, one Continents room** (unattended, a local relay from `wrangler dev`, room
+  `continents-test-1`, seed 4242, `build/cont-run-a` creating with `neighbour.map=continents`,
+  `build/cont-run-b` joining): both said the sea runs east-west (town 1's land north), built
+  `[WorldHash] height f32=e2e908db20d3a6f6`, drew the sea in 16 pieces (10199 vertices), found the
+  same start sites (128,72 / 106,208), each on its own land, the same scatter (7845 resources,
+  fingerprint `915f7bee19ad14d0`), and said "the same land"; the joiner's copy lost the 26 trees
+  town 1 felled. About three minutes each, empty crash logs.
+- Screenshots (`BANISHED_SCREENSHOT_AT`): town 1 by its coast, the sea drawn as water, a river
+  running to the beach; an overview without fog (seed 12345: the sea runs north-south, the lands
+  west and east) showing both lands, the sea between and round them, rivers inland.
+- New room's Map row: checked by its laid-out rectangles (a temporary dump): label, the two
+  buttons side by side, the note, then Create room, nothing overlapping, the screen's size unchanged.
+- An ordinary single-player game is unchanged: seed 12345 still builds `627a733aa4109739`, tiles
+  `f904233e641d5efa`, and prints no Continents line. `tools/acceptance/acceptance.sh`: 0 off target.
+- **Not checked yet**: nomads coming ashore in a running game (they need a Town Hall and empty
+  houses; the walk is unit tested); a trader boat on this map (the route code is unchanged and the
+  sea joins every coast); the Mac against the PC on a Continents map in a real game (CI says the
+  maths agree); picking One land / Continents by hand; whether a bridge can span the sea.

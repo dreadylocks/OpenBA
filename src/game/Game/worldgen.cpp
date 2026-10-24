@@ -63,6 +63,7 @@
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 #include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::NoteWorldHash (NOT RETAIL)
 #include "ext/neighbour/world_maths.h" // EXT SEAM: Neighbour::PortableWorldMaths (NOT RETAIL)
+#include "ext/neighbour/continents_world.h" // EXT SEAM: a Continents room's map (NOT RETAIL)
 
 // ============================================================
 // Reused helpers from sibling reimpl TUs (already registered/defined)
@@ -208,11 +209,15 @@ static void wg_HeightmapPipeline_f390(TerrainHeightfield* hf) {
         // Verified f390 order (blueprint §0), incl. the stage-progress writes.
         wg_PublishLoadProgress(2);
         LoadTime::Stamp("wg.coastline");   // NOT RETAIL: print-only
-        wg_f390_coastline(hf);   // cd090
+        // EXT SEAM (NOT RETAIL, ext.neighbour Continents, docs/fork/NEIGHBOUR_TOWNS.md §12): a Continents
+        // room's path 0 is the sea lane between its two lands, in place of the main river.
+        if (!Neighbour::Continents::PlaceSeaLane(hf))
+            wg_f390_coastline(hf);   // cd090
         LoadTime::Stamp("wg.ranges");   // NOT RETAIL: print-only
         wg_f390_ranges(hf);      // cd150
         LoadTime::Stamp("wg.paths");   // NOT RETAIL: print-only
         wg_f390_paths(hf);       // ccf60
+        Neighbour::Continents::KeepRiversOnLand(hf);   // EXT SEAM (NOT RETAIL): rivers and lakes end at its coasts
         wg_PublishLoadProgress(3);
         LoadTime::Stamp("wg.rivers");   // NOT RETAIL: print-only
         wg_f390_rivers(hf);      // cd460
@@ -228,6 +233,7 @@ static void wg_HeightmapPipeline_f390(TerrainHeightfield* hf) {
         wg_f390_smooth(hf);      // c350
         LoadTime::Stamp("wg.smooth2");   // NOT RETAIL: print-only
         wg_f390_smooth(hf);      // c350 (second pass)
+        Neighbour::Continents::ShapeCoasts(hf);   // EXT SEAM (NOT RETAIL): its sea and its beaches
     }
 }
 

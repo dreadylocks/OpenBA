@@ -65,6 +65,12 @@ Every `hello` field except `room`, `token`, `lastSeq` and `join`, plus the new g
 `seed` (int), `size` (int 0..2: 256 / 384 / 512), `disasters` (int 0/1), `start`, `terrain`,
 `climate` (resource paths). Refused if the room exists. Then handled as the creator's `hello`.
 
+The map type rides in `terrain`: a Continents room (a land each, sea between and all round,
+`NEIGHBOUR_TOWNS.md` §12) sends `continents:` before the TerrainGenerator's path, e.g.
+`continents:Game\Terrain\Valleys.rsc`; a one-land room sends the path alone. The relay stores and
+hands it back as any path. A game that does not know a prefix cannot load the path and refuses to
+join, so it never builds other land.
+
 ### `chat`
 `text` (string, at most 200 chars after cleaning). Example: `{"t":"chat","text":"Hello from Ashford"}`
 

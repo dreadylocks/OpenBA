@@ -399,6 +399,9 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
             const float s = portable ? MsvcLibm::Sinf(ang) : sinf(ang);
             const int tx = (int)(c * radius) + cx;   // local_res8 (cos) * r + dim/2
             const int ty = (int)(s * radius) + cy;   // local_res10 (sin) * r + dim/2
+            // EXT SEAM (NOT RETAIL, ext.neighbour Continents): on a Continents room's map a town starts
+            // on its own land; the spiral never crosses the sea. True everywhere else.
+            if (!Neighbour::StartTileAllowed(dim, tx, ty)) continue;
             if (StartTown_DiskBuildable(game, tx, ty, size, sizeSq)) {
                 *outX = tx; *outY = ty;
                 return true;

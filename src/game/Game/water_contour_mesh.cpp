@@ -91,6 +91,7 @@
 #include "Game/WorldGeometry.h"
 #include "Game/WorldGeometryElements.h"
 #include "Game/TerrainHeightfield.h"
+#include "ext/neighbour/continents_world.h"   // EXT SEAM: Neighbour::Continents::AddSea (NOT RETAIL)
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -772,6 +773,9 @@ void WorldGeometry::BuildWaterMesh(TerrainHeightfield* hf) {
 
     BuildWaterBodies(hf);
     BuildWaterShores(hf);   // shore rings around the hf->waterFeatures
+    // EXT SEAM (NOT RETAIL, ext.neighbour Continents, docs/fork/NEIGHBOUR_TOWNS.md §12): a Continents room's
+    // sea, as more lake ranges; its sea lane (body 0) is the boats' route and is not drawn as a river.
+    Neighbour::Continents::AddSea(this, hf);
 
     // Finalize the GPU buffers (b260 tail). IndexBuffer first, then VertexBuffer.
     _waterIndexBuffer.Create(_contourIndices.size * 2, false, _contourIndices.data);
