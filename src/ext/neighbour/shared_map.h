@@ -34,6 +34,7 @@ namespace Neighbour {
 
 class Link;
 class Message;
+struct SavedState;
 
 namespace SharedMap {
 
@@ -51,6 +52,15 @@ void NoteStructure(ComponentEntity* entity);
 void NoteRoadCell(uint32_t cellIdx);
 // A lobby game loaded from its save: report every structure standing (its claim and mirror).
 void ScanExisting();
+
+// The changes still waiting for the relay -- roads, resource changes, structures that are gone, land
+// to claim or give back -- go into the save, so a town that quits while offline sends them on its next
+// connect (structures standing are claimed and mirrored again on every join anyway). Main thread:
+// WaitingGeneration moves whenever they change; SaveWaiting copies them into `s`'s map* fields;
+// RestoreWaiting queues a loaded save's again (after ScanExisting).
+uint64_t WaitingGeneration();
+void     SaveWaiting(SavedState& s);
+void     RestoreWaiting(const SavedState& s);
 
 // EXT SEAM in RoadTool::CalcPath: the road tool's template for a road type (sent with the road).
 void NoteRoadTemplate(uint8_t roadType, const ComponentDescription* tool);

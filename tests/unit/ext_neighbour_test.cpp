@@ -140,6 +140,45 @@ UNIT_TEST(ext_neighbour_saved_state) {
     CHECK(old.outbox.empty() && old.received.empty() && old.waiting.empty());
 }
 
+// v5: the shared map's changes still waiting for the relay come back from the save; a v4 save has none.
+UNIT_TEST(ext_neighbour_saved_state_waiting_changes) {
+    Neighbour::SavedState s;
+    s.room = "river-folk";
+    s.mapWaiting = {"{\"t\":\"road\",\"cell\":1234,\"type\":1,\"tt\":0,\"tmpl\":\"Template\\\\Road.rsc\"}",
+                    "{\"t\":\"nat\",\"op\":\"rm\",\"cell\":99,\"tmpl\":\"Template\\\\TreeOak.rsc\"}"};
+    s.mapUnbuilds = {"s12_34"};
+    s.mapClaims = {{5, 6, 1, 1}};
+    s.mapReleases = {{10, 10, 3, 2}};
+    const std::vector<uint8_t> bytes = Neighbour::EncodeState(s);
+    Neighbour::SavedState back;
+    CHECK(Neighbour::DecodeState(5, bytes, back));
+    CHECK_EQ(static_cast<int>(back.mapWaiting.size()), 2);
+    if (back.mapWaiting.size() == 2) CHECK_STREQ(back.mapWaiting[1].c_str(), s.mapWaiting[1].c_str());
+    CHECK_EQ(static_cast<int>(back.mapUnbuilds.size()), 1);
+    CHECK(back.mapClaims.size() == 1 && back.mapClaims[0].y == 6);
+    CHECK(back.mapReleases.size() == 1 && back.mapReleases[0].x == 10 && back.mapReleases[0].w == 3 &&
+          back.mapReleases[0].h == 2);
+    // A v4 save: the same bytes without the four (empty) v5 lists.
+    Neighbour::SavedState v4s = s;
+    v4s.mapWaiting.clear();
+    v4s.mapUnbuilds.clear();
+    v4s.mapClaims.clear();
+    v4s.mapReleases.clear();
+    std::vector<uint8_t> v4 = Neighbour::EncodeState(v4s);
+    v4.resize(v4.size() - 16);   // four u32 counts
+    Neighbour::SavedState old;
+    CHECK(Neighbour::DecodeState(4, v4, old));
+    CHECK(old.mapWaiting.empty() && old.mapReleases.empty());
+    CHECK(!Neighbour::DecodeState(5, v4, old));   // as a v5 payload it is short
+    // Anything but a road or resource change, or land off the map, is refused.
+    Neighbour::SavedState bad = s;
+    bad.mapWaiting = {"{\"t\":\"chat\",\"text\":\"hi\"}"};
+    CHECK(!Neighbour::DecodeState(5, Neighbour::EncodeState(bad), old));
+    bad = s;
+    bad.mapReleases = {{1020, 0, 10, 1}};
+    CHECK(!Neighbour::DecodeState(5, Neighbour::EncodeState(bad), old));
+}
+
 UNIT_TEST(ext_neighbour_parcel_bodies) {
     // Goods: the count after the LAST ':', so a path may hold one.
     std::vector<std::pair<std::string, int>> g;

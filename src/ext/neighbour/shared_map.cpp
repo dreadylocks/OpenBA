@@ -106,6 +106,7 @@ bool s_applying = false;                    // applying the neighbour's change: 
 std::string s_roadTmpl[2];                  // the road tool's template per road type
 std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: not news
 std::vector<Message> s_pending;             // road / resource messages for the relay
+uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
 // What the neighbour's changes did here (logged when it changes): roads laid / taken up,
 // resources removed / planted, tiles marked solid.
 struct Applied { int roads = 0, unroads = 0, removed = 0, planted = 0, solid = 0, refused = 0; } s_applied, s_appliedLogged;
@@ -281,6 +282,7 @@ void AddMirror(const Message& m) {
 void Queue(const Message& m) {
     if (s_pending.size() >= kMaxPending) s_pending.erase(s_pending.begin());
     s_pending.push_back(m);
+    ++s_waitingAdds;
 }
 
 // ---- M3: roads ----------------------------------------------------------------------------------
@@ -562,6 +564,7 @@ void NoteStructure(ComponentEntity* entity) {
     s_mine[id] = mine;
     s_claimQueue.push_back(r);
     s_buildQueue.push_back(id);
+    ++s_waitingAdds;
 }
 
 void ScanExisting() {
@@ -586,6 +589,7 @@ void NoteRoadCell(uint32_t cellIdx) {
     if (!s_on || !EnsureGrid()) return;
     s_claimQueue.push_back(TileRect{static_cast<int>(cellIdx % static_cast<uint32_t>(s_dim)),
                                     static_cast<int>(cellIdx / static_cast<uint32_t>(s_dim)), 1, 1});
+    ++s_waitingAdds;
 }
 
 void NoteRoadTemplate(uint8_t roadType, const ComponentDescription* tool) {
@@ -652,6 +656,7 @@ void Tick(Link* link, uint64_t frame) {
             if (e == nullptr) {
                 s_unbuildQueue.push_back(it->first);
                 s_releaseQueue.push_back(it->second.rect);
+                ++s_waitingAdds;
                 it = s_mine.erase(it);
                 continue;
             }
@@ -694,6 +699,40 @@ void OnJoined(Link* link) {
         s_claimQueue.push_back(kv.second.rect);
         s_buildQueue.push_back(kv.first);
     }
+    ++s_waitingAdds;
+}
+
+uint64_t WaitingGeneration() {
+    // An addition moves the counter, a send shrinks a queue: either changes the pair.
+    const uint64_t sizes = s_claimQueue.size() + (s_releaseQueue.size() << 16) + (s_unbuildQueue.size() << 32) +
+                           (static_cast<uint64_t>(s_pending.size()) << 44);
+    return sizes ^ (s_waitingAdds * 0x9E3779B97F4A7C15ull);
+}
+
+void SaveWaiting(SavedState& s) {
+    s.mapWaiting.clear();
+    s.mapWaiting.reserve(s_pending.size());
+    for (const Message& m : s_pending) s.mapWaiting.push_back(m.Encode());
+    s.mapUnbuilds = s_unbuildQueue;
+    s.mapClaims = s_claimQueue;
+    s.mapReleases = s_releaseQueue;
+}
+
+void RestoreWaiting(const SavedState& s) {
+    if (!s_on) return;
+    for (const std::string& text : s.mapWaiting) {
+        Message m;
+        if (Parse(text, m) && (m.type == "road" || m.type == "nat")) Queue(m);
+    }
+    s_unbuildQueue.insert(s_unbuildQueue.end(), s.mapUnbuilds.begin(), s.mapUnbuilds.end());
+    s_claimQueue.insert(s_claimQueue.end(), s.mapClaims.begin(), s.mapClaims.end());
+    s_releaseQueue.insert(s_releaseQueue.end(), s.mapReleases.begin(), s.mapReleases.end());
+    ++s_waitingAdds;
+    if (!s.mapWaiting.empty() || !s.mapUnbuilds.empty() || !s.mapReleases.empty())
+        fprintf(stderr, "[Neighbour] shared map: %u change(s), %u removed structure(s) and %u land release(s) from the "
+                        "save wait for the relay\n",
+                static_cast<unsigned>(s.mapWaiting.size()), static_cast<unsigned>(s.mapUnbuilds.size()),
+                static_cast<unsigned>(s.mapReleases.size()));
 }
 
 bool OnMessage(const Message& m, std::string* notice) {

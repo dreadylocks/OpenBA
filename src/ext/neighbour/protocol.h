@@ -132,10 +132,20 @@ struct SavedState {
     std::vector<Parcel>      waiting;
     std::string              town, pass, server, worldHash;
     std::string              token;
+    // v5: the shared map's changes still waiting for the relay (shared_map.h SaveWaiting), so a town
+    // that quits while offline sends them on its next connect.
+    std::vector<std::string> mapWaiting;    // road / nat messages, each its JSON text
+    std::vector<std::string> mapUnbuilds;   // ids of structures that are gone
+    std::vector<TileRect>    mapClaims;     // land to claim (road tiles; structures are claimed again anyway)
+    std::vector<TileRect>    mapReleases;   // land to give back
 };
-constexpr int32_t kPayloadFormat   = 4;   // the registry row's formatVersion
-constexpr size_t  kKeepReceivedIds = 128;
-constexpr size_t  kMaxSavedParcels = 64;   // per list
+constexpr int32_t kPayloadFormat     = 5;   // the registry row's formatVersion
+constexpr size_t  kKeepReceivedIds   = 128;
+constexpr size_t  kMaxSavedParcels   = 64;      // per list
+constexpr size_t  kMaxSavedWaiting   = 20000;   // the newest; shared_map.cpp kMaxPending
+constexpr size_t  kMaxWaitingBytes   = 1024;    // one waiting message
+constexpr size_t  kMaxSavedUnbuilds  = 4096;
+constexpr size_t  kMaxSavedRects     = 65536;   // per list
 std::vector<uint8_t> EncodeState(const SavedState& s);
 bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, SavedState& out);
 

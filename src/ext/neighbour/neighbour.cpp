@@ -82,6 +82,10 @@ std::string           s_worldHashNew;     // NoteWorldHash during this Load (a n
 bool                  s_freshGame = false;
 uint64_t              s_parcelCounter = 0;
 constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
+// The shared map's changes waiting for the relay are copied into the saved state when they change, at
+// most this often (the save may be written on the save worker, so the copy is made here, in the frame).
+constexpr uint64_t    kWaitingSyncFrames = 15;
+uint64_t              s_waitingSynced = 0;     // SharedMap::WaitingGeneration at the last copy
 
 std::mutex& s_savedMu        = SavedMutex();     // the save-tail codec may run on the save worker
 SavedState& s_saved          = Saved();          // what goes into the save (save_state.cpp)
@@ -489,6 +493,7 @@ void ResetForGame(const void* owner) {
     // this Load, before SelectForGame).
     SharedMap::Begin(s_lobbyGame);
     s_freshGame = true;   // until the save (if this Load is one) says otherwise
+    s_waitingSynced = 0;
     std::lock_guard<std::mutex> lock(s_savedMu);
     s_saved = SavedState();
     s_loadedFromSave = false;
@@ -690,6 +695,7 @@ void SelectForGame() {
         if (!s_lobbyGame && s_loadedFromSave && !s_saved.pass.empty()) {   // a lobby save: its structures again
             SharedMap::Begin(true);
             SharedMap::ScanExisting();
+            SharedMap::RestoreWaiting(s_saved);   // and what it had not sent yet
         }
         s_saved.town = s_config.name;
         s_saved.pass = s_lobbyGame || !s_saved.pass.empty() ? s_config.password : std::string();
@@ -740,6 +746,19 @@ void BeginFrame() {
     if (s_frame % kRetryWaitingFrames == 0) RetryWaiting();
     if (!s_link) return;
     SharedMap::Tick(s_link.get(), s_frame);
+    if (s_frame % kWaitingSyncFrames == 0) {
+        const uint64_t gen = SharedMap::WaitingGeneration();
+        if (gen != s_waitingSynced) {
+            SavedState w;
+            SharedMap::SaveWaiting(w);
+            std::lock_guard<std::mutex> lock(s_savedMu);
+            s_saved.mapWaiting.swap(w.mapWaiting);
+            s_saved.mapUnbuilds.swap(w.mapUnbuilds);
+            s_saved.mapClaims.swap(w.mapClaims);
+            s_saved.mapReleases.swap(w.mapReleases);
+            s_waitingSynced = gen;
+        }
+    }
     std::vector<Incoming> got;
     s_link->Poll(got);
     for (Incoming& in : got) OnIncoming(in);

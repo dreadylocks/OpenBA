@@ -57,7 +57,7 @@ for that game and says why in the event log (or the lobby).
 ```json
 {"t":"hello","v":2,"room":"river","pass":"secret","name":"Ashford","token":"ac24a0aa785d279c20581e821c702bf0",
  "lastSeq":12,"engine":"openba","engineVer":"1.0.0","simBuild":"5b1d0c3e9a77f210","dataHash":"8f2e44a1c09b3d6e",
- "mods":"BetterFields.pkm|48213|0c1f9e2d7a3b4c55","exts":"neighbour:4","maxPlayers":2}
+ "mods":"BetterFields.pkm|48213|0c1f9e2d7a3b4c55","exts":"neighbour:5","maxPlayers":2}
 ```
 
 ### `create` (the lobby's Create room)
@@ -119,7 +119,7 @@ a random 128-bit `token`; the room keeps only a SHA-256 of it. Every later `hell
 and gets the same seat, whatever its `name`. A town with no token, or one the room does not know, takes
 a free seat or is refused (`already has two towns`). A room made before tokens existed knows its towns
 by name only; each such seat is handed its token once, to the town with that name. The game keeps its
-token in its save (neighbour save payload v4, `protocol.h` `SavedState`) and, the moment it arrives,
+token in its save (neighbour save payload v4 and later, `protocol.h` `SavedState`) and, the moment it arrives,
 in `<Documents>/Banished/neighbour_seats.txt` beside `settings.cfg` (one line per relay, room and town;
 `seat_store.h`), so a town that quits or crashes before saving keeps its seat. A hello with no token in
 the save, and the lobby's Join, send the one from that file. The file never leaves the machine.

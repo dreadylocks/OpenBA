@@ -631,4 +631,14 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   game left in that seat (buildings, roads, land, queued resource changes) and tells the neighbour
   (`NEIGHBOUR_PROTOCOL.md` hello; selftest 50 checks). A town that later loads an older save sends its
   buildings and land again on joining, so nothing is lost for good.
+- **Fixed: changes made offline were lost on quitting.** Roads, resource changes (trees felled or
+  planted), structures that are gone and land to give back wait in the shared map's queues while the
+  relay cannot be reached; a town that quit before reconnecting lost them, and the neighbour's copy
+  drifted. They now go into the save (neighbour payload v5, `protocol.h` `SavedState` `map*`; v4 saves
+  still load): `SharedMap::SaveWaiting` copies them into the saved state from the frame when they
+  change (the save may be written on the save worker), and a loaded lobby save queues them again
+  (`RestoreWaiting`, after `ScanExisting`). Checked on the Mac against a local relay: a town made a
+  room and saved; with the relay down it loaded, played (citizens felled trees) and saved; with the
+  relay back it loaded, logged "8 change(s) ... from the save wait for the relay" and sent them, and a
+  second town joining then received all 13 felled trees and the town's 8 buildings.
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.

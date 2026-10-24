@@ -587,6 +587,34 @@ void PutParcels(std::vector<uint8_t>& out, const std::vector<Parcel>& list) {
         PutStr(out, list[i].from);
     }
 }
+// The newest `max` strings.
+void PutStrings(std::vector<uint8_t>& out, const std::vector<std::string>& list, size_t max) {
+    const size_t n = list.size() < max ? list.size() : max;
+    PutU32(out, static_cast<uint32_t>(n));
+    for (size_t i = list.size() - n; i < list.size(); ++i) PutStr(out, list[i]);
+}
+void PutTileRects(std::vector<uint8_t>& out, const std::vector<TileRect>& list) {
+    const size_t n = list.size() < kMaxSavedRects ? list.size() : kMaxSavedRects;
+    PutU32(out, static_cast<uint32_t>(n));
+    for (size_t i = list.size() - n; i < list.size(); ++i) {
+        PutU32(out, static_cast<uint32_t>(list[i].x));
+        PutU32(out, static_cast<uint32_t>(list[i].y));
+        PutU32(out, static_cast<uint32_t>(list[i].w));
+        PutU32(out, static_cast<uint32_t>(list[i].h));
+    }
+}
+bool GetTileRects(ByteReader& r, std::vector<TileRect>& list) {
+    uint32_t n = 0;
+    if (!r.U32(n) || n > kMaxSavedRects) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t x = 0, y = 0, w = 0, h = 0;
+        if (!r.U32(x) || !r.U32(y) || !r.U32(w) || !r.U32(h)) return false;
+        if (w < 1 || h < 1 || x + w > static_cast<uint32_t>(kMaxMapDim) || y + h > static_cast<uint32_t>(kMaxMapDim))
+            return false;
+        list.push_back(TileRect{static_cast<int>(x), static_cast<int>(y), static_cast<int>(w), static_cast<int>(h)});
+    }
+    return true;
+}
 bool GetParcels(ByteReader& r, std::vector<Parcel>& list) {
     uint32_t n = 0;
     if (!r.U32(n) || n > kMaxSavedParcels) return false;
@@ -621,6 +649,14 @@ std::vector<uint8_t> EncodeState(const SavedState& s) {
     PutStr(out, s.worldHash.substr(0, 32));
     // v4
     PutStr(out, s.token.substr(0, kMaxTokenChars));
+    // v5
+    std::vector<std::string> waiting;
+    for (const std::string& m : s.mapWaiting)
+        if (m.size() <= kMaxWaitingBytes) waiting.push_back(m);
+    PutStrings(out, waiting, kMaxSavedWaiting);
+    PutStrings(out, s.mapUnbuilds, kMaxSavedUnbuilds);
+    PutTileRects(out, s.mapClaims);
+    PutTileRects(out, s.mapReleases);
     return out;
 }
 
@@ -648,6 +684,23 @@ bool DecodeState(int32_t formatVersion, const std::vector<uint8_t>& bytes, Saved
     }
     if (formatVersion >= 4) {
         if (!r.Str(s.token, kMaxTokenChars) || !ValidToken(s.token)) return false;
+    }
+    if (formatVersion >= 5) {
+        uint32_t n = 0;
+        if (!r.U32(n) || n > kMaxSavedWaiting) return false;
+        for (uint32_t i = 0; i < n; ++i) {
+            std::string text;
+            Message m;
+            if (!r.Str(text, kMaxWaitingBytes) || !Parse(text, m) || (m.type != "road" && m.type != "nat")) return false;
+            s.mapWaiting.push_back(std::move(text));
+        }
+        if (!r.U32(n) || n > kMaxSavedUnbuilds) return false;
+        for (uint32_t i = 0; i < n; ++i) {
+            std::string id;
+            if (!r.Str(id, kMaxParcelIdChars) || !ValidParcelId(id)) return false;
+            s.mapUnbuilds.push_back(std::move(id));
+        }
+        if (!GetTileRects(r, s.mapClaims) || !GetTileRects(r, s.mapReleases)) return false;
     }
     if (r.left != 0) return false;
     out = std::move(s);
