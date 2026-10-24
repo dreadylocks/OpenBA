@@ -41,6 +41,8 @@ namespace SharedMap {
 // The game started (a lobby game: `on`), or ended. Drops everything of the last game.
 void Begin(bool on);
 void End();
+// Sharing stops while the game goes on (a refusal): the mirrors leave the scene first, then End.
+void Stop();
 
 // EXT SEAMs: true when the neighbour holds the tile (only ever in a lobby game).
 bool PeerHolds(int x, int y);

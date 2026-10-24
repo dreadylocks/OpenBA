@@ -304,8 +304,25 @@ export class Room {
     if (msg.t === "unbuild") return this.onUnbuild(ws, a, msg);
     if (msg.t === "road") return this.onRoad(ws, a, msg);
     if (msg.t === "nat") return this.onNat(ws, a, msg);
+    if (msg.t === "pause") return this.onPause(ws, a, msg);
+    if (msg.t === "walkers") return this.onWalkers(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
+  }
+
+  // Shared pause: either town pausing pauses both. Passed straight to the neighbour, kept nowhere.
+  onPause(ws, a, msg) {
+    if (typeof msg.on !== "boolean") return this.fail(ws, "bad pause", false);
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "pause", on: msg.on, from: a.name || "" });
+  }
+
+  // The town's villagers, once a second: passed straight to the neighbour if it is online, kept nowhere.
+  onWalkers(ws, a, msg) {
+    if (typeof msg.tmpl !== "string" || msg.tmpl.length < 1 || msg.tmpl.length > kMaxPathChars ||
+        typeof msg.list !== "string" || msg.list.length > 14000 || !/^[0-9,;-]*$/.test(msg.list)) {
+      return this.fail(ws, "bad walkers", false);
+    }
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "walkers", tmpl: msg.tmpl, list: msg.list });
   }
 
   async onCreate(ws, a, msg) {

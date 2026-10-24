@@ -8,7 +8,8 @@
 //            wss://, TLS from the OS; no third-party library).
 //   macOS:   src/platform/darwin/websocket_darwin.cpp, the OS's Network.framework client (ws:// and
 //            wss://, TLS from the OS).
-//   Linux:   src/platform/posix/websocket_posix.cpp, not implemented yet (Connect fails).
+//   Linux:   src/platform/posix/websocket_posix.cpp, sockets + OpenSSL (TLS 1.2+, the system CA
+//            store); its pure parts in websocket_frames.{h,cpp}.
 //
 // THREADING. One thread may block in WebSocketReceiveText while another calls
 // WebSocketSendText; WebSocketCancel may be called from any thread and makes a blocked
