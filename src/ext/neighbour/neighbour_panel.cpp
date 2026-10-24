@@ -128,9 +128,9 @@ public:
         const Status st = GetStatus();
         std::string line;
         if (!st.serverSet)        line = "No server set (neighbour.server in settings.cfg).";
-        else if (!st.connected)   line = "Connecting to the neighbour server...";
+        else if (!st.connected)   line = "Connecting to the neighbor server...";
         else if (!st.joined)      line = "Joining the room \"" + st.room + "\"...";
-        else if (st.peer.empty()) line = "In the room \"" + st.room + "\" as " + st.name + ". No neighbour has joined yet.";
+        else if (st.peer.empty()) line = "In the room \"" + st.room + "\" as " + st.name + ". No neighbor has joined yet.";
         else line = "In the room \"" + st.room + "\" as " + st.name + ". " + st.peer +
                     (st.peerOnline ? " is here." : " is away (parcels wait for them).");
         if (st.unsent > 0) line += " " + std::to_string(st.unsent) + " parcel(s) not yet sent.";
@@ -159,7 +159,7 @@ public:
             std::string t = "A family of " + std::to_string(fam.size()) + " (" + std::to_string(adults) +
                             (adults == 1 ? " adult" : " adults");
             if (children > 0) t += ", " + std::to_string(children) + (children == 1 ? " child" : " children");
-            t += ") could move to " + (st.peer.empty() ? std::string("your neighbour") : st.peer) + ".";
+            t += ") could move to " + (st.peer.empty() ? std::string("your neighbor") : st.peer) + ".";
             Text("textFamily", t);
         }
     }

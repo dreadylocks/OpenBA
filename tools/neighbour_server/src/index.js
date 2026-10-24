@@ -101,7 +101,7 @@ export default {
       if (!isWebSocketUpgrade(request)) return new Response("expected a WebSocket", { status: 426 });
       return env.DIRECTORY.get(env.DIRECTORY.idFromName("directory")).fetch(request);
     }
-    if (url.pathname === "/") return new Response("OpenBA neighbour relay: connect to /room/<name>\n");
+    if (url.pathname === "/") return new Response("OpenBA neighbor relay: connect to /room/<name>\n");
     return new Response("not found", { status: 404 });
   },
 };
@@ -400,7 +400,7 @@ export class Room {
       if (b[off] !== "." && b[off] !== mine) { takenBy = b[off]; return false; }
       return true;
     });
-    if (takenBy !== null) return this.send(ws, { t: "claimed", id, ok: false, why: "your neighbour already holds that land" });
+    if (takenBy !== null) return this.send(ws, { t: "claimed", id, ok: false, why: "your neighbor already holds that land" });
     await this.eachTile(rects, true, (b, off) => { b[off] = mine; return true; });
     this.send(ws, { t: "claimed", id, ok: true });
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "claims", seat: a.seat, rects: msg.rects });
@@ -523,7 +523,7 @@ export class Room {
     const other = meta.hashes[1 - a.seat];
     if (other && other !== mine) {
       // Another land: refused (the room's land is the one the other town already built).
-      const peer = meta.seats[1 - a.seat] || "your neighbour";
+      const peer = meta.seats[1 - a.seat] || "your neighbor";
       this.send(ws, { t: "hashCheck", same: false, mine, theirs: other });
       for (const p of this.socketsFor(1 - a.seat)) this.send(p, { t: "hashCheck", same: false, mine: other, theirs: mine });
       return this.fail(ws, `your map is not the same land as ${peer}'s: the two games built different worlds ` +
@@ -569,7 +569,7 @@ export class Room {
       issue = true;
     }
     const other = 1 - seat;
-    const otherName = meta.seats[other] || "your neighbour";
+    const otherName = meta.seats[other] || "your neighbor";
     const theirs = meta.compat[other];
     const verdict = theirs ? compareCompat(read.compat, theirs, otherName) : { refuse: null, warn: [] };
     if (verdict.refuse) return this.fail(ws, verdict.refuse, true);
@@ -647,7 +647,7 @@ export class Room {
     // A parcel sent again (the sender reconnected before it heard "stored"): stored already.
     if (!list.some((p) => p.id === id && p.fromSeat === a.seat)) {
       if (list.filter((p) => p.to === to).length >= kMaxParcels) {
-        return this.fail(ws, "too many parcels are waiting for your neighbour", false);
+        return this.fail(ws, "too many parcels are waiting for your neighbor", false);
       }
       const entry = { id, kind: msg.kind, body: msg.body, from: a.name, fromSeat: a.seat, to };
       list.push(entry);

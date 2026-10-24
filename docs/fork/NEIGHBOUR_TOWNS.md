@@ -608,4 +608,18 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   (the same as the local-relay run), said "the same land", drew each other's buildings and the
   creator's felled trees left the joiner's copy; 60 s each, empty crash logs. The room stays in the
   relay's public list until it has been idle 60 days.
+- **A new Multiplayer screen** (2026-10-23, the user's pick of two mockups): rooms on the left in a
+  scrolling list (the Mods dialog's list box, up to 200 rows shown) with a search box that filters by
+  room or town name as you type; open rooms first, full ones dimmed; the picked room on the right
+  (password, your town, Join room) or New room; the relay folded into the header (Change relay).
+  Layout `ExtensionsLobby.rsc`, controller `lobby_panel.cpp`; the text reader now names the list box's
+  size fields (`_requestedWidth` / `_requestedHeight` / `_barSize`). Test aid:
+  `neighbour.lobbyview=join|new` opens the screen on the first room's Join panel or on New room
+  (with `BANISHED_AUTOMENU_BUTTON=14`). Checked on the Mac by each part's laid-out rectangle in all
+  three states (the menu has no screenshot, and this session may not record the screen).
+- **American spelling on screen**: "Neighbor" in every text a player sees (the screen, the Neighbor
+  panel, the event log, the relay's messages, the Extensions list). Internal names stay as they are:
+  settings keys (`neighbour.server`), the extension id and save codec, file names, the protocol, the
+  `[Neighbour]` log prefix, and the relay's seat and password hashing.
+- **Mac trackpad**: tap to click (and the two-finger tap) now reach the game (`mac_keymap.h`).
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.

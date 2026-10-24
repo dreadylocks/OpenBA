@@ -50,9 +50,9 @@ StringTable resource
 		// retail's ModMissing): @0 name, @1 the save's `ext:<id>`, @2 the saved format version
 		{ String _name = "ExtensionNotInBuild";		String _text = "The following extension is not part of this version of the game.~n~n@0 [@1]~nSaved with extension version @2~n~nA save keeps the extensions it was made with, so this one cannot be played here: loading it will stop the game with an error. Do you still want to load the save game?"; }
 		{ String _name = "ExtensionNewer";			String _text = "The following extension was saved by a newer version of it than this game has.~n~n@0 [@1]~nSaved with extension version @2~n~nThis version of the game cannot read it: loading this save will stop the game with an error. Do you still want to load the save game?"; }
-		// the Neighbour panel (ExtensionsNeighbour.rsc, ext.neighbour); its texts show @0
+		// the Neighbor panel (ExtensionsNeighbour.rsc, ext.neighbour); its texts show @0
 		{ String _name = "NeighbourParam";			String _text = "@0"; }
-		{ String _name = "NeighbourTitle";			String _text = "Neighbour Towns"; }
+		{ String _name = "NeighbourTitle";			String _text = "Neighbor towns"; }
 		{ String _name = "NeighbourSend";			String _text = "Send"; }
 		{ String _name = "NeighbourPrev";			String _text = "<"; }
 		{ String _name = "NeighbourNext";			String _text = ">"; }
@@ -64,14 +64,19 @@ StringTable resource
 		// the Multiplayer lobby (ExtensionsLobby.rsc, ext.neighbour M2)
 		{ String _name = "LobbyButton";			String _text = "Multiplayer"; }
 		{ String _name = "LobbyTip";			String _text = "Play next to a friend's town: create a room or join one."; }
-		{ String _name = "LobbyTitle";			String _text = "Multiplayer: Neighbour Towns"; }
+		{ String _name = "LobbyTitle";			String _text = "Neighbor towns"; }
 		{ String _name = "LobbyRoom";			String _text = "Room name"; }
-		{ String _name = "LobbyPassword";		String _text = "Password"; }
+		{ String _name = "LobbyPassword";		String _text = "Room password"; }
 		{ String _name = "LobbyTown";			String _text = "Your town"; }
 		{ String _name = "LobbyRelay";			String _text = "Relay"; }
+		{ String _name = "LobbyConnect";		String _text = "Connect"; }
+		{ String _name = "LobbyChangeRelay";	String _text = "Change relay"; }
+		{ String _name = "LobbyOpenRooms";		String _text = "Rooms"; }
+		{ String _name = "LobbySearch";			String _text = "Search"; }
 		{ String _name = "LobbyRefresh";		String _text = "Refresh"; }
-		{ String _name = "LobbyCreate";			String _text = "Create room"; }
-		{ String _name = "LobbyJoin";			String _text = "Join"; }
+		{ String _name = "LobbyNewRoom";		String _text = "New room"; }
+		{ String _name = "LobbyBack";			String _text = "Back"; }
+		{ String _name = "LobbyFooter";			String _text = "Or start your own room: you pick its map next."; }
 
 		// ext.load_progress's line on the boot loading screen (src/ext/load_progress/): @0 / @1 the mod numbers
 		{ String _name = "LoadProgressGameData";	String _text = "Loading game data"; }

@@ -328,10 +328,10 @@ const Entry kEntries[] = {
     // a relay server (neighbour.* keys in settings.cfg). Class C: the town's room state is in the
     // save's tail record (src/ext/neighbour/protocol.h SavedState).
     { "neighbour", Tier::Extension, Class::C, false,
-      "Neighbour towns",
+      "Neighbor towns",
       "Connects this town to a friend's town through a relay server (set neighbour.server, "
       "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
-      "appear in the event log. Press N in game for the Neighbour panel: chat, send goods, send a family.",
+      "appear in the event log. Press N in game for the Neighbor panel: chat, send goods, send a family.",
       4, [](State& s) -> bool& { return s.ext.neighbour; } },   // = Neighbour::kPayloadFormat (protocol.h)
 
 #ifdef BANISHED_UNIT_TEST

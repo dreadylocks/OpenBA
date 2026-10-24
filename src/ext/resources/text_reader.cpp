@@ -135,8 +135,11 @@ const FieldDesc kTabDesc[] = {
 };
 const FieldDesc kRibbon[] = { F("_vertical", Bool), F("", Bool), F("_cellPad", Int), F("_elements", ExtArray) };
 const FieldDesc kGroup[]  = { F("_elements", ExtArray) };
+// UI::ContainerDescription::Serialize: the requested size (+0x68, +0x6c), the bar size (+0x74), the
+// three parts, the two clamps (ContainerDescription.h).
 const FieldDesc kContainer[] = {
-    F("", Int), F("", Int), F("", Int), F("", Ext), F("", Ext), F("_content", Ext), F("", Bool), F("", Bool),
+    F("_requestedWidth", Int), F("_requestedHeight", Int), F("_barSize", Int), F("", Ext), F("", Ext),
+    F("_content", Ext), F("", Bool), F("", Bool),
 };
 const FieldDesc kLayoutItem[] = {
     F("_element", Ext), F("_name", String), F("_xAnchorTo", String), F("_yAnchorTo", String),

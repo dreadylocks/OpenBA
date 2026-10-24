@@ -641,7 +641,7 @@ void Tick(Link* link, uint64_t frame) {
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
             a.solid != l.solid || a.refused != l.refused) {
-            fprintf(stderr, "[Neighbour] shared map: from the neighbour so far: %d road tile(s) laid, %d taken up, "
+            fprintf(stderr, "[Neighbour] shared map: from the neighbor so far: %d road tile(s) laid, %d taken up, "
                             "%d resource(s) gone, %d planted, %d tile(s) solid; %d not applied%s%s\n",
                     a.roads, a.unroads, a.removed, a.planted, a.solid, a.refused, a.refused > 0 ? " (last: " : "",
                     a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
@@ -721,7 +721,7 @@ bool OnMessage(const Message& m, std::string* notice) {
         bool ok = true;
         m.GetBool("ok", ok);
         if (!ok && notice != nullptr)
-            *notice = "Some land you built on was already your neighbour's; the two towns overlap there.";
+            *notice = "Some land you built on was already your neighbor's; the two towns overlap there.";
         return true;
     }
     if (m.type == "build") { AddMirror(m); return true; }

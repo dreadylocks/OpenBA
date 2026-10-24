@@ -141,7 +141,7 @@ Message Hello() {
 
 // --- parcels --------------------------------------------------------------
 
-std::string PeerLabel() { return s_peerName.empty() ? std::string("your neighbour") : s_peerName; }
+std::string PeerLabel() { return s_peerName.empty() ? std::string("your neighbor") : s_peerName; }
 
 // A fresh parcel id: this town's clock and a counter, in base 36 (ValidParcelId's alphabet).
 std::string NewParcelId() {
@@ -292,7 +292,7 @@ void OnMessage(const Message& m) {
         }
     }
     if (m.type == "chat") {
-        const std::string from = Sanitize(m.GetOr("from", "Neighbour"), kMaxNameChars);
+        const std::string from = Sanitize(m.GetOr("from", "Neighbor"), kMaxNameChars);
         const std::string text = Sanitize(m.GetOr("text", ""), kMaxChatChars);
         int64_t seq = 0;
         if (m.GetInt("seq", seq)) {
@@ -334,12 +334,12 @@ void OnMessage(const Message& m) {
             s_link->Send(h);
         }
         std::string line = "Joined the room \"" + s_config.room + "\".";
-        if (peer.empty())  line += " No neighbour has joined yet.";
+        if (peer.empty())  line += " No neighbor has joined yet.";
         else if (online)   line += " " + peer + " is here.";
         else               line += " " + peer + " is away.";
         Post(line, kColourStatus);
     } else if (m.type == "peer") {
-        const std::string peer = Sanitize(m.GetOr("name", "Your neighbour"), kMaxNameChars);
+        const std::string peer = Sanitize(m.GetOr("name", "Your neighbor"), kMaxNameChars);
         bool online = false;
         m.GetBool("online", online);
         s_peerName = peer;
@@ -364,17 +364,17 @@ void OnMessage(const Message& m) {
         }
     } else if (m.type == "compat") {
         // A difference the separate-town profile only warns about (a different build or mod list).
-        Post(Sanitize(m.GetOr("warn", "Your game and your neighbour's differ."), kMaxChatChars), kColourProblem);
+        Post(Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars), kColourProblem);
     } else if (m.type == "error") {
         bool fatal = false;
         m.GetBool("fatal", fatal);
-        Post("The neighbour server says: " + Sanitize(m.GetOr("why", "an unknown problem"), kMaxChatChars),
+        Post("The neighbor server says: " + Sanitize(m.GetOr("why", "an unknown problem"), kMaxChatChars),
              kColourProblem);
         if (fatal && s_link) {   // refused for good (another game's data, another land): stop retrying
             s_refused = true;
             SharedMap::End();
             s_link->Stop();
-            Post("Neighbour towns stopped for this game.", kColourProblem);
+            Post("Neighbor towns stopped for this game.", kColourProblem);
         }
     }
     // "pong" and anything newer: ignored.
@@ -397,8 +397,8 @@ void OnIncoming(Incoming& in) {
         fprintf(stderr, "[Neighbour] offline: %s\n", in.detail.c_str());
         if (!s_announcedOffline) {
             s_announcedOffline = true;
-            Post(s_everConnected ? "Lost the line to the neighbour server; retrying."
-                                 : "Cannot reach the neighbour server (" + Sanitize(in.detail, 120) +
+            Post(s_everConnected ? "Lost the line to the neighbor server; retrying."
+                                 : "Cannot reach the neighbor server (" + Sanitize(in.detail, 120) +
                                        "); retrying.",
                  kColourProblem);
         }
@@ -705,7 +705,7 @@ void SelectForGame() {
     s_peerName.clear();
     s_peerOnline = false;
     if (s_config.server.empty()) {
-        Post("Neighbour towns is on, but no server is set (neighbour.server in settings.cfg).",
+        Post("Neighbor towns is on, but no server is set (neighbour.server in settings.cfg).",
              kColourProblem);
         return;
     }
@@ -753,7 +753,7 @@ Status GetStatus() {
 }
 
 std::string SendGoods(const ComponentDescription* resource, int count) {
-    if (!s_active) return "Neighbour towns is not on for this game.";
+    if (!s_active) return "Neighbor towns is not on for this game.";
     if (resource == nullptr || count <= 0) return "Pick some goods first.";
     const int taken = Town::TakeGoods(resource, count);
     if (taken <= 0) return "None of that is left in storage.";
@@ -771,7 +771,7 @@ std::string SendGoods(const ComponentDescription* resource, int count) {
 }
 
 std::string SendFamily() {
-    if (!s_active) return "Neighbour towns is not on for this game.";
+    if (!s_active) return "Neighbor towns is not on for this game.";
     const std::vector<FamilyMember> members = Town::SendFamily();
     if (members.empty()) return "No family can leave right now (the town keeps at least one family).";
     Parcel p;

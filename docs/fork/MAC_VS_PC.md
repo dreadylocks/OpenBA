@@ -49,12 +49,14 @@ Mac. That one does open a port to your home network while it runs.)
 
 ## 4. Start the game
 
-1. **Mac**: open `OpenBA.app`, then **Multiplayer**. In **Relay** type
-   `wss://openba-neighbour.spellpress.workers.dev`, then press **Refresh**. Type a room name, a password
-   and your town's name, then press **Create room**. Choose the map in New Game and press Ok.
+1. **Mac**: open OpenBA (it's in Applications), then **Multiplayer**. The top right should say
+   *Connected to your relay*; if not, press **Change relay**, type
+   `wss://openba-neighbour.spellpress.workers.dev` and press **Connect**. Press **New room**, type a
+   room name, a password and your town's name, then press **Create room**. Choose the map in New Game
+   and press Ok.
 2. **PC**: start OpenBA (normally, not with `tools/build.sh run`, which switches extensions off), then
-   **Multiplayer**. Same **Relay**, press **Refresh**, pick the room, type the password and your
-   town's name, then press **Join**.
+   **Multiplayer**. Set the same relay the same way if it isn't connected. Pick the room on the left
+   (type in **Search** to find it), type its password and your town's name, then press **Join room**.
 3. The PC builds the same map from the same seed and starts on the other side of it.
 
 Tip: put `neighbour.server=wss://openba-neighbour.spellpress.workers.dev` in each machine's
@@ -65,12 +67,12 @@ Tip: put `neighbour.server=wss://openba-neighbour.spellpress.workers.dev` in eac
 
 - In the event log: **"the same land"** means it works. You should then see each other's buildings
   appear, roads become real roads, and trees one town fells disappear in the other.
-- **"not the same land"** and *Neighbour towns stopped* means the two built different worlds. Check
+- **"not the same land"** and *Neighbor towns stopped* means the two built different worlds. Check
   the mods (step 1) first; otherwise send both logs (below).
 - **"game data is not the same"**: the two have different Banished files (or different mods inside
   `WinData`).
-- A warning that the neighbour's game is "another build" is expected (Mac and Windows) and harmless.
-- Press **N** in game for the Neighbour panel: chat, send goods, send a family.
+- A warning that the neighbor's game is "another build" is expected (Mac and Windows) and harmless.
+- Press **N** in game for the Neighbor panel: chat, send goods, send a family.
 
 Logs to send if something goes wrong (the lines that matter start with `[Neighbour]` and
 `[WorldHash]`):
