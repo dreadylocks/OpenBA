@@ -105,8 +105,8 @@ This town's villagers, once a second while the neighbour is online (`walkers.h`)
 template's path) and `list` = `id,x,y,z,yaw,clip,grp,scale,cloth;...`, integers: a small id per villager
 while it lives, the render position x 100, the yaw in degrees x 10, the animation clip it plays (0
 standing, 1-4 walking, others working), the mesh group (0 man, 1 woman), the size x 100 (100 adult, 83
-student, 66 child) and the clothes index. At most 12,000 characters a message (more villagers: more
-messages). The relay passes it on and keeps nothing; the neighbour draws each villager see-through and
+student, 66 child) and the clothes index. One message per template, its list at most about 12,000
+characters: a town of more than about 300 villagers sends its first ~300 (walkers.cpp kMaxListChars). The relay passes it on and keeps nothing; the neighbour draws each villager see-through and
 lets one no message names for 4 s go.
 
 ### `ping`
