@@ -19,12 +19,15 @@
 namespace Neighbour {
 
 // A room's new-game settings: the seed, the map size row (0/1/2 = 256/384/512), disasters on or
-// off, and the start condition / terrain / climate generators by resource path.
+// off, the start condition / terrain / climate generators by resource path, and the map type: "" for
+// one shared land, "continents" for a land each with sea between (continents.h). On the wire the map
+// type rides in front of the terrain path ("continents:<path>"); here `terrain` is the path alone.
 struct RoomSettings {
     int64_t     seed = 0;
     int         size = 0;
     bool        disasters = true;
     std::string start, terrain, climate;
+    std::string map;
 };
 
 // One line of the lobby's list.
@@ -64,7 +67,8 @@ bool JoinRoom(TransportFactory factory, const std::string& server, const std::st
 std::string LobbyUrl(const std::string& server);
 // The settings read back from a welcome or a room line; false when they are missing or bad.
 bool ReadSettings(const Message& m, RoomSettings& out);
-// "Medium map, Valleys, Mild, Easy start, disasters on": for the lobby's list.
+// "Medium map, Valleys, Mild, Easy start, disasters on" ("Continents (Valleys)" for a Continents room):
+// for the lobby's list.
 std::string DescribeSettings(const RoomSettings& s);
 
 }  // namespace Neighbour

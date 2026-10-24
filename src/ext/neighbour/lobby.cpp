@@ -4,6 +4,8 @@
 
 #include "ext/neighbour/lobby.h"
 
+#include "ext/neighbour/continents.h"   // the map type in front of the terrain path
+
 #include <chrono>
 #include <thread>
 
@@ -100,8 +102,11 @@ bool ReadSettings(const Message& m, RoomSettings& out) {
     if (s.seed < 0 || s.seed > 0xFFFFFFFFll || size < 0 || size > 2 || disasters < 0 || disasters > 1) return false;
     s.size = static_cast<int>(size);
     s.disasters = disasters != 0;
-    if (!m.Get("start", s.start) || !m.Get("terrain", s.terrain) || !m.Get("climate", s.climate)) return false;
-    if (!ShortPath(s.start) || !ShortPath(s.terrain) || !ShortPath(s.climate)) return false;
+    std::string terrain;
+    if (!m.Get("start", s.start) || !m.Get("terrain", terrain) || !m.Get("climate", s.climate)) return false;
+    if (!ShortPath(s.start) || !ShortPath(terrain) || !ShortPath(s.climate)) return false;
+    Continents::SplitMap(terrain, s.map, s.terrain);
+    if (s.terrain.empty()) return false;
     out = s;
     return true;
 }
@@ -109,8 +114,10 @@ bool ReadSettings(const Message& m, RoomSettings& out) {
 std::string DescribeSettings(const RoomSettings& s) {
     static const char* kSizes[] = {"Small", "Medium", "Large"};
     const char* size = (s.size >= 0 && s.size <= 2) ? kSizes[s.size] : "?";
-    return std::string(size) + " map, " + ShortName(s.terrain) + ", " + ShortName(s.climate) + ", " +
-           ShortName(s.start) + " start, disasters " + (s.disasters ? "on" : "off");
+    const std::string terrain = s.map == Continents::kMapContinents ? "Continents (" + ShortName(s.terrain) + ")"
+                                                                     : ShortName(s.terrain);
+    return std::string(size) + " map, " + terrain + ", " + ShortName(s.climate) + ", " + ShortName(s.start) +
+           " start, disasters " + (s.disasters ? "on" : "off");
 }
 
 bool ListRooms(TransportFactory factory, const std::string& server, std::vector<RoomInfo>& out,
@@ -144,7 +151,8 @@ bool CreateRoom(TransportFactory factory, const std::string& server, const std::
     Message create("create");
     create.SetInt("v", kProtocolVersion).Set("pass", pass).Set("name", town).SetInt("seed", settings.seed)
           .SetInt("size", settings.size).SetInt("disasters", settings.disasters ? 1 : 0)
-          .Set("start", settings.start).Set("terrain", settings.terrain).Set("climate", settings.climate);
+          .Set("start", settings.start).Set("terrain", Continents::JoinMap(settings.map, settings.terrain))
+          .Set("climate", settings.climate);
     AddHandshake(create, info);
     RoomJoin j;
     bool bad = false;

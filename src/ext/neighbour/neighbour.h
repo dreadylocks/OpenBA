@@ -92,6 +92,9 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
 // EXT SEAM, StartTown_FindSpawnTile: the centre of the start spiral on a lobby room's shared map
 // (the two towns start apart); false = the map centre, as retail.
 bool StartCentre(int dim, int* cx, int* cy);
+// EXT SEAM, the same spiral: false for a tile on the other town's land of a Continents room's map, so
+// each town starts on its own (continents_world.h). True everywhere else.
+bool StartTileAllowed(int dim, int tx, int ty);
 // EXT SEAMs, StartTown_SpawnResources (M3): on a lobby room's shared map both towns scatter the
 // same trees and rocks. Begin / End swap the world's random numbers for the scatter's own, seeded
 // from the map seed; ScatterCell restarts them for each candidate tile (a tile one copy skips --
