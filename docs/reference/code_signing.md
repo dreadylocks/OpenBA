@@ -68,6 +68,9 @@ repository, so the repository owner does every step below.
   application whether shipping them in the same zip is acceptable. If it is not, the zip can leave
   them out (Sharp UI then falls back to the game's glyph sheets) and they can be offered as a
   separate download.
+- **This repository is a fork** (of `fran-cap/OpenBA`). SignPath Foundation signs a fork only under
+  conditions, for example when the upstream publishes signed builds and the project is visibly a
+  fork of it. Ask SignPath in the application how that applies here.
 - **The team roles** in `CODE_SIGNING.md` name only the owner. Add every member with commit or
   review rights, and every SignPath approver, before you apply.
 - **SmartScreen still warns at first.** A signature names the publisher, but SmartScreen decides

@@ -22,11 +22,11 @@ Signatures. Each release also lists a `.sha256` checksum for every package.
 
 ## Team roles
 
-- **Committers and reviewers:** [fran-cap](https://github.com/fran-cap). `main` takes changes only
-  through pull requests, and every pull request, from a team member or anyone else, is reviewed
-  before it is merged.
-- **Approvers:** [fran-cap](https://github.com/fran-cap) approves each signing request in SignPath
-  before a release is signed.
+- **Committers and reviewers:** [dreadylocks](https://github.com/dreadylocks). `main` takes changes
+  only through pull requests, and every pull request, from a team member or anyone else, is
+  reviewed before it is merged.
+- **Approvers:** [dreadylocks](https://github.com/dreadylocks) approves each signing request in
+  SignPath before a release is signed.
 
 Every team member must use multi-factor authentication on GitHub and on SignPath.
 
