@@ -86,6 +86,7 @@
 #include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSAVE.md): DoLoad's `ext:` pseudo-mods
 #include "ext/load_notice.h"  // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTNOTICE.md): their notices, Dialog/Extensions.rsc:extension*
 #include "ext/resources/text_provider.h"  // EXT SEAM (NOT RETAIL, docs/extensions/KITFREE.md): InitText, the notices' provider
+#include "ext/ferries/ferries.h"  // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): the Ferry Dock template a save names
 #include "ext/quick_screens/quick_screens.h"  // EXT SEAM (NOT RETAIL, docs/extensions/handins/SPLASH.md): ext.quick_screens' minimum operation time
 #include <vector>
 #include "ui/ButtonElement.h"
@@ -987,6 +988,7 @@ void SaveLoadDialog::DoLoad() {
         // is registered here, on demand, before the notice is loaded.
         if (modIsExt[k]) {
             Ext::Resources::InitText();
+            Ext::Ferries::InitProviders();   // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): a save's Ferry Docks name our template
             warnPath = Ext::PseudoModNoticeDialog(extNotice);
         }
 

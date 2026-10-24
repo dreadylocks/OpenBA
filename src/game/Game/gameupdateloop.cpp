@@ -70,6 +70,7 @@
 #include "ext/restricted_foods/restricted_foods.h"
 #include "ext/drain_split/drain_split.h"       // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_DRAINSPLIT.md): ext.drain_split (class B), Ext::DrainSplit::BeginFrame
 #include "ext/neighbour/neighbour.h"           // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour (class C), Neighbour::BeginFrame / EndGame
+#include "ext/ferries/ferries.h"               // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries (class B), BeginFrame / EndGame
 #include "Game/terrain_sidecar.h" // the terrain-type mirror's teardown (faithful perf work)
 #include <cstdio>
 #include <cstring>
@@ -592,6 +593,7 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     Ext::RestrictedFoods::BeginFrame();
     Ext::DrainSplit::BeginFrame();           // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_DRAINSPLIT.md): ext.drain_split (B) read once per frame, the owed half's frame count
     Neighbour::BeginFrame();            // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour (C) what the relay sent -> the game; idle when off
+    Ext::Ferries::BeginFrame();         // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries (B) the docks, the riders' boats; idle when off
 
     // [EVENTS] RETIRED: the BANISHED_LIVE_EVENTS resource-shortage scanner used to
     // run here (a second port of FUN_14008c100 via EventLog_CheckResourceShortages).
@@ -2292,6 +2294,8 @@ GameUpdateLoop::~GameUpdateLoop() {
     Ext::UnlockForGame(this);
     // ext.neighbour: hang up (ignored when a reload's new loop already owns the line).
     Neighbour::EndGame(this);
+    // ext.ferries: forget the game's docks and boats (docs/fork/FERRIES.md).
+    Ext::Ferries::EndGame(this);
 }
 
 // The exe cell 0x1401c3dd8 (B3R STORAGE; was the file-static

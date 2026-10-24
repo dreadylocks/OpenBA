@@ -77,6 +77,7 @@
 #include "Component/still_path.h"             // STILLPATH: the exact still fast path of the tail
 #include "Component/still_terrain.h"          // STILLTERRAIN: the last iteration's terrain memo
 #include "stress_harness.h"                     // g_verifyOn / StressHarness_Verify (the StillFastPath shadow)
+#include "ext/ferries/ferries.h"                // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries riders on water
 
 namespace {
 
@@ -575,6 +576,9 @@ extern "C" void CharacterComponent_MoveTick_1094c0(CharacterComponent* self, con
     model->transform = xform;   // Transform::operator=
     model->yaw = fVar14;
     // [COPY-PINNED end]
+    // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): on the last iteration a walker on water rides a ferry boat, at the
+    // water's height (the intermediate iterations keep the height they read)
+    if (Ext::Ferries::g_riding && rootOnly == 0) Ext::Ferries::Ride(self, &model->transform.translation.x, model->yaw);
     // [ext.render_culling GEOMXF_LASTONLY -- NON-RETAIL] retail pushes the transform into the
     // Geometry (bounds, attached children, scene quadtree) on EVERY speed iteration; only
     // the last one is ever drawn, and the render-side interpolation is snapped from that

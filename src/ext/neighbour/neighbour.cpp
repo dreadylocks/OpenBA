@@ -72,10 +72,12 @@ uint64_t              s_frame = 0;
 bool                  s_hasPending = false;
 LobbyStart            s_pending;
 bool                  s_pendingPrevRequested = false;
+bool                  s_pendingPrevFerries = false;   // ext.ferries goes on with it (docs/fork/FERRIES.md §4)
 bool                  s_lobbyGame = false;
 LobbyStart            s_lobby;
 bool                  s_restoreRequested = false;
 bool                  s_restoreTo = false;
+bool                  s_restoreFerriesTo = false;
 std::string           s_worldHashNew;     // NoteWorldHash during this Load (a new game's map)
 // A new game (not a save) that the relay has not yet welcomed: its hellos say `fresh`, so the relay
 // drops what an earlier game left in this town's seat. The first welcome ends it.
@@ -487,6 +489,7 @@ void ResetForGame(const void* owner) {
         s_hasPending = false;
         s_restoreRequested = true;
         s_restoreTo = s_pendingPrevRequested;
+        s_restoreFerriesTo = s_pendingPrevFerries;
     }
     SetPortableWorldMaths(s_lobbyGame);   // before this Load generates the world (world_maths.h)
     // A lobby game is a shared map from its first structure on (the start town is built during
@@ -504,6 +507,11 @@ void SetLobbyStart(const LobbyStart& start) {
         if (!s_hasPending) s_pendingPrevRequested = Ext::Requested(*e);
         Ext::SetRequested(*e, true);   // this one game; restored in SelectForGame
     }
+    // Both towns of a room build Ferry Docks and draw each other's (FERRIES.md §4).
+    if (const Ext::Entry* e = Ext::FindEntry("ferries")) {
+        if (!s_hasPending) s_pendingPrevFerries = Ext::Requested(*e);
+        Ext::SetRequested(*e, true);
+    }
     s_pending = start;
     s_hasPending = true;
 }
@@ -519,6 +527,7 @@ bool PendingJoinSettings(RoomSettings& out) {
 void ClearLobbyStart() {
     if (!s_hasPending) return;
     if (const Ext::Entry* e = Ext::FindEntry("neighbour")) Ext::SetRequested(*e, s_pendingPrevRequested);
+    if (const Ext::Entry* e = Ext::FindEntry("ferries")) Ext::SetRequested(*e, s_pendingPrevFerries);
     s_hasPending = false;
 }
 
@@ -673,6 +682,7 @@ void SelectForGame() {
     if (s_active) return;   // already running for this game
     if (s_restoreRequested) {   // the lobby turned the extension on for this game only
         if (const Ext::Entry* e = Ext::FindEntry("neighbour")) Ext::SetRequested(*e, s_restoreTo);
+        if (const Ext::Entry* e = Ext::FindEntry("ferries")) Ext::SetRequested(*e, s_restoreFerriesTo);
         s_restoreRequested = false;
     }
     s_config = ReadConfig();

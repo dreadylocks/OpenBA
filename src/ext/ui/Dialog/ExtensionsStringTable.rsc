@@ -79,6 +79,13 @@ StringTable resource
 		{ String _name = "LobbyLoad";			String _text = "Load saved game"; }
 		{ String _name = "LobbyFooter";			String _text = "Or start your own room: you pick its map next."; }
 
+		// ext.ferries' Ferry Dock (src/ext/ferries/, docs/fork/FERRIES.md)
+		{ String _name = "FerryDock";				String _text = "Ferry Dock"; }
+		{ String _name = "FerryDockLwr";			String _text = "ferry dock"; }
+		{ String _name = "FerryDockTip";			String _text = "Ferry Dock: citizens row from here to the nearest Ferry Dock across the water. Build one on each shore. No workers."; }
+		{ String _name = "FerryCreateOk";			String _text = "Build a Ferry Dock here."; }
+		{ String _name = "FerryCreateBlocked";		String _text = "A Ferry Dock goes on a shore, out over the water, on clear ground."; }
+
 		// ext.load_progress's line on the boot loading screen (src/ext/load_progress/): @0 / @1 the mod numbers
 		{ String _name = "LoadProgressGameData";	String _text = "Loading game data"; }
 		{ String _name = "LoadProgressMod";			String _text = "Loading mod @0 of @1"; }

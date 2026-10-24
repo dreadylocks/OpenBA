@@ -35,6 +35,7 @@
 #include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 #include "ext/registry.h"   // Ext::Fix().terrain_resort
 #include "ext/terrain_resort/terrain_resort.h"   // fix.terrain_resort (docs/extensions/handins/TERRAINRESORT.md)
+#include "ext/ferries/ferries.h"   // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries joins zones, keeps lanes
 
 typedef unsigned int  uint;
 typedef unsigned short ushort;
@@ -94,6 +95,8 @@ void Map::FillZones() {
                 uVar2 = static_cast<uint64_t>(static_cast<int>(uVar2) + 1);
             } while (lVar4 != 0);
         }
+        // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries joins the zones of two linked docks' shores
+        Ext::Ferries::AfterFillZones(this);
     }
 }
 
@@ -136,6 +139,8 @@ void Map::SetTerrainType(int param_2, uint param_3) {
     }
     // Retail's R9 carries the road-bit flag here; 0x1400a6fe0 reads EDX and R8D only.
     pathfinder->SetCellTerrain(param_2, static_cast<int>(param_3));   // 0x1400a6fe0
+    // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): a ferry lane cell keeps its lane type in the worker's copy
+    Ext::Ferries::AfterSetTerrainType(this, param_2);
 }
 
 // ============================================================

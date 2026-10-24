@@ -74,6 +74,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/toolbar/window_state.cpp               #   the toolbar window's host record
   ${CMAKE_SOURCE_DIR}/src/ext/spread_warmth/spread_warmth.cpp     # ext_spread_warmth_test.cpp (HITCH_PFBURST)
   ${CMAKE_SOURCE_DIR}/src/ext/drain_split/drain_split.cpp         # ext_drain_split_test.cpp (HITCH_DRAINSPLIT)
+  ${CMAKE_SOURCE_DIR}/src/ext/ferries/lanes.cpp                  # ext_ferries_test.cpp (FERRIES)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/protocol.cpp              # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/save_state.cpp            #   its class C codec (state_codecs.cpp)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/handshake.cpp             #   the layer-1 hello fields, xxHash64

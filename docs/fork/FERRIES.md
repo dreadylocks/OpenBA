@@ -1,12 +1,15 @@
-# Ferry docks: research and design
+# Ferry docks: design and record
 
 A **Ferry Dock** is a building you put on a shore, one on each side of a lake, a river or the sea.
 Citizens use the pair the way they use a road: a citizen whose job, home or errand is across the
 water walks to the near dock, rows across in a small boat and walks on from the far dock. Nothing
 waits: each traveller takes a boat, like stepping onto a bridge.
 
-Status (2026-10-24): research and design only. Nothing is built. The user checks this before any
-code (§7 lists what they decide). Branch `claude/ferries-b99825`.
+Status (2026-10-24): built on branch `claude/ferries-b99825` (no PR yet). The user took the
+recommendations in §7 the same day. On a Mac, unattended: the Ferry Dock is built from the Fisherman's
+Dock, citizens cross in boats (hundreds of crossings, none stuck), a save with docks loads with its
+links, and a click on a dock opens its panel. Not done: the panel's "Ferry to ..." line, the harbour
+for families sent next door (§4, later by the user's choice). What was built and tested: §9.
 
 Everything new is a class B extension, `ext.ferries` (on screen: "Ferry docks"), under
 `src/ext/ferries/`, off for ordinary games. Single-player with the extension off stays faithful.
@@ -71,10 +74,10 @@ saved. The ferry uses the same trick the other way round.
 ### 3.1 What the player does and sees
 - A **Ferry Dock** button in the build menu beside the Bridge. It looks and places like a Fisherman's
   Dock (its model, construction stages and shore rule, by path), has no workers, and costs what the
-  Fisherman's Dock costs (first version).
+  Fisherman's Dock costs (first version). As built, its workers' parts are the Well's (§9).
 - Build one on each shore. Each dock **links to the nearest Ferry Dock on other land across the same
-  water**, up to 150 tiles of water. The dock's panel says "Ferry to the dock 34 tiles across" or
-  "No dock across the water yet".
+  water**, up to 150 tiles of water. Planned, not built yet: the dock's panel saying "Ferry to the
+  dock 34 tiles across" or "No dock across the water yet" (today it is the Fisherman's Dock's panel).
 - A route **opens as soon as one of its two docks is built**: the builders row over to build the
   other one (otherwise the far dock could never be reached).
 - A citizen bound across walks to the dock, glides across standing in a small boat (the trader's boat
@@ -97,9 +100,10 @@ saved. The ferry uses the same trick the other way round.
 3. **Zones** (EXT SEAM at the end of `Map::FillZones`): the two land zones of every open link are
    joined (one pass over the cells with a small remap table). Every zone check in the game then
    treats the two shores as one island, with no other change.
-4. **Regions** (EXT SEAM at the end of `RegionGraph::RebuildAdjacency`, which wipes the list every
-   time): the region at each dock's landing gets the other landing's region as a neighbour, so job
-   and storage choice see the crossing; the region-pair cache is cleared when a link opens or closes.
+4. **Regions** (EXT SEAM at the end of `RegionGraph::Flush`, as built; `RebuildAdjacency` wipes the
+   lists every time): the region at each dock's landing gets the other landing's region as a
+   neighbour, so job and storage choice see the crossing. A link that opens or closes marks its
+   landing cells dirty, so the next distance query flushes (which drops the region-search memo).
 5. **Riding** (EXT SEAM in the move tick, `citizenai_executor.cpp` after the height is set): a
    citizen standing on a water cell (`Map::cells` type 7 / 8: in retail no citizen ever does) is held
    at the water's height and a boat mesh is drawn under them, facing their heading (a bare
@@ -158,11 +162,12 @@ middle of the gap; a ferry lane crossing it does not block them. Reusable there:
   do not change; only where a family leaves and arrives does.
 
 ## 5. What does not change
-The faithful game code: three one-line EXT SEAMs (`FillZones`, `RebuildAdjacency`, the move tick),
-plus the build-menu entry (the toolbar's own Toolbar list) and the load seam; each does nothing with
-ext.ferries off. No new `BANISHED_*` flag; the test aid is a settings key, `ext.ferries_testdocks`.
+The faithful game code changes only through one-line EXT SEAMs (the list as built: §9), each doing
+nothing with ext.ferries off. The build-menu entry is a `Toolbar` object the toolbar finds as it finds
+retail's. No new `BANISHED_*` flag; the test aid is a settings key, `ferries.testdocks` (as
+`neighbour.autolobby` is).
 
-## 6. Build plan (after the user's OK)
+## 6. Build plan (after the user's OK; done except step 5, see §9)
 1. **Spike: the building.** Build `Template\ExtFerryDock.rsc` in memory from the Fisherman's Dock's
    parts (placement, model, construction, picking, highlight, decal, destroy; not fishing, work,
    storage or its fishing panel) plus our toolbar entry and text; place, build, save and load it on
@@ -176,14 +181,11 @@ ext.ferries off. No new `BANISHED_*` flag; the test aid is a settings key, `ext.
    links, boardings and landings; a screenshot of a crossing (`BANISHED_SCREENSHOT_AT`, camera pin).
 7. Docs: this file's record section, `docs/extensions/LIST.MD`, the registry row's text.
 
-## 7. For the user to decide
-1. The ferry style: **each traveller rows their own boat** (recommended, §3) or one ferry boat that
-   waits and carries a group (§3.4).
-2. On a shared map, may your ferry take your citizens to land on the neighbour's continent (shared
-   land, first come first served)? Recommended: yes.
-3. The harbour for things sent to the neighbour (§4, last point): later, after ferries work?
-   Recommended: later.
-4. The crossing's price: about a road's walk plus a short wait. Cheaper or dearer?
+## 7. Decided by the user (2026-10-24: "go ahead with your recommendations")
+1. The ferry style: **each traveller rows their own boat** (§3), not one ferry boat that waits.
+2. On a shared map your ferry may take your citizens to free land on the neighbour's continent.
+3. The harbour for things sent to the neighbour (§4, last point): later, after ferries work.
+4. The crossing's price: about a road's walk plus a short wait.
 
 ## 8. Risks
 - The new building is the biggest unknown: no extension has added a building before. The panel a
@@ -198,3 +200,91 @@ ext.ferries off. No new `BANISHED_*` flag; the test aid is a settings key, `ext.
 - A citizen whose 256-cell piece of path ends mid-lane asks again from a water cell, and the game then
   lets that one search cross any water (`Map::RequestPath` adds the water types). They would still be
   drawn in a boat; the lane's lower cost keeps them on it.
+
+---------------------------------------------------------------------------------------------
+
+## 9. As built (2026-10-24)
+
+Files: `src/ext/ferries/ferries.{h,cpp}` (the game glue), `lanes.{h,cpp}` (pairing and lanes,
+standard C++), `test_docks.{h,cpp}` (the test aid), `tests/unit/ext_ferries_test.cpp`. Registry row
+`ferries` (class B, off by default, formatVersion 1); strings in `Dialog/ExtensionsStringTable.rsc`
+(`FerryDock*`, `FerryCreate*`).
+
+- **The building** (`Template\ExtFerryDock.rsc`, served by our resource provider, built once per
+  process): the Fisherman's Dock's parts by reference, in their order (the state machine chains the
+  parts' controllers in that order: with the parts reordered the docks never started construction),
+  less its radius and fishing, with its work and workplace swapped for the **Well's** (builders while
+  it is built, no workers after; the dock's own would hire fishermen), and its build-menu text ours.
+  Its storage stays: a construction site keeps the delivered materials there (`GatherRawMaterials`;
+  without it the game crashed on placement). The icon is still the Fisherman's Dock's. Cost: the
+  Fisherman's Dock's.
+- **The button** (`Template\ExtFerryDock.rsc:ferrydock`, a `Toolbar` item): in the Transport group at
+  priority 500, after the Bridge (300) and the Tunnel (400); shown only in a game with ext.ferries on.
+  The template and button share one provider prefix because the provider table holds 8 entries and
+  was full. Not checked by eye: the toolbar's group never opened in an unattended run.
+- **Saves**: a dock is an ordinary entity naming our template; the template is provided when the
+  save's entities load (before the save tail's manifest locks ext.ferries on). Under a command-line
+  faithful profile `SaveLoadDialog::DoLoad` registers the provider beside `InitText` (EXT SEAM).
+- **Finding the docks**: the town manager's per-template list (`CitizenBehavior` +0x160, filled by
+  `ZoneComponent`), looked at twice a second; a dock counts as finished when its model shows its
+  group's last mesh. Any change marks the zones stale, so the next path request works the links out
+  again.
+- **Seams** (each a one-line EXT SEAM citing this file, each idle with the extension off):
+  `Map::FillZones` (end of the rebuild: links, lanes, zones joined), `Map::SetTerrainType` (a lane
+  cell keeps its lane type in the worker), `RegionGraph::Flush` (the landing blocks' adjacency
+  rebuilt, then each link's two regions made neighbours), the character move tick just past its COPY-PINNED tail,
+  on the last iteration (`if (Ext::Ferries::g_riding && rootOnly == 0) Ext::Ferries::Ride(...)`: one bool
+  test per tick; inside the tail it broke `copy_drift_pinned_regions_unchanged`), `GameUpdateLoop::Update`
+  (`BeginFrame`), `~GameUpdateLoop` (`EndGame`), `GameUpdateLoop::Load` (`SelectForGame`),
+  ext boot (`InitProviders`).
+- **The ride**: a citizen on a water cell of `Map::cells` is held at the trader boat's fixed height
+  (`Template\TraderBoat.rsc` `CharacterDescription::_f40`, read at run time: 0.0 in 1.0.7) and a
+  boat is drawn under them: `Models\Buildings\TradingPost\BoatMesh` at 0.32 scale, turned to the
+  citizen's heading, as a bare `Graphics::MeshInstance` (the neighbour mirrors' way), moved once a
+  frame from notes the tick leaves. In the screenshot it reads as a rowboat with its oars out and the
+  citizen standing in it.
+- **Multiplayer**: the lobby switches ext.ferries on with ext.neighbour for the room's game and gives
+  the player's own setting back afterwards (`neighbour.cpp` `SetLobbyStart` / `ResetForGame` /
+  `SelectForGame`). The neighbour's docks arrive as mirrors by template path, as any building.
+- **Test aid** `ferries.testdocks=1` (settings.cfg; a new game whose town has no dock): from about
+  frame 90, every valid dock site within 70 tiles of the town by the game's own footprint test, the
+  nearest one in the town's zone that links (`LinkFrom`) to a site in another zone; both docks are
+  placed with `PlacementTool::CreateAt` inside retail's instant-build bracket (GameUpdateLoop +0xd0
+  bit 0, as the start town's founding buildings), so the route opens at once; a house beside the far
+  dock is placed as a construction site; 120 frames later the near dock is selected with the edit
+  tool (its panel opens, as a click does).
+
+### Tested (Mac, native build, seed 12345, small Valleys map, speed 10)
+- Unit (`tools/build.sh unit`, Mac): 1422 tests, 0 failures, 17 skipped; 10 new tests in
+  `ext_ferries_test.cpp`: two shores linked, straight across; a link needs one finished dock; no link
+  on one land; the lane length cap; no corner cutting; each dock takes its nearest partner, the same
+  input gives the same lanes, `LinkFrom` agrees; deep water preferred; a dock with no shore ignored;
+  the lane's worker types; zones joined.
+- The test aid put the docks either side of the river beside the start town, 9 cells of water apart;
+  `[Ferries] link: dock (103,120) to dock (97,109), 9 cells of water, zones 2 and 1`. Citizens began
+  crossing at once (builders and haulers for the house): 59 boardings in the first game minute, 259
+  boarded and 259 landed by the autosave, at most 7 on the water at once, none left there. Empty crash
+  logs. Screenshots (camera pinned at the lane): the two docks and a citizen standing in a rowboat
+  mid-river; the selected near dock outlined.
+- **Save / load**: the autosave with two docks loaded with `BANISHED_AUTOLOAD`: `[ExtSave] manifest: ...
+  ferries(v1, 0 payload bytes)`, `2 Ferry Dock(s) in this town`, the same link, crossings resumed.
+  (That run also showed the test aid firing again on a loaded game; it is armed only for a town with
+  no dock now.) With four docks (two more placed in that run) there were three links, one of them a
+  71-cell crossing between zones 5 and 1.
+- With ext.ferries off: no `[Ferries]` line, the ordinary seed-12345 land
+  (`[WorldHash] height f32=627a733aa4109739`), no crash. `tools/acceptance/acceptance.sh`: 0 off target.
+- Not run: the faithful gate and the Windows build (the PC; CI builds Windows and Linux); a
+  Multiplayer room with ferries; a Continents map; a player placing a dock by hand (the button was
+  not clicked); a trader boat sailing through a lane.
+
+### Open
+- The panel line ("Ferry to the dock N tiles across"): the panel is the Fisherman's Dock's own.
+- A crossing's speed is the citizen's walking speed (water cells are not road cells in `Map::cells`).
+- The neighbour's mirrored dock marks its footprint solid in the worker (type 31); a lane passing
+  under their pier would be cut there.
+- Citizens walk (their walking animation) while standing in the boat.
+- Lane ends are type 4 in the worker, which boats cannot sail: a trader boat's approach right
+  beside a Ferry Dock could be cut.
+- Any walker whose walk mask has type 9 could use a lane (a deer, say) and would be drawn in a boat.
+  Trader boats are left out (they sail at a fixed height).
+

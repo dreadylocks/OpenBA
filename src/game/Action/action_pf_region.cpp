@@ -32,6 +32,7 @@
 #include "hw_watch.h"
 #include "stress_harness.h"           // g_verifyOn (PATHDIST shadow in PathLength; one branch when off)
 #include "Action/region_search.h"     // RegionSearch::Memo* (HITCH_PAIRSPREAD, NOT RETAIL)
+#include "ext/ferries/ferries.h"      // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries links landing regions
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -728,6 +729,8 @@ void RegionGraph::Flush() {
         // Both are SetSize(0) of a trivial element — no growth.
         dirtyRebuild.SetSize(0);     // 0x1400021d0
         dirtyAdjacency.SetSize(0);   // 0x1400021d0
+        // EXT SEAM (NOT RETAIL, docs/fork/FERRIES.md): ext.ferries makes each link's two landing regions neighbours
+        Ext::Ferries::AfterRegionFlush(this);
         SearchNodesResize(&search.nodes, regions.size);   // 0x14001d830
         // NOT RETAIL (HITCH_PAIRSPREAD): the graph changed, so PathLength's memo is dropped.
         RegionSearch::NoteGraphChanged();

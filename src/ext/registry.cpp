@@ -333,6 +333,14 @@ const Entry kEntries[] = {
       "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
       "appear in the event log. Press N in game for the Neighbor panel: chat, send goods, send a family.",
       5, [](State& s) -> bool& { return s.ext.neighbour; } },   // = Neighbour::kPayloadFormat (protocol.h)
+    // FERRIES (this fork; docs/fork/FERRIES.md): a Ferry Dock building; citizens row between two docks
+    // across water. Class B: play diverges (citizens cross water) and the save holds Ferry Dock
+    // entities of our own template; the links are worked out again from the docks on load.
+    { "ferries", Tier::Extension, Class::B, false,
+      "Ferry docks",
+      "Adds a Ferry Dock to the build menu, beside the Bridge. Build one on each shore and citizens row "
+      "across the water between them. Play diverges; recorded in the save.",
+      1, [](State& s) -> bool& { return s.ext.ferries; } },
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.
