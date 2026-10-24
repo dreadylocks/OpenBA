@@ -216,9 +216,10 @@ UNIT_TEST(mac_option_click_release_orders) {
         CHECK_EQ(mouse.PolledButtons(1), 2u);
         CHECK_EQ(mouse.ButtonEvent(1, false, 0), 2);
         CHECK_EQ(mouse.PolledButtons(0), 0u);
-        // Mouse-up before Option-up has the same result.
+        // Mouse-up before Option-up has the same result (a press no poll saw is shown once).
         CHECK_EQ(mouse.ButtonEvent(1, true, option), 2);
         CHECK_EQ(mouse.ButtonEvent(1, false, option), 2);
+        CHECK_EQ(mouse.PolledButtons(0), 2u);
         CHECK_EQ(mouse.PolledButtons(0), 0u);
     }
 }
@@ -240,22 +241,52 @@ UNIT_TEST(mac_option_double_click_and_wheel) {
         CHECK_EQ(mouse.ButtonEvent(3, true, MK::kModOption), 3);
         CHECK_EQ(mouse.ButtonEvent(3, false, 0), 3);
         CHECK_EQ(mouse.ButtonEvent(1, false, 0), 2);
+        CHECK_EQ(mouse.PolledButtons(0), 4u);   // the right press no poll saw, once
         CHECK_EQ(mouse.PolledButtons(0), 0u);
     }
     CHECK_EQ(mouse.ButtonEvent(1, true, 0), 1);
     CHECK_EQ(mouse.ButtonEvent(1, false, 0), 1);
     CHECK_EQ(mouse.ButtonEvent(2, true, MK::kModOption), 2);
+    CHECK_EQ(mouse.PolledButtons(2), 3u);   // the held middle button, and the left tap once
     CHECK_EQ(mouse.PolledButtons(2), 2u);
 }
 
 UNIT_TEST(mac_option_focus_reset_and_physical_release) {
     MK::MouseButtonRemapper mouse;
     CHECK_EQ(mouse.ButtonEvent(1, true, MK::kModOption), 2);
+    CHECK_EQ(mouse.PolledButtons(0), 2u);   // released before the poll: shown once
     CHECK_EQ(mouse.PolledButtons(0), 0u);
+    CHECK_EQ(mouse.ButtonEvent(1, false, 0), 2);
+    CHECK_EQ(mouse.ButtonEvent(1, true, MK::kModOption), 2);
     mouse.Reset();
     CHECK_EQ(mouse.PolledButtons(1), 0u);
     CHECK_EQ(mouse.ButtonEvent(1, true, 0), 1);
     CHECK_EQ(mouse.PolledButtons(1), 1u);
+}
+
+UNIT_TEST(mac_trackpad_tap_is_shown_to_one_poll) {
+    MK::MouseButtonRemapper mouse;
+    // Tap to click: the press and the release reach the pump before a poll, which sees the button up.
+    CHECK_EQ(mouse.ButtonEvent(1, true, 0), 1);
+    CHECK_EQ(mouse.ButtonEvent(1, false, 0), 1);
+    CHECK_EQ(mouse.PolledButtons(0), 1u);
+    CHECK_EQ(mouse.PolledButtons(0), 0u);
+    // A two-finger tap is the right button (SDL button 3).
+    CHECK_EQ(mouse.ButtonEvent(3, true, 0), 3);
+    CHECK_EQ(mouse.ButtonEvent(3, false, 0), 3);
+    CHECK_EQ(mouse.PolledButtons(0), 4u);
+    CHECK_EQ(mouse.PolledButtons(0), 0u);
+    // Option + tap is the middle button, once.
+    CHECK_EQ(mouse.ButtonEvent(1, true, MK::kModOption), 2);
+    CHECK_EQ(mouse.ButtonEvent(1, false, 0), 2);
+    CHECK_EQ(mouse.PolledButtons(0), 2u);
+    CHECK_EQ(mouse.PolledButtons(0), 0u);
+    // A held click reads as before: down while held, up after the release.
+    CHECK_EQ(mouse.ButtonEvent(1, true, 0), 1);
+    CHECK_EQ(mouse.PolledButtons(1), 1u);
+    CHECK_EQ(mouse.PolledButtons(1), 1u);
+    CHECK_EQ(mouse.ButtonEvent(1, false, 0), 1);
+    CHECK_EQ(mouse.PolledButtons(0), 0u);
 }
 
 UNIT_TEST(mac_option_event_translation_uses_only_middle_and_preserves_wheel) {
