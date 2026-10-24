@@ -648,7 +648,18 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   `settings.cfg` (`neighbour.server`) at once (`lobby_panel.cpp` `RememberRelay`, the settings map's own
   insert and `WriteSettings`), so each machine types it once. Test aid `neighbour.lobbyrelay=<url>` fills
   the box as if typed; checked on the Mac (a run with no relay saved ended with it in settings.cfg).
-- **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.
+- **The first game against a real Windows PC** (2026-10-24, a friend's PC, vanilla, one land): both
+  joined through the Cloudflare relay and played ~30 minutes. Found: a room using a mod's map size
+  (Colonial Charter's extra-large) never shows in the room list (`ReadSettings` takes sizes 0..2);
+  neither town sees the other's citizens (by design: only structures, roads and resource changes are
+  shared); pausing pauses one town only (shared pause: next).
+- **Found and fixed: demolishing a building crashed the game.** `SharedMap::Mine::entity` is a plain
+  pointer that the entity's free does not clear, so the periodic check (`Tick` -> `BuiltPercent`) read
+  a demolished building after its free (SIGSEGV, the user's Mac, the moment the builders finished
+  taking a half-built house down). The structure is now dropped in `NoteRemoved` (the EXT SEAM in
+  `EntityList::DrainRemovals`), before the free, through a pointer -> id map; the neighbour gets the
+  `unbuild` and the land back, which never happened before. Checked on the Mac: a neighbour's house
+  mirrored and then unbuilt, no crash.
 
 ---------------------------------------------------------------------------------------------
 
@@ -733,3 +744,10 @@ large one), with nomads landing on the coast.
   houses; the walk is unit tested); a trader boat on this map (the route code is unchanged and the
   sea joins every coast); the Mac against the PC on a Continents map in a real game (CI says the
   maths agree); picking One land / Continents by hand; whether a bridge can span the sea.
+
+### Continents: known problems (the user's first real game, 2026-10-24; tabled)
+- The land looks wrong overall ("super weird").
+- On vanilla terrain the coasts tend to be lined with mountains, which gets in the way of building.
+- Lakes are cut off halfway ("weird cut off half lake things"), most likely where `KeepRiversOnLand` /
+  `ShapeCoasts` trim water at the new coast.
+The user's call: it needs a lot more work, later. One land stays the map to use until then.

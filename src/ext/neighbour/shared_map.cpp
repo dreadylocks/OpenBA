@@ -17,6 +17,7 @@
 #include <map>
 #include <new>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include "Component/ComponentDescription.h"
@@ -84,6 +85,10 @@ int BuiltPercent(ComponentEntity* entity) {
     return ((idx + 1) * 100) / count;
 }
 std::map<std::string, Mine> s_mine;
+// Which id each structure of ours is under. Mine::entity is a plain pointer the free does not clear
+// (EntityList::DrainRemovals: "weak refs the free does not invalidate"), so a structure that goes is
+// dropped from s_mine by NoteRemoved, while it still exists; nothing reads an entity after its free.
+std::unordered_map<const ComponentEntity*, std::string> s_mineIds;
 std::vector<TileRect> s_claimQueue;
 std::vector<TileRect> s_releaseQueue;
 std::vector<std::string> s_unbuildQueue;
@@ -477,6 +482,7 @@ void End() {
     for (auto& kv : s_mirrors) FreeMirror(kv.second, false);
     s_mirrors.clear();
     s_mine.clear();
+    s_mineIds.clear();
     s_claimQueue.clear();
     s_releaseQueue.clear();
     s_unbuildQueue.clear();
@@ -561,7 +567,10 @@ void NoteStructure(ComponentEntity* entity) {
     mine.entity = Object::InternalPtr<ComponentEntity>(entity);
     mine.build = b;
     mine.rect = r;
+    auto old = s_mine.find(id);
+    if (old != s_mine.end() && old->second.entity.Get() != entity) s_mineIds.erase(old->second.entity.Get());
     s_mine[id] = mine;
+    s_mineIds[entity] = id;
     s_claimQueue.push_back(r);
     s_buildQueue.push_back(id);
     ++s_waitingAdds;
@@ -614,6 +623,20 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
 
 void NoteRemoved(ComponentEntity* entity) {
     if (!s_on || entity == nullptr) return;
+    // A structure of ours is gone (demolished, burnt, a site cancelled): the neighbour takes it off its
+    // map and its land is free again. Dropped here, before the free, never looked at again.
+    auto ours = s_mineIds.find(entity);
+    if (ours != s_mineIds.end()) {
+        auto it = s_mine.find(ours->second);
+        if (it != s_mine.end() && it->second.entity.Get() == entity) {
+            s_unbuildQueue.push_back(it->first);
+            s_releaseQueue.push_back(it->second.rect);
+            ++s_waitingAdds;
+            s_mine.erase(it);
+        }
+        s_mineIds.erase(ours);
+        return;
+    }
     auto q = s_quiet.find(entity);
     if (q != s_quiet.end()) { s_quiet.erase(q); return; }
     if (!s_live || entity->FindComponent<NaturalResourceComponent>() == nullptr) return;
@@ -639,7 +662,8 @@ void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
     EnsureGrid();
     s_live = true;   // from the first frame of play on, a change is news
-    // Structures that are gone: unbuild, release their land.
+    // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
+    // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {
         const Applied& a = s_applied;
         const Applied& l = s_appliedLogged;
