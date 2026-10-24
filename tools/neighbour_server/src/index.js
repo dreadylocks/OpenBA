@@ -52,7 +52,7 @@ const kParcelId = /^[0-9a-z_-]{1,40}$/;
 const kSeats = 2;
 const kRoomIdleDays = 60;
 const kMaxListedRooms = 500;
-const kCreatesPerDay = 5;
+const kCreatesPerDay = 50;   // new lobby rooms a day from one address (a spam guard; friends share a home address)
 const kDayMs = 24 * 60 * 60 * 1000;
 // The new-game settings a room carries, besides the seed: the map size row and the disasters
 // switch as small whole numbers, and the start condition, terrain and climate as the game's
