@@ -1,73 +1,82 @@
 # Playing your Mac against your PC
 
 Two towns, one map: one on the Mac, one on the PC, talking through a small relay (the "postbox").
-No Steam account or login is involved. Neighbour towns is still young; nobody has played a real
-two-machine game yet, so expect to find things.
+No Steam account or login is involved.
 
-## 1. Same game data on both machines
+What is already proven (on the Mac, 2026-10-23): the Mac game boots and plays; it trades chat, goods
+and families with a pretend town; and two Mac games on one shared map build the same land, see each
+other's buildings and share felled trees. A shared map is built with the same maths code on Windows
+and Mac, so the PC should build the same land too. The first real Mac-against-PC game is what is
+left to test.
 
-Both games must read the **same Banished 1.0.7 files**, or the relay refuses the second town ("your
-Banished game data is not the same"). Simplest: copy them from the PC.
+Your machines (home network): Mac `192.168.0.168`, PC `DESKTOP-3I0OFRD` = `192.168.0.177`.
 
-1. On the PC, find the Banished folder (yours is
-   `C:/Program Files (x86)/Steam/steamapps/common/Banished`). Copy its `WinData` folder (the four
-   files `data0.pkg`, `data1.pkg`, `patch0.pkg`, `patch1.pkg`, plus any `.pkm` mods you use) to a USB
-   stick or a network share.
-2. On the Mac, put it on the external SSD, for example `/Volumes/DevSSD/dev/games/Banished/WinData`.
-3. The first time `OpenBA.app` starts, it asks for the game folder: pick
-   `/Volumes/DevSSD/dev/games/Banished` (the folder that holds `WinData`).
+## 1. Same game data on both machines (done)
 
-Use the same mods on both, in the same order. Different mods only warn, but they can make the two maps
-different.
+The Mac has a copy of the PC's Banished folder at `/Volumes/DevSSD/dev/games/Banished` (copied from
+`\\DESKTOP-3I0OFRD\Media\Banished`). The first time `OpenBA.app` starts, it asks for the game folder:
+pick `/Volumes/DevSSD/dev/games/Banished`.
+
+**Mods:** the Mac has your four mods but none switched on. For the first test, switch mods off on the
+PC too (or switch the same ones on, in the same order, on both). Different mods only warn, but a mod
+that changes the terrain would make the two maps differ.
 
 ## 2. Same version of OpenBA on both
 
-Build both from the same commit of the `neighbour-towns` branch:
-- **Mac**: `tools/macos/make_app.sh`, which makes `dist/OpenBA.app`.
-- **PC**: pull the branch and run `tools/build.sh deploy`. Or copy the Mac's cross-built
-  `build/cross-release/OpenBA.exe` (`tools/build.sh build release --cross`) into the PC's Banished
-  folder.
+- **Mac**: already built, `dist/OpenBA.app` in the worktree (rebuild: `tools/macos/make_app.sh`).
+- **PC**: pull the `neighbour-towns` branch, then `tools/build.sh unit` and `tools/build.sh deploy`.
+  The unit test `ext_neighbour_world_maths_same_bits_everywhere` must pass on the PC: it proves the PC
+  computes the shared map's maths exactly as the Mac does.
 
-The two builds differ (Mac and Windows), so the event log shows a warning that the neighbour's game is
-"another build". That's expected and only a warning.
+## 3. Start the relay on the Mac
 
-## 3. A relay both machines can reach
+In Terminal on the Mac (leave the window open while you play):
 
-Pick one:
-- **A relay on your home network** (quickest to try). On one machine, in `tools/neighbour_server`:
-  `npm install`, then `npx wrangler dev --ip 0.0.0.0 --port 8791`. The other machine uses
-  `ws://<that machine's home address>:8791`; the machine running the relay uses `ws://127.0.0.1:8791`.
-  This opens port 8791 to your home network (your Mac's firewall may ask), so only do it at home.
-  Port 8787 is already used by another tool on your Mac, so this guide uses 8791.
-- **Your Cloudflare Worker** (works from anywhere; secure `wss://`). A Worker deployed before
-  2026-10-23 speaks the previous protocol and refuses the new games, so deploy this branch's relay
-  (`npx wrangler login`, then `npm run deploy` in `tools/neighbour_server`). Then both machines use
-  `wss://openba-neighbour.<your-subdomain>.workers.dev`.
+```bash
+cd /Volumes/DevSSD/dev/repos/OpenBA/.claude/worktrees/neighbour-towns-0cd35d/tools/neighbour_server
+npx wrangler dev --ip 0.0.0.0 --port 8791
+```
 
-You can also put the address in each machine's `settings.cfg` as `neighbour.server=...`, so the
-lobby's Relay box starts with it. On the Mac that file is `~/Documents/Banished/settings.cfg`; on the
-PC it's `Documents/Banished/settings.cfg`.
+When it says `Ready on`, the relay is at `ws://192.168.0.168:8791` for the PC and
+`ws://127.0.0.1:8791` for the Mac. Only devices on your home network can reach it, and it stops when
+you close the window. (Port 8787 is used by another tool on your Mac, so this uses 8791.)
 
 ## 4. Start the game
 
-1. **Mac**: main menu, then **Multiplayer**. Type the relay address in **Relay**, then press
-   **Refresh**. Type a room name, a password and your town's name, then press **Create room**. Choose
-   the map in New Game and press Ok.
-2. **PC**: main menu, then **Multiplayer**. Same relay, press **Refresh**, pick the room, type the
-   password and your town's name, then press **Join**.
+1. **Mac**: open `OpenBA.app`, then **Multiplayer**. In **Relay** type `ws://127.0.0.1:8791`, then
+   press **Refresh**. Type a room name, a password and your town's name, then press **Create room**.
+   Choose the map in New Game and press Ok.
+2. **PC**: start OpenBA, then **Multiplayer**. In **Relay** type `ws://192.168.0.168:8791`, then press
+   **Refresh**. Pick the room, type the password and your town's name, then press **Join**.
 3. The PC builds the same map from the same seed and starts on the other side of it.
 
 ## 5. What to look for
 
-- In the event log: **"the same land"** means it works.
-- **"not the same land"** and *Neighbour towns stopped* means the Mac and the PC built slightly
-  different worlds from the same seed. This is the one big unknown: the two operating systems' maths
-  libraries may round some numbers differently. If it happens, send both logs (below); there is a
-  planned fix.
+- In the event log: **"the same land"** means it works. You should then see each other's buildings
+  appear, roads become real roads, and trees one town fells disappear in the other.
+- **"not the same land"** and *Neighbour towns stopped* means the two built different worlds. Check
+  the mods (step 1) first; otherwise send both logs (below).
+- **"game data is not the same"**: the two have different Banished files (or different mods inside
+  `WinData`).
+- A warning that the neighbour's game is "another build" is expected (Mac and Windows) and harmless.
 - Press **N** in game for the Neighbour panel: chat, send goods, send a family.
 
-Logs to send if something goes wrong:
+Logs to send if something goes wrong (the lines that matter start with `[Neighbour]` and
+`[WorldHash]`):
 - Mac: `~/Library/Application Support/OpenBA/Run/standalone_error.log`
 - PC: `standalone_error.log` in the Banished folder.
 
-The lines that matter start with `[Neighbour]` and `[WorldHash]`.
+## Unattended runs (for testing)
+
+With `BANISHED_AUTOSTART=1`, a game can create or join the room on its own: in its `settings.cfg` put
+`neighbour.autolobby=create` (or `join`) with `neighbour.server`, `neighbour.room`,
+`neighbour.password` and `neighbour.name`. A joining game takes the room's seed and settings itself.
+This is how the two-Mac test ran (`docs/fork/NEIGHBOUR_TOWNS.md` §11). The gate's faithful run
+(`tools/build.sh run`) switches every extension off, so test with a plain autostart instead.
+
+## Playing from anywhere (later)
+
+The Cloudflare Worker relay works across the internet with secure `wss://`. Any Worker deployed before
+2026-10-23 speaks the previous protocol and refuses these games, so deploy this branch's relay first
+(`npx wrangler login`, then `npm run deploy` in `tools/neighbour_server`). Both machines then use
+`wss://openba-neighbour.<your-subdomain>.workers.dev`.

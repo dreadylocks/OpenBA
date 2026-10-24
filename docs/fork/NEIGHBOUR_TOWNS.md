@@ -575,9 +575,26 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   `LoadSeatToken` / `RememberSeat` in `neighbour.cpp`, through `Platform::WriteFileAtomic`), and a
   hello without a token in the save, or the lobby's Join, sends the stored one. Checked on the Mac:
   join, quit without saving, start a new game: the same seat came back.
-- **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. A cheaper
-  check first, with no relay: start a new game on the PC with `BANISHED_SEED=12345`, mods off and the
-  same defaults, and compare its `[WorldHash] height f32=` line with the Mac's above. Worldgen
+- **The same land on every platform** (`ext/neighbour/world_maths.{h,cpp}`): a lobby room's shared map
+  is built with the engine's ported MSVC maths (`MsvcLibm::Powf` / `Sinf` / `Cosf`) at the four places
+  worldgen and the start spiral call libm (`worldgen_cells.cpp` falloff, the eee0 brushes in
+  `worldgen_f390_erosion.cpp` / `worldgen_f390_rivers.cpp`, `StartTown_FindSpawnTile`); every other game
+  keeps the platform's (an ordinary seed-12345 game still builds `627a733aa4109739`). The unit test
+  `ext_neighbour_world_maths_same_bits_everywhere` pins a digest taken on the Mac: passing on Windows
+  proves the PC rounds the same.
+- **An unattended lobby (test aid)**: `neighbour.autolobby=create|join` in `settings.cfg` with
+  `BANISHED_AUTOSTART`; a joining game takes the room's settings (`Lobby_RoomSettingsForJoin`, a new EXT
+  SEAM at the top of `MainMenuDialog::StartNewGame`).
+- **Two Mac games on one shared map** (2026-10-23, unattended, `build/mac-run-a` creating and
+  `build/mac-run-b` joining, seed 4242): both built `[WorldHash] height f32=e4d1a072d1722c84`, found the
+  same start sites (71,153 / 169,128) and the same scatter (9237 resources, fingerprint
+  `0f9570638a4696fa`), said "the same land", drew each other's buildings solid, and the creator's felled
+  trees left the joiner's copy; both ran 70+ s, empty crash logs. Odd but harmless so far: the creator
+  counted 224 solid tiles from the joiner's buildings, the joiner 112 from the creator's (the counter
+  may count a re-sent building twice); worth a look.
+- **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`). The relay must be started by the user on the
+  home network (`npx wrangler dev --ip 0.0.0.0 --port 8791`); this session's tooling may not open a
+  port to the network itself. Worldgen
   calls the platform's `powf` (`worldgen_cells.cpp:56`, `worldgen_f390_erosion.cpp:84`,
   `worldgen_f390_rivers.cpp:95`): Apple's libm and the PC's may differ in the last bit for some inputs,
   and then the land hashes differ and the relay refuses the join. If so, the fix is a portable `powf`
