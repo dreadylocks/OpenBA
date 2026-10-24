@@ -131,11 +131,16 @@ saved. The ferry uses the same trick the other way round.
 
 ## 4. Neighbor towns and the Continents map
 
-The Continents map (branch `claude/continents-d6295d`, `NEIGHBOUR_TOWNS.md` §12): two lands, each
-ringed by sea; the sea floor is -2.5 (deep water, type 8) with flat beaches; the sea between the lands
-is at least 20 tiles, about 45 on a small map and 90 on a large one; it is one body of water out to
-the map edge; each town starts on its own land. The trader boats' lane runs down the middle of that
-sea (a ferry lane crossing it does not block them).
+The Continents map (branch `claude/continents-d6295d`, `NEIGHBOUR_TOWNS.md` §12; facts from that
+session, 2026-10-24): exactly two lands, each ringed by sea, no small islands (rivers can still split
+a land into several zones). From each coast about 1-2 tiles of shallow water (7), then deep water (8);
+the floor reaches -2.5 within 5 tiles. The gap between the lands averages 45 tiles on a small map, 67
+on a medium and 90 on a large one, never under 20 (scaled by map size), typically 30-60 on a small
+map. The sea is one body of water, between the lands, all round them and out to every map edge;
+inland lakes are separate. No type 9 is ever made by the classifier. Each town starts on its own land
+(town 1, the room's creator, west or north). The trader boats' lane (path 0) runs straight down the
+middle of the gap; a ferry lane crossing it does not block them. Reusable there:
+`Continents::LandDistance`, `Continents::RingedBySea` (works on a loaded save).
 
 - **Inside one town** the ferry is the same everywhere: across a river or lake on an ordinary map,
   between your own land and an island, or from your continent to the other one.
@@ -186,8 +191,10 @@ ext.ferries off. No new `BANISHED_*` flag; the test aid is a settings key, `ext.
   fishing parts.
 - The boat model is a merchant ship; scaled down it may look odd. Then a plainer stand-in (the dock's
   own model has none) or hiding the citizen during the crossing.
-- The water's height on a lake differs from the sea's: the lane takes the height from the water mesh
-  at its end (to be checked on screen).
+- The water's height: every water surface is drawn at about -0.75 world height (the water mesh's
+  vertex z is in 1/256 units: `featureIdx - 191` for lakes, and the Continents sea the same way,
+  e.g. -0.738 with two lakes; rivers `-192 - body`). The rider takes the trader boat's own fixed
+  height (`CharacterDescription::_f40`) or -0.75; to be checked on screen.
 - A citizen whose 256-cell piece of path ends mid-lane asks again from a water cell, and the game then
   lets that one search cross any water (`Map::RequestPath` adds the water types). They would still be
   drawn in a boat; the lane's lower cost keeps them on it.
