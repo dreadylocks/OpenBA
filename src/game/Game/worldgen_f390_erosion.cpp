@@ -48,6 +48,8 @@
 #include <cmath>
 #include "system/Value.h"      // ENDGAME B.3.4b System caller batch (Random/Time/Color)
 #include "Game/worldgen_brush_curve.h"   // [WGPAR] the exact falloff memo of the eee0 brush
+#include "crt/msvc_libm.h"          // EXT SEAM (NOT RETAIL): MsvcLibm::Powf for ext.neighbour's shared map
+#include "ext/neighbour/world_maths.h"   // EXT SEAM (NOT RETAIL): Neighbour::PortableWorldMaths
 #include "Game/worldgen_erosion_par.h"   // [EROSIONPAR] the parallel droplet commit
 #include "system/parallel_for.h"         // [EROSIONPAR] System::ParallelFor
 #include <atomic>
@@ -82,6 +84,10 @@ static const     uint32_t kSignBitMask  = 0x80000000u; // 0x1401722c0 (float-neg
 // std:: equivalents (blueprint §3). sub_1460(base, exp) == powf(base, exp).
 // ============================================================================
 static inline float wg_powf(float base, float exp) { return std::pow(base, exp); }
+// EXT SEAM (NOT RETAIL): the engine's ported MSVC powf, the same bits on every platform, for a lobby
+// room's shared map (Neighbour::PortableWorldMaths). Its own curve memo below: the memo keys on the
+// brush only, so the two powfs must never share one.
+static inline float wg_powf_portable(float base, float exp) { return MsvcLibm::Powf(base, exp); }
 static inline float wg_sqrtf(float v)               { return std::sqrt(v); }
 
 // XOR a float's bit pattern with the sign bit (== negate). Matches the exe's
@@ -139,7 +145,9 @@ static void wg_eee0_radial_brush(const TerrainHeightfield* hf, const float* cent
     // once instead of once per cell. One cache per process: worldgen runs on one
     // thread at a time (the loader).
     static WgBrushCurveCache s_curves(&wg_powf, &wg_sqrtf, kOne, kRadiusThreshold);
-    WgBrushCurveCache::Curve& curve = s_curves.Get(falloffBase, cutoff);
+    static WgBrushCurveCache s_curvesPortable(&wg_powf_portable, &wg_sqrtf, kOne, kRadiusThreshold);
+    WgBrushCurveCache& curves = Neighbour::PortableWorldMaths() ? s_curvesPortable : s_curves;   // EXT SEAM
+    WgBrushCurveCache::Curve& curve = curves.Get(falloffBase, cutoff);
 
     int half  = dim >> 1;                  // iVar9 = iVar9 >> 1
     int cxBase = (int)center[0] + half;    // (int)param_2[0] + half  (col)  -- see note
@@ -159,7 +167,7 @@ static void wg_eee0_radial_brush(const TerrainHeightfield* hf, const float* cent
             int col = dx + cxBase;
             if (col < 0 || col >= edge) continue;
 
-            float f = s_curves.Weight(curve, dx * dx + dy * dy);   // 1/(powf(base,-(d-cutoff))+1)
+            float f = curves.Weight(curve, dx * dx + dy * dy);   // 1/(powf(base,-(d-cutoff))+1)
 
             float* cell = &mask[(int64_t)row * edge + col];
             if (mode == 0) {

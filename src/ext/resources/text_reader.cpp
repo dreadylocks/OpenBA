@@ -135,8 +135,11 @@ const FieldDesc kTabDesc[] = {
 };
 const FieldDesc kRibbon[] = { F("_vertical", Bool), F("", Bool), F("_cellPad", Int), F("_elements", ExtArray) };
 const FieldDesc kGroup[]  = { F("_elements", ExtArray) };
+// UI::ContainerDescription::Serialize: the requested size (+0x68, +0x6c), the bar size (+0x74), the
+// three parts, the two clamps (ContainerDescription.h).
 const FieldDesc kContainer[] = {
-    F("", Int), F("", Int), F("", Int), F("", Ext), F("", Ext), F("_content", Ext), F("", Bool), F("", Bool),
+    F("_requestedWidth", Int), F("_requestedHeight", Int), F("_barSize", Int), F("", Ext), F("", Ext),
+    F("_content", Ext), F("", Bool), F("", Bool),
 };
 const FieldDesc kLayoutItem[] = {
     F("_element", Ext), F("_name", String), F("_xAnchorTo", String), F("_yAnchorTo", String),
@@ -149,6 +152,12 @@ const FieldDesc kImage[] = { F("_spriteSheet", Ext), F("_spriteName", String), F
 const FieldDesc kSlider[] = {
     F("_number", Ext), F("", Ext), F("", String), F("", String), F("", String), F("", String), F("", String),
     F("", Int), F("", Int), F("", Float), F("", Float), F("", Int),
+};
+// UI::EditDescription::Serialize (editdescription.cpp), version 0: the font (+0x68), the initial
+// text (+0x70), the max length (+0x78), the password flag (+0x7c), the allowed characters (+0x80;
+// empty = any). EditElement.h names the copies _font / _text / _maxLength / _password / _filter.
+const FieldDesc kEdit[] = {
+    F("_font", Ext), F("_text", String), F("_maxLength", Int), F("_password", Bool), F("_filter", String),
 };
 const FieldDesc kOverride[] = { F("_element", Ext), F("_name", String) };
 const FieldDesc kController[] = { F("", UInt), F("", Ext), F("", Ext), F("", String) };
@@ -183,6 +192,7 @@ const Level kLevels[] = {
     L("TableDescription",     "ElementDescription", kTable),
     L("ImageDescription",     "ElementDescription", kImage),
     L("SliderDescription",    "ElementDescription", kSlider),
+    L("EditDescription",      "ElementDescription", kEdit),
     L("Dialog",               nullptr,              kDialog),
     L("StringTable",          nullptr,              kStringTable),
 };

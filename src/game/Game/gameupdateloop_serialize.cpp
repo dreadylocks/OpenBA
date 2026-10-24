@@ -868,7 +868,8 @@ static void ExtSave_ReadTail(GameUpdateLoop* owner, IO::CompressedMemoryStream* 
                 static_cast<unsigned>(records.size()));
     }
     for (const Ext::SaveTail::Record& r : records)
-        fprintf(stderr, " %s(v%d)", r.id.c_str(), r.formatVersion);
+        fprintf(stderr, " %s(v%d, %u payload bytes)", r.id.c_str(), r.formatVersion,
+                static_cast<unsigned>(r.payload.size()));
     fprintf(stderr, "\n");
     fflush(stderr);
     // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): class C, each record's payload

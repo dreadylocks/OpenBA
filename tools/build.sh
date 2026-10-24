@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tools/build.sh -- the one build / deploy / run entry point over the CMake build (2026-10-11).
 #
-# usage: tools/build.sh <command> [flavour] [--jobs N]
+# usage: tools/build.sh <command> [flavour] [--jobs N] [--cross]
 #   build   [flavour]   configure the platform build dir if absent, build OpenBA
 #   unit    [flavour]   build the unit tests and run them (exit = the suite's exit)
 #   deploy  [flavour]   build + copy the exe to the game directory (BANISHED_DIR), then
@@ -14,6 +14,10 @@
 #   build dirs: build/cmake-<flavour> (Windows, Linux); on macOS build/mac-<flavour>, with debug = build/mac-arm64.
 #               Darwin builds with the Metal render backend.
 #   flavours: debug (default) | og | perf | release   -- CMakeLists.txt's BANISHED_FLAVOUR
+#   --cross             (macOS / Linux host) build the WINDOWS exe with mingw-w64 GCC through
+#                       tools/toolchains/mingw-w64-x86_64.cmake, into build/cross-<flavour>.
+#                       build / deploy / exe / clean only: the exe cannot be launched here, so
+#                       deploy just copies it to BANISHED_DIR (e.g. the PC's game folder on a share).
 #
 # Jobs: --jobs N or BUILD_JOBS (default 8 since 2026-10-17, the user: no wide multi-agent builds any more; agents still use 2 -- memory
 # feedback_build_parallelism_low_memory). Extra cmake args: CMAKE_EXTRA (e.g. "-DBANISHED_USE_CCACHE=OFF").
@@ -26,9 +30,11 @@ FLAV="debug"; [ "$CMD" = stress ] && FLAV=perf
 FLAV_GIVEN=0
 case "${1:-}" in debug|og|perf|release) FLAV="$1"; FLAV_GIVEN=1; shift;; esac
 JOBS="${BUILD_JOBS:-8}"
+CROSS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --jobs) JOBS="$2"; shift 2;;
+    --cross) CROSS=1; shift;;
     *) echo "unknown argument $1"; exit 2;;
   esac
 done
@@ -37,7 +43,13 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXT=.exe;; *) EXT="";; esac
 # the CMake cache var BANISHED_GAME_DIR is set from it at configure time.
 BANISHED_DIR="${BANISHED_DIR:-C:/GOG Games/Banished}"
 B="build/cmake-$FLAV"
-if [ "$(uname -s)" = Darwin ]; then
+CROSS_ARGS=""
+if [ "$CROSS" = 1 ]; then
+  case "$CMD" in build|deploy|exe|clean) ;; *) echo "build.sh $CMD: not with --cross (the exe only runs on Windows)"; exit 2;; esac
+  EXT=.exe
+  B="build/cross-$FLAV"
+  CROSS_ARGS="-DCMAKE_TOOLCHAIN_FILE=tools/toolchains/mingw-w64-x86_64.cmake"
+elif [ "$(uname -s)" = Darwin ]; then
   B="build/mac-$FLAV"
   [ "$FLAV" = debug ] && B="build/mac-arm64"
 fi
@@ -51,7 +63,7 @@ FAITHFUL="/profile:faithful"
 configure() {
   [ -f "$B/build.ninja" ] && return 0
   echo "== configure $B (BANISHED_FLAVOUR=$FLAV)"
-  cmake -S . -B "$B" -G Ninja -DBANISHED_FLAVOUR="$FLAV" -DBANISHED_GAME_DIR="$BANISHED_DIR" ${CMAKE_EXTRA:-} || exit 1
+  cmake -S . -B "$B" -G Ninja -DBANISHED_FLAVOUR="$FLAV" -DBANISHED_GAME_DIR="$BANISHED_DIR" $CROSS_ARGS ${CMAKE_EXTRA:-} || exit 1
 }
 build() { # targets...
   configure
@@ -62,7 +74,7 @@ need_game_dir() {
   [ -d "$BANISHED_DIR" ] || { echo "build.sh $CMD: game directory not found: $BANISHED_DIR (set BANISHED_DIR to the Banished install)"; exit 1; }
 }
 deploy() {
-  if [ "$(uname -s)" = Darwin ]; then
+  if [ "$(uname -s)" = Darwin ] && [ "$CROSS" != 1 ]; then
     echo "build.sh $CMD is not supported on macOS; use tools/macos/make_app.sh and tools/macos/run_openba.sh" >&2
     exit 2
   fi
@@ -90,13 +102,14 @@ case "$CMD" in
            else deploy; fi
            tools/stress_run.sh --no-build ${STRESS_ARGS:-};;
   clean)   if [ "$FLAV_GIVEN" = 1 ]; then rm -rf "$B"; echo "removed $B"
+           elif [ "$CROSS" = 1 ]; then rm -rf build/cross-debug build/cross-og build/cross-perf build/cross-release; echo "removed build/cross-{debug,og,perf,release}"
            elif [ "$(uname -s)" = Darwin ]; then
              rm -rf build/mac-*
              echo "removed build/mac-*"
            else rm -rf build/cmake-debug build/cmake-og build/cmake-perf build/cmake-release; echo "removed build/cmake-{debug,og,perf,release}"; fi;;
   *)
     echo "unknown command $CMD"
-    sed -n '2,17p' "$0"
+    sed -n '2,21p' "$0"
     exit 2
     ;;
 esac

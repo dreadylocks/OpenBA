@@ -90,6 +90,7 @@
 #include "ext/savetail.h"
 #include "ext/fast_paths/fast_paths.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/FASTPATHS.md): Ext::FastPaths::SelectForGame
 #include "ext/path_workers/path_workers.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/PATHWORKERS.md): Ext::PathWorkers::SelectForGame
+#include "ext/neighbour/neighbour.h"   // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::ResetForGame / SelectForGame
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 
 // ============================================================
@@ -744,6 +745,7 @@ void GameUpdateLoop::Load() {
     // re-reads it (src/ext/fast_paths/fast_paths.h).
     Ext::FastPaths::SelectForGame();
     Ext::PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
+    Neighbour::ResetForGame(this);  // ext.neighbour (class C): the last game's room state goes
 
     // Steps 1-4: resource Finds (Diseases/Profession/Material/Help). Only step 3
     // (UI material) is still DEFERRED (left null; consumers guarded).
@@ -1367,6 +1369,7 @@ void GameUpdateLoop::Load() {
     // selection for the game before the sim issues its first path request.
     Ext::FastPaths::SelectForGame();
     Ext::PathWorkers::SelectForGame();   // ext.path_workers (class B), the same rule
+    Neighbour::SelectForGame();     // ext.neighbour (class C): connects when on (the save's state read)
 
     // Step 32 — AchievementInstance (retail 0x140097645-0x1400976dd).
     //

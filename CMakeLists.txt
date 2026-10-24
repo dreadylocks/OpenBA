@@ -128,7 +128,9 @@ set(EXT_RSC_SOURCES
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/EnhancedOptions.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsStringTable.rsc
   ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsWindow.rsc
-  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/RestrictedFoodsPage.rsc)
+  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/RestrictedFoodsPage.rsc
+  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsNeighbour.rsc
+  ${CMAKE_SOURCE_DIR}/src/ext/ui/Dialog/ExtensionsLobby.rsc)
 set(EXT_RSC_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 set(EXT_RSC_GEN ${EXT_RSC_GEN_DIR}/ext_rsc_text.h)
 find_package(Python3 COMPONENTS Interpreter QUIET)
@@ -289,6 +291,8 @@ target_link_options(OpenBA PRIVATE ${FLAVOUR_FLAGS} -static -static-libgcc -stat
 # SDL3's own system libraries still bring it.
 # gdi32: the run-time font rasteriser (src/platform/win/font_raster_win.cpp, KITFREE RSCFONT).
 target_link_libraries(OpenBA PRIVATE user32 dbghelp shell32 gdi32)
+# winhttp: the WebSocket seam (src/platform/win/websocket_win.cpp) for ext.neighbour.
+target_link_libraries(OpenBA PRIVATE winhttp)
 # SDL3 static: the target carries its include directory and its system libraries
 target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static)
 # xWMA -> PCM (third_party/wmadec): the target carries its include directory
@@ -367,6 +371,8 @@ if(RENDER_BACKEND_READY)
   if(APPLE)
     # Metal needs no dlopened SDL: SDL3 is static, and libairconv.dylib is found beside the exe.
     target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+    # Network.framework: the WebSocket seam (src/platform/darwin/websocket_darwin.cpp) for ext.neighbour.
+    target_link_libraries(OpenBA PRIVATE "-framework Network")
   else()
     target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
   endif()

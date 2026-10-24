@@ -13,6 +13,7 @@
 // The runtime type headers come FIRST: they pull src/engine/volume/Volume.h,
 // whose global-scope `struct Rectangle` is hidden by <wingdi.h>'s `Rectangle()`
 // once <windows.h> has been seen through resolve.h.  ENDGAME B.3.5 batch I2.
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "graphics/Mesh.h"
 #include <new>
 #include "object/External.h"
@@ -315,6 +316,7 @@ uint64_t PlacementTool::CreateAt(int param_2, int param_3, int param_4, int para
     Object::InternalPtr<ComponentEntity> local_48 = entity;
     gameWorld->m_entityList->RegisterEntity(&local_48,
                                    static_cast<int>(descriptionPtr->_category));
+    Neighbour::SharedMap::NoteStructure(entity);   // EXT SEAM (NOT RETAIL): claim + mirror (ext.neighbour M2)
 
     // The pick mesh: RegisterEntity's OnAdded pass runs PickingComponent::OnAdded
     // (0x140128b90 -> 0x140128f50) for the new entity; retail calls nothing more here

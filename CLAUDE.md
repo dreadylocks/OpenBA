@@ -18,6 +18,11 @@ is replaced (`src/render/dx11/`), game logic lives in `src/game/`; the launcher 
 diagnostics and harnesses `src/diag/`. There is no address registry: a call is a C++ call, and a
 function with no body yet is a `// PORT GAP 0x<addr> <name>` comment at its call site.
 
+**This fork** (`dreadylocks/OpenBA`) also builds a two-player "neighbour towns" mode and island
+maps as class B/C extensions in `src/ext` (off by default; the faithful path stays untouched).
+Plan, decisions and next steps: `docs/fork/NEIGHBOUR_TOWNS.md`. If a rule here blocks a fork
+goal, ask the user rather than working around it.
+
 ## Current work — read these, don't restate them here
 - **Where things stand:** `docs/runtime_port/STATUS.md`; **what is next:** `docs/runtime_port/NEXT_SESSION.md`
 - **Phase plan:** `docs/runtime_port/ENDGAME.md` (closed B-phase sheets and kits: `docs/history/endgame_b/`)

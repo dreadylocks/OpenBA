@@ -25,6 +25,7 @@
 //   +0x00 occupying entity ptr · +0x28 road-adjacency count · +0x29 terrain type byte
 //   +0x2a road type (0xff = none) · +0x2b road state (0x80 = queued)
 
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour M2 claims + mirrors (NOT RETAIL)
 #include "Player/roadtool_funcs.h"
 #include "Player/dragtool.h"   // Tool + DragTool (ENDGAME B.3.8 TOOL)
 #include <new>
@@ -150,6 +151,10 @@ void Map::PlaceRoadCell(uint32_t cellIdx,
 
     // Only upgrade: bail unless the new road type outranks what is already there.
     if (!(roadType < cell->field_0x2A)) return;
+    // EXT SEAM (NOT RETAIL, ext.neighbour M2): no road on the neighbour's land; this town's road
+    // tiles are claimed. Both never act outside a lobby room's shared map.
+    if (Neighbour::SharedMap::PeerHoldsCell(cellIdx)) return;
+    Neighbour::SharedMap::NoteRoadCell(cellIdx);
 
     // If this cell already has a pending road entry, clear it first.
     if (PendingRoad(this, (int)cellIdx)) {
@@ -277,6 +282,7 @@ bool RoadTool::CalcPath(int startCell, int endCell) {
 
     WorldGeometry* decalMgr = gameWorld->m_worldGeometry;
     decalMgr->StoreBatchMaterial((int)roadType, decal);
+    Neighbour::SharedMap::NoteRoadTemplate(roadType, descEntity);   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
 
     for (int i = 0; i < pathLen; ++i) {
         mapGrid->PlaceRoadCell((uint32_t)pathBuf[i], roadType,

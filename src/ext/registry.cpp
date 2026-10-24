@@ -324,6 +324,15 @@ const Entry kEntries[] = {
       "No fog",
       "Removes the fog that hazes the far map when the camera is zoomed far out.",
       0, [](State& s) -> bool& { return s.ext.no_fog; } },
+    // NEIGHBOUR TOWNS (this fork; docs/fork/NEIGHBOUR_TOWNS.md): two players' towns talk through
+    // a relay server (neighbour.* keys in settings.cfg). Class C: the town's room state is in the
+    // save's tail record (src/ext/neighbour/protocol.h SavedState).
+    { "neighbour", Tier::Extension, Class::C, false,
+      "Neighbor towns",
+      "Connects this town to a friend's town through a relay server (set neighbour.server, "
+      "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
+      "appear in the event log. Press N in game for the Neighbor panel: chat, send goods, send a family.",
+      5, [](State& s) -> bool& { return s.ext.neighbour; } },   // = Neighbour::kPayloadFormat (protocol.h)
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.

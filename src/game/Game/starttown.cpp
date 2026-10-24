@@ -119,6 +119,10 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <algorithm>
 #include <functional>
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "ext/neighbour/neighbour.h"   // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::StartCentre
+#include "crt/msvc_libm.h"             // EXT SEAM (NOT RETAIL): MsvcLibm::Sinf / Cosf for ext.neighbour's shared map
+#include "ext/neighbour/world_maths.h"  // EXT SEAM (NOT RETAIL): Neighbour::PortableWorldMaths
+#include "ext/neighbour/shared_map.h"  // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): Neighbour::SharedMap::NoteStructure
 
 // ============================================================================
 // Economy Brick M-D — live town storage (BANISHED_LIVE_STORAGE, default OFF).
@@ -374,7 +378,10 @@ static bool StartTown_DiskBuildable(const Map* game, int tileX, int tileY, int s
 // whose disk passes StartTown_DiskBuildable.
 static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* outY) {
     const int dim    = game->size;
-    const int half   = dim >> 1;
+    // EXT SEAM (NOT RETAIL, ext.neighbour M2): on a lobby room's shared map each town's spiral
+    // starts from its own side; otherwise the map centre, as retail.
+    int cx = dim >> 1, cy = dim >> 1;
+    Neighbour::StartCentre(dim, &cx, &cy);
     const int sizeSq = size * size;
     const int step   = (size * 3) >> 2;        // floor(size*3/4); size > 0
     const float fullCircle = 360.0f;           // DAT_140172238
@@ -382,11 +389,16 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
     float radius = 0.0f;
     int   points = 4;
     const int kMaxRings = 4096;                // defensive cap (original loops forever)
+    // EXT SEAM (NOT RETAIL): a lobby room's shared map takes the ported MSVC sinf / cosf, so both towns'
+    // games find the same start sites on any platform (Neighbour::PortableWorldMaths).
+    const bool portable = Neighbour::PortableWorldMaths();
     for (int ring = 0; ring < kMaxRings; ++ring) {
         for (int i = 0; i < points; ++i) {
             const float ang = (float)i * (fullCircle / (float)points) * kDeg2Rad;
-            const int tx = (int)(cosf(ang) * radius) + half;   // local_res8 (cos) * r + dim/2
-            const int ty = (int)(sinf(ang) * radius) + half;   // local_res10 (sin) * r + dim/2
+            const float c = portable ? MsvcLibm::Cosf(ang) : cosf(ang);
+            const float s = portable ? MsvcLibm::Sinf(ang) : sinf(ang);
+            const int tx = (int)(c * radius) + cx;   // local_res8 (cos) * r + dim/2
+            const int ty = (int)(s * radius) + cy;   // local_res10 (sin) * r + dim/2
             if (StartTown_DiskBuildable(game, tx, ty, size, sizeSq)) {
                 *outX = tx; *outY = ty;
                 return true;
@@ -395,7 +407,7 @@ static bool StartTown_FindSpawnTile(const Map* game, int size, int* outX, int* o
         points *= 2;
         radius += (float)step;
     }
-    *outX = half; *outY = half;                // fallback: map center (should not happen)
+    *outX = cx; *outY = cy;                    // fallback: map center (should not happen)
     return false;
 }
 
@@ -1853,6 +1865,7 @@ static int StartTown_SpawnStructures(MapGenerator* startConfig, EntityList* enti
         }
 
         ++g_stDiag.structPlaced;   // [WGPAR] folded into the summary line
+        Neighbour::SharedMap::NoteStructure(ent);   // EXT SEAM (NOT RETAIL): claim + mirror (ext.neighbour M2)
         return ent;
     };
     g_stPlaceStructure = placeStructure;   // for the deferred spawn tick
@@ -4824,6 +4837,7 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
             for (int x = 0; x < dim; ++x) {
                 float p = noise[dim * y + x];   // was RtUtility_PerlinNoise_Generate(&perlin, (float)x * scale, (float)y * scale)
                 if (threshold > p * 0.5f + 0.5f) continue;
+                Neighbour::ScatterCell(e, dim * y + x);   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
                 if (rng->RandFloat() > density) continue;
 
                 const int idx = dim * y + x;
@@ -4853,6 +4867,7 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
                 if (cells[idx].blocker) { ++zoneSkips; continue; }
                 const int dy = y - spawnY, dx = x - spawnX;
                 if (dy * dy + dx * dx < sizeSq) continue;   // town exclusion
+                if (Neighbour::ScatterExcluded(dim, x, y, sizeSq)) continue;   // EXT SEAM (NOT RETAIL): both towns' sites
 
                 // Terrain height + slope from the heightmap sampler.
                 const float center = (float)(dim >> 1) - kCenterBias;
@@ -5194,6 +5209,7 @@ extern "C" void StartTown_SpawnEntities(MapGenerator* startConfig, GameUpdateLoo
         int size = sc->subdivisions;
         if (size <= 0) size = 1;
         StartTown_FindSpawnTile(game, size, &spawnX, &spawnY);
+        Neighbour::NoteSpawnTiles(spawnX, spawnY, size, [&](int* x, int* y) { StartTown_FindSpawnTile(game, size, x, y); });   // EXT SEAM (NOT RETAIL, ext.neighbour M3)
     }
     g_stSpawnX = spawnX; g_stSpawnY = spawnY;
 
@@ -5230,7 +5246,9 @@ extern "C" void StartTown_SpawnEntities(MapGenerator* startConfig, GameUpdateLoo
     // excluding the town site (radius = townSize, sizeSq = size*size).
     int resSize = sc->subdivisions;
     if (resSize <= 0) resSize = 1;
+    Neighbour::ScatterBegin(world);   // EXT SEAM (NOT RETAIL): the same scatter in both towns (ext.neighbour M3)
     int nr = StartTown_SpawnResources(sc, world, spawnX, spawnY, resSize * resSize);
+    Neighbour::ScatterEnd(world);     // EXT SEAM (NOT RETAIL)
     int afterRes = entityList->masterArray._size;
     fprintf(stderr, "[startTown::spawn] resources: spawned %d; entityList count %d -> %d\n",
             nr, afterCitizens, afterRes);

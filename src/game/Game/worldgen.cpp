@@ -61,6 +61,8 @@
 #include "system/Value.h"      // ENDGAME B.3.4b System caller batch (Random/Time/Color)
 #include "Game/worldgen_cells.h"   // [WGPAR] the row-parallel cell loops of e5d0 / cf440
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
+#include "ext/neighbour/neighbour.h"   // EXT SEAM: Neighbour::NoteWorldHash (NOT RETAIL)
+#include "ext/neighbour/world_maths.h" // EXT SEAM: Neighbour::PortableWorldMaths (NOT RETAIL)
 
 // ============================================================
 // Reused helpers from sibling reimpl TUs (already registered/defined)
@@ -172,7 +174,8 @@ static void wg_BaseHeightmap_e5d0(TerrainHeightfield* hf) {
     RtUtility_PerlinNoise_Ctor(&pn2, kQuarter, kOctaves, s4, s3);       // persist 0.25
 
     // [WGPAR] the per-cell loop: Game/worldgen_cells.cpp (row-parallel, exact).
-    WgCells_BaseHeightmap(heightmap, dim, &pn1, &pn2);
+    // EXT SEAM (NOT RETAIL): a lobby room's shared map takes the ported MSVC powf (Neighbour::PortableWorldMaths).
+    WgCells_BaseHeightmap(heightmap, dim, &pn1, &pn2, Neighbour::PortableWorldMaths());
 }
 
 // ============================================================
@@ -397,10 +400,12 @@ void WorldGeometry::BuildFromHeightfield(TerrainHeightfield* hf) {
     LoadTime::Stamp("wg.quantize");   // NOT RETAIL: print-only (the f390 pipeline is done)
     if (hf->heightmap.data && _heights.data) {   // NOT RETAIL: print-only world-identity proof (LOADPLAN §4)
         const uint64_t edgeN = (uint64_t)(hf->gridSize + 1);
+        const uint64_t heightHash = LoadTime::HashArray(hf->heightmap.data, edgeN * edgeN);
         fprintf(stderr, "[WorldHash] height f32=%016llx i16=%016llx dim=%d\n",
-                (unsigned long long)LoadTime::HashArray(hf->heightmap.data, edgeN * edgeN),
+                (unsigned long long)heightHash,
                 (unsigned long long)LoadTime::HashArray(_heights.data, (uint64_t)N * N),
                 hf->gridSize);
+        Neighbour::NoteWorldHash(heightHash);   // EXT SEAM (NOT RETAIL): the land's fingerprint, for ext.neighbour
     }
     StillTerrain::Bump();   // [STILLTERRAIN] the heightmap was (re)built
 

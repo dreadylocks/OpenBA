@@ -8,6 +8,7 @@
 #include "ext/savetail.h"
 
 #include "ext/restricted_foods/restricted_foods.h"   // RestrictedFoods::Codec()
+#include "ext/neighbour/save_state.h"                // Neighbour::Codec() (this fork, docs/fork/NEIGHBOUR_TOWNS.md)
 
 #include <cstring>
 
@@ -16,7 +17,7 @@ namespace SaveTail {
 namespace {
 
 const StateCodec* const* Codecs(int& n) {
-    static const StateCodec* const kCodecs[] = { &RestrictedFoods::Codec() };
+    static const StateCodec* const kCodecs[] = { &RestrictedFoods::Codec(), &Neighbour::Codec() };
     n = static_cast<int>(sizeof(kCodecs) / sizeof(kCodecs[0]));
     return kCodecs;
 }

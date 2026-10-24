@@ -37,12 +37,29 @@ bool ParseEmbedded(const char* path, File& f) {
 }  // namespace
 
 UNIT_TEST(ext_rsc_text_embedded_files) {
-    CHECK(kEmbeddedCount == 5);
+    CHECK(kEmbeddedCount == 7);
     CHECK(Embedded("Dialog/Extensions.rsc") != nullptr);
     CHECK(Embedded("Dialog/EnhancedOptions.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsStringTable.rsc") != nullptr);
     CHECK(Embedded("Dialog/ExtensionsWindow.rsc") != nullptr);
     CHECK(Embedded("Dialog/RestrictedFoodsPage.rsc") != nullptr);
+    CHECK(Embedded("Dialog/ExtensionsNeighbour.rsc") != nullptr);   // ext.neighbour's panel (this fork)
+    CHECK(Embedded("Dialog/ExtensionsLobby.rsc") != nullptr);       // ext.neighbour's lobby (M2)
+}
+
+// ext.neighbour's panel (this fork): it parses, its dialog is modal without pausing the game, and
+// the chat box is an EditDescription (text_reader.cpp has its schema).
+UNIT_TEST(ext_rsc_text_parse_neighbour_panel) {
+    File f;
+    CHECK(ParseEmbedded("Dialog/ExtensionsNeighbour.rsc", f));
+    const Object* dlg = f.Find("resource");
+    CHECK(dlg != nullptr && dlg->type == "Dialog");
+    if (dlg) {
+        const Field* flags = dlg->body.Find("_flags");
+        CHECK(flags && flags->tokens.size() == 2 && flags->tokens[0].text == "Modal");
+    }
+    const Object* edit = f.Find("editChat");
+    CHECK(edit && edit->type == "EditDescription" && edit->base == "NewGame.rsc:editName");
 }
 
 UNIT_TEST(ext_rsc_text_parse_extensions) {
@@ -101,8 +118,8 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
     CHECK(ParseEmbedded("Dialog/ExtensionsStringTable.rsc", s));
     CHECK(s.objects.size() == 1 && s.objects[0].type == "StringTable" && s.objects[0].name == "resource");
     const Field* strings = s.objects[0].body.Find("_strings");
-    CHECK(strings && strings->blocks.size() == 33);
-    if (strings && strings->blocks.size() == 33) {
+    CHECK(strings && strings->blocks.size() == 58);   // upstream's 33 + ext.neighbour's 25 (this fork)
+    if (strings && strings->blocks.size() == 58) {
         // The load notice with two parameters (found by its text: the window and page keys sit before the
         // notices, so an index into the list moves whenever one is added).
         bool found = false;

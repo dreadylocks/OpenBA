@@ -140,35 +140,51 @@ inline constexpr uint16_t kModOption = 0x0100 | 0x0200;   // SDL_KMOD_LALT | SDL
 
 // Rule 4 is decided once, by the event pump, never by the current modifier at poll
 // time. Releasing Option during a drag must not turn that drag back into a left click.
+//
+// A trackpad tap (tap to click; a two-finger tap is the right button) sends its press and
+// release a few milliseconds apart, so both land between two of the game's once-a-frame
+// polls and the polled state never shows the button down: the game missed every tap. So a
+// press the pump has seen is shown to the next poll even when it was already released; a
+// held press reads exactly as before. The game reads the buttons through one poll a frame
+// (the DirectInput-shaped one), so the press is shown once and then cleared. Input/Legacy
+// (off by default) reads each button on its own; there only the left button's read sees a tap.
 class MouseButtonRemapper {
 public:
     uint8_t ButtonEvent(uint8_t button, bool down, uint16_t modifiers) {
-        if (button != 1) return button;
+        if (button != 1) {
+            if (down && button >= 1 && button <= 32) pressed_ |= 1u << (button - 1);
+            return button;
+        }
         if (down && !leftDown_) {
             middle_ = (modifiers & kModOption) != 0;
         }
         const uint8_t logical = middle_ ? 2 : 1;
+        if (down) pressed_ |= middle_ ? kButtonMiddle : kButtonLeft;
         leftDown_ = down;
         if (!down) middle_ = false;
         return logical;
     }
 
-    uint32_t PolledButtons(uint32_t physical) const {
+    uint32_t PolledButtons(uint32_t physical) {
         // A physical press can arrive before its queued event is dispatched (retail
         // polls before pumping). Hide it until the pump has chosen its logical button.
-        const uint32_t other = physical & ~kButtonLeft;
-        if (!leftDown_ || (physical & kButtonLeft) == 0) return other;
-        return other | (middle_ ? kButtonMiddle : kButtonLeft);
+        uint32_t buttons = physical & ~kButtonLeft;
+        if (leftDown_ && (physical & kButtonLeft) != 0) buttons |= middle_ ? kButtonMiddle : kButtonLeft;
+        buttons |= pressed_;
+        pressed_ = 0;
+        return buttons;
     }
 
     void Reset() {
         leftDown_ = false;
         middle_ = false;
+        pressed_ = 0;
     }
 
 private:
     bool leftDown_ = false;
     bool middle_ = false;
+    uint32_t pressed_ = 0;   // presses the pump saw that no poll has shown yet (logical bits)
 };
 
 // One main-thread state shared by the SDL event pump and both polling APIs. The

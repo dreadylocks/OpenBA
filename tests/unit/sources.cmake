@@ -74,6 +74,12 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/toolbar/window_state.cpp               #   the toolbar window's host record
   ${CMAKE_SOURCE_DIR}/src/ext/spread_warmth/spread_warmth.cpp     # ext_spread_warmth_test.cpp (HITCH_PFBURST)
   ${CMAKE_SOURCE_DIR}/src/ext/drain_split/drain_split.cpp         # ext_drain_split_test.cpp (HITCH_DRAINSPLIT)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/protocol.cpp              # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/save_state.cpp            #   its class C codec (state_codecs.cpp)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/handshake.cpp             #   the layer-1 hello fields, xxHash64
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/seat_store.cpp            #   the seat-token file format
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/link.cpp                  # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/lobby.cpp                 # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS M2)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/dxbc.cpp            # ext_better_trees_test.cpp (block FAA-CORE)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/cutout_rewrite.cpp
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/receiver_rewrite.cpp   # ext_better_trees_test.cpp (block TS-CORE)
@@ -81,6 +87,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/fast_paths/fast_search.cpp
   ${CMAKE_SOURCE_DIR}/src/game/Action/action_pf_region_search.cpp
   ${CMAKE_SOURCE_DIR}/src/game/Game/worldgen_f390_erosion.cpp   # worldgen_erosion_test.cpp (block EROSION)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/world_maths.cpp        #   its EXT SEAM (ext.neighbour's portable worldgen maths)
   ${CMAKE_SOURCE_DIR}/src/ext/path_workers/pool.cpp
   ${CMAKE_SOURCE_DIR}/src/platform/common/cpu/roster.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/draw_gather/gather_side.cpp

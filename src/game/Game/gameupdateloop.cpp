@@ -69,6 +69,7 @@
 // ext.restricted_foods (class C), Ext::RestrictedFoods::BeginFrame
 #include "ext/restricted_foods/restricted_foods.h"
 #include "ext/drain_split/drain_split.h"       // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_DRAINSPLIT.md): ext.drain_split (class B), Ext::DrainSplit::BeginFrame
+#include "ext/neighbour/neighbour.h"           // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour (class C), Neighbour::BeginFrame / EndGame
 #include "Game/terrain_sidecar.h" // the terrain-type mirror's teardown (faithful perf work)
 #include <cstdio>
 #include <cstring>
@@ -590,6 +591,7 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): ext.restricted_foods (C) read once per frame
     Ext::RestrictedFoods::BeginFrame();
     Ext::DrainSplit::BeginFrame();           // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_DRAINSPLIT.md): ext.drain_split (B) read once per frame, the owed half's frame count
+    Neighbour::BeginFrame();            // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour (C) what the relay sent -> the game; idle when off
 
     // [EVENTS] RETIRED: the BANISHED_LIVE_EVENTS resource-shortage scanner used to
     // run here (a second port of FUN_14008c100 via EventLog_CheckResourceShortages).
@@ -2288,6 +2290,8 @@ GameUpdateLoop::~GameUpdateLoop() {
     // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): release this loop's class B / C lock (ignored
     // when a reload's new loop already holds it). Releasing it also empties the class C state.
     Ext::UnlockForGame(this);
+    // ext.neighbour: hang up (ignored when a reload's new loop already owns the line).
+    Neighbour::EndGame(this);
 }
 
 // The exe cell 0x1401c3dd8 (B3R STORAGE; was the file-static
