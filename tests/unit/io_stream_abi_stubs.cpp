@@ -96,7 +96,11 @@ TextFileStream::~TextFileStream() {}
 // Slot 0 is PURE on CompressedStream and inline on CompressedFileStream /
 // CompressedMemoryStream (B.3.9 IO), so none of them needs one.
 bool     CompressedStream::Write(int, const void*) { StubReached("CompressedStream::Write"); }
-bool     CompressedStream::Read(int, void*)        { StubReached("CompressedStream::Read"); }
+// CompressedStream::Read is the real body (compressed_stream_read.cpp, linked for
+// decode_exact_test.cpp); so are SetWindow / GetAvailableWindow / DecompressFromSource.
+// The write path they reach only when WRITING stays a stub, and the ext hook is null.
+void     CompressedStream::CompressWindow(int)     { StubReached("CompressedStream::CompressWindow"); }
+CompressedStream::ExtAsyncCompressFn CompressedStream::_extAsyncCompress = nullptr;
 bool     CompressedStream::SetCurrentPos(int)      { StubReached("CompressedStream::SetCurrentPos"); }
 uint32_t CompressedStream::GetCurrentPos() const   { StubReached("CompressedStream::GetCurrentPos"); }
 uint32_t CompressedStream::GetSize() const         { StubReached("CompressedStream::GetSize"); }

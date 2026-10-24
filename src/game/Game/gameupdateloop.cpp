@@ -60,6 +60,7 @@
 #include "math/Math.h"
 #include "system/String.h"
 #include "system/Filename.h"
+#include "showroom.h"         // BANISHED_SHOWROOM shot sequence (src/diag/)
 #include "stress_harness.h"   // BANISHED_STRESS Update/Draw brackets (standalone/)
 #include "ext/render_culling/render_culling.h" // EXT SEAM (NOT RETAIL, docs/extensions/handins/PERFXEXT.md): ext.render_culling / ext.anim_batch (PerfX)
 #include "ext/walk_batch/walk_batch.h" // EXT SEAM (NOT RETAIL, docs/extensions/handins/WALKBATCH.md, WALKGRID.md): ext.walk_batch (A) / ext.walk_batch_grid (B)
@@ -370,7 +371,7 @@ extern "C" int GameUpdateLoop_CurrentFrame() { return s_frameNum; }
 // In-game tool-injection harness (src/diag/tool_harness.cpp), env-gated by
 // BANISHED_TOOL_HARNESS. No-op unless that env var is set.
 extern "C" void ToolHarness_Tick(PlayerToolManager* entityUI, int frameNum);
-extern "C" void PauseMenuHarness_Tick(PlayerToolManager* entityUI, int frameNum);  // src/diag/pausemenu_harness.cpp
+#include "pausemenu_harness.h"   // PauseMenuHarness_Tick (src/diag)
 extern "C" void FoodPanel_Tick(PlayerToolManager* entityUI, int frameNum);  // src/diag/food_panel_harness.cpp
 extern "C" void FoodPlace_Tick(int frameNum);                  // src/diag/food_placement_harness.cpp
 extern "C" void StartTown_DeferredSpawn_Tick(int frameNum);    // src/game/Game/starttown.cpp
@@ -578,6 +579,11 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     g_samplerTag = 1;   // [Sampler] inside Update
     struct SamplerTagReset { ~SamplerTagReset() { g_samplerTag = 0; } } samplerTagReset;
     ApplyForceSpeed(m_toolManager);
+    // [SHOWROOM] hold the world paused while the showroom frames and shoots its buildings,
+    // so every shot sees the same season, weather and sun.
+    if (Showroom_WantsPause()) {
+        m_toolManager->paused = true;
+    }
     StressHarness_UpdateBegin(s_frameNum);   // [STRESS] no-op unless BANISHED_STRESS
     Ext::RenderCulling::BeginFrame(m_renderer);      // EXT SEAM (NOT RETAIL, docs/extensions/handins/PERFXEXT.md): ext.render_culling / ext.anim_batch read once per frame (frustum, pause flush)
     Ext::WalkBatch::BeginFrame();            // EXT SEAM (NOT RETAIL, docs/extensions/handins/WALKBATCH.md, WALKGRID.md): ext.walk_batch (A) / ext.walk_batch_grid (B) read once per frame
@@ -1174,6 +1180,11 @@ post_simulation:
                 m_quickSavePressed = 1;
                 std::fprintf(stderr, "[Screenshot] BANISHED_SCREENSHOT_AT=%d reached at frame %d"
                                      " -- raising the TakeScreenshot request bit\n", ssAt, ssFrame);
+            }
+            // BANISHED_SHOWROOM (src/diag/showroom.h): the same request bit, once per
+            // building, after the camera pin has framed it.
+            if (Showroom_Tick()) {
+                m_quickSavePressed = 1;
             }
         }
 

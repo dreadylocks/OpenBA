@@ -112,6 +112,9 @@
 #include "stall_debug.h"
 #include "boot_window.h"
 #include "dx11_backend_access.h"
+#include "async_gpu_create/async_create.h"   // NOT RETAIL: ext.async_gpu_create
+#include "share_gpu_data/share_create.h"     // NOT RETAIL: ext.share_gpu_data
+#include "create_on_demand/lazy_create.h"    // NOT RETAIL: ext.create_on_demand
 #include "VideoDX11Data.h"
 
 #include <windows.h>
@@ -1069,6 +1072,14 @@ DeviceData::~DeviceData() {
 //     src/platform/sdl/cursor_sdl.cpp.)
 // ============================================================
 void DeviceData::Shutdown() {
+    // NOT RETAIL (ext.async_gpu_create): no create is left running against the device going away.
+    AsyncCreate::Drain();
+    // NOT RETAIL (ext.create_on_demand): no first-use create runs against the device going away (the
+    // rest wait for the next device).
+    CreateOnDemand::Pause();
+    // NOT RETAIL (ext.share_gpu_data): nothing made on this device is handed out again; the table's
+    // references go (exit, both device-lost recoveries and a device rebuild all come through here).
+    ShareGpuData::Clear();
 #if BANISHED_TWEAK_OVERLAY
     // The debug tweak overlay releases its DX11 objects and its device / context references before
     // the device goes (device lost, a settings rebuild, exit); it re-inits on the next open frame.
@@ -1322,6 +1333,8 @@ bool DeviceData::CreateDevice() {
     ::Application::Application* app = AppOf();
     app->RegisterMessageCallback(Platform::Window::kMsgSetCursor, &DeviceData_OnSetCursor);   // 0x20
     app->RegisterMessageCallback(Platform::Window::kMsgActivate, &DeviceData_OnActivate);      // 6
+    // NOT RETAIL (ext.create_on_demand): objects waiting for their first use are made on this device.
+    CreateOnDemand::Resume();
     return true;
 }
 

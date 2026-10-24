@@ -316,6 +316,16 @@ public:
     // retail, PUBLIC here because the walkers are free functions.
     static ImageBuffer* _firstSurface;
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md, DESIGN.md hook rule 5):
+    // ext.create_on_demand's level reader. Null by default and under the faithful profile.
+    // PlatformSerialize's READ arm, with the outer level array sized, asks it before reading the
+    // `count` level blobs: true = it consumed them (each level's size read as retail reads it, its
+    // bytes either skipped -- left for the renderer to create on first use -- or read into `levels`
+    // exactly as retail reads them), false = nothing consumed, retail's read follows.
+    using ExtLevelSourceFn = bool (*)(IO::Serializer& serializer, ImageBuffer& image, int32_t count,
+                                      LevelArray& levels);
+    static ExtLevelSourceFn _extLevelSource;
+
     // `??0ImageBuffer@Video@@QEAA@AEBV01@@Z` (0x18001eb80) and
     // `??4ImageBuffer@Video@@QEAAAEAV01@AEBV01@@Z` (0x18001ec50) are REAL,
     // EXPORTED bodies, not compiler defaults — the situation RULE B5-10 records

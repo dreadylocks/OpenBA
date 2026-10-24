@@ -218,6 +218,7 @@
 #include "device_lost_drive.h"   // BANISHED_FORCE_DEVICE_LOST=bgsave (src/diag)
 #include "options.h"
 #include "dx11_backend_access.h"
+#include "async_gpu_create/async_create.h"   // NOT RETAIL: ext.async_gpu_create
 #include "system/Error.h"   // ENDGAME B.3.4b System callers: System::Error (-Iruntime/types)
 // ENDGAME B.3.5 block VC: `Video::Viewport` and `Video::Context`.
 #include "video/Context.h"
@@ -377,6 +378,14 @@ bool ForceDeviceLostThisFrame() {
 
 }  // namespace
 
+// NOT RETAIL: the Present lock (dx11_backend_access.h). One per process; the
+// immediate context it guards is re-created on a device-lost round trip, the
+// mutex is not.
+std::recursive_mutex& Dx11PresentMutex() {
+    static std::recursive_mutex m;
+    return m;
+}
+
 // ============================================================
 // Slot 0 — scalar deleting destructor  (0x180001600)
 //
@@ -502,7 +511,8 @@ static_assert(static_cast<int>(DXGI_FORMAT_B8G8R8A8_UNORM) == 0x57,
 //
 // Present, then the whole device-lost recovery path.
 //
-//   1. Present(Configuration+0x41 ? 1 : 0, 0) and drop the device lock.
+//   1. Present(Configuration+0x41 ? 1 : 0, 0) and drop the device lock
+//      (this port drops it first and presents under Dx11PresentMutex; see below).
 //   2. Success -> done.
 //   3. If the failure is not already DEVICE_REMOVED / DEVICE_RESET, ask
 //      ID3D11Device::GetDeviceRemovedReason() for the real one. The original
@@ -531,8 +541,18 @@ void ContextData::Finish() {
     // The debug tweak overlay draws into the back buffer EndCommands resolved (one atomic test closed).
     Diag::TweakOverlay::BeforePresent(dd->d3dDevice, d3dContext, dd->swapChain);
 #endif
-    HRESULT hr = dd->swapChain->Present(sync, 0);
+    // NOT RETAIL (lock scope only): retail presents, then drops the device lock.
+    // Here the device lock goes first and the Present runs under the Present
+    // mutex, which every off-frame immediate-context user also takes (the note
+    // above Dx11PresentMutex, dx11_backend_access.h). A loader thread linking a
+    // new buffer into the engine's resource lists no longer waits out the
+    // Present; nothing else can touch the immediate context while it runs.
     device->Unlock();
+    HRESULT hr;
+    {
+        std::lock_guard<std::recursive_mutex> presentLock(Dx11PresentMutex());
+        hr = dd->swapChain->Present(sync, 0);
+    }
 
     // The PLAN 5.5 drive. Substitutes the Present result and nothing else; see
     // the block comment above ForceDeviceLostThisFrame.
@@ -575,6 +595,8 @@ void ContextData::Finish() {
     std::fflush(stderr);
     if (onLost) onLost();
 
+    // NOT RETAIL (ext.async_gpu_create): creates queued against the lost device finish first.
+    AsyncCreate::Drain();
     owner->ReleaseDynamic();
 
     dd->d3dDevice = nullptr;

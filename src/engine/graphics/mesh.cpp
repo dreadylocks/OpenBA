@@ -2000,7 +2000,12 @@ void MeshInstance::UpdateHierarchy() {
 // ---------------------------------------------------------------------------
 void MeshInstance::SetMaterialInstance(int index, Object::ExternalPtr<MaterialInstance> value) {
     _materials._data[index] = value;
+    // EXT SEAM (NOT RETAIL): ext.create_on_demand's prefetch (Mesh.h has the contract).
+    if (_extMaterialAssigned != nullptr) _extMaterialAssigned(value.Get());
 }
+
+void (*MeshInstance::_extMaterialAssigned)(const MaterialInstance* material) = nullptr;
+void (*MeshInstance::_extLevelGathered)(const MeshInstance& instance, int32_t level) = nullptr;
 
 // ---------------------------------------------------------------------------
 // ?SetMesh@MeshInstance@Graphics@@QEAAXV?$ExternalPtr@…@Z retail 0x1800ffea0
@@ -2042,7 +2047,13 @@ void MeshInstance::SetMesh(Object::ExternalPtr<GraphicsMesh> mesh) {
         _localBounds.max.z = m->_aabb.max.z;
         _dirtyFlags |= 2u;
     }
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): ext.create_on_demand queues
+    // the creates this instance's first draw needs (Mesh.h). Null: nothing.
+    if (_extMeshAssigned != nullptr) _extMeshAssigned(*this);
 }
+
+void (*MeshInstance::_extMeshAssigned)(const MeshInstance& instance) = nullptr;
 
 // ---------------------------------------------------------------------------
 // ?PlayAnimation@MeshInstance@Graphics@@QEAAXV?$ExternalPtr@…HAEBVTime@…1M@Z
@@ -2181,6 +2192,9 @@ void MeshInstance::AddDrawItems(const Scene& scene, Renderer& renderer) const {
 
     const GraphicsMesh::DetailLevel* const levels =                              // 18010109a
         mesh->_detailLevels._data;
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): the gather's prefetch
+    // (Mesh.h has the contract).
+    if (_extLevelGathered != nullptr) _extLevelGathered(*this, level);
     const int32_t listCount = levels[level]._triangleLists._size;
     if (listCount <= 0) return;                                // 1801010c0
 

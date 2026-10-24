@@ -1149,6 +1149,9 @@ void OptionsDialog::OnElementEvent(Object::InternalPtr<UI::Element>* element, in
             OnApply();
             return;
         }
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/COMPRESSAO.md): a button of an Enhanced tab
+        // row (its id far above the input binds'); false for every id retail's dialog owns.
+        if (Ext::EnhancedTab::OnButton(this, eventData)) return;
         // Input bind button clicks: IDs >= 13
         if (eventData >= kInputBind_Base) {
             // FUN_140010460: IsDerivedFrom(elem, ButtonElement type) — returns elem if valid, else null

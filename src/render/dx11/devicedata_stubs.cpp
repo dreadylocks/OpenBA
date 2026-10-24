@@ -32,13 +32,41 @@
 // file.
 
 #include "VideoDX11Data.h"
+#include "async_gpu_create/async_create.h"   // NOT RETAIL: ext.async_gpu_create
+#include "compress_ao/bc4_chain.h"           // NOT RETAIL: ext.compress_ao (the load's summary)
+#include "share_gpu_data/share_create.h"     // NOT RETAIL: ext.share_gpu_data (the load's summary)
+#include "create_on_demand/lazy_create.h"    // NOT RETAIL: ext.create_on_demand (the load's summary)
 
 namespace VideoDX11 {
 
 // 0x180001190 — `ret`. The Runtime's one caller (Engine::Loader::Run
 // 0x1800dbfc0) passes a bool in DL (1 around the load, 0 after); the body
 // ignores it (B3R owed 3).
-void DeviceData::Slot4(bool /*loading*/) {
+//
+// NOT RETAIL (ext.async_gpu_create, docs/extensions/handins/ASYNCGPUCREATE.md): the bracket's two
+// calls are the loader's own thread opening and closing a load, which is exactly the span whose
+// seeded creates the extension may defer: `true` arms it for this thread (row on, driver with
+// concurrent creates), `false` waits for every deferred create and disarms it. Off: two calls that
+// test a bool and return, as the `ret` did nothing.
+//
+// NOT RETAIL (ext.compress_ao, docs/extensions/handins/COMPRESSAO.md): the close also prints the
+// load's BC4 summary (when a texture was converted since the last) and asks the derived cache to
+// persist its keep list, without waiting.
+//
+// NOT RETAIL (ext.share_gpu_data, docs/extensions/handins/SHAREGPUDATA.md): and, after the drain, the
+// run's sharing summary (when anything was shared since the last).
+//
+// NOT RETAIL (ext.create_on_demand, docs/extensions/handins/CREATEONDEMAND.md): and the deferred
+// creates' summary (when anything changed since the last).
+void DeviceData::Slot4(bool loading) {
+    if (loading) {
+        AsyncCreate::Begin();
+    } else {
+        AsyncCreate::End();
+        ::CompressAo::LoadEnd();
+        ShareGpuData::LoadEnd();
+        CreateOnDemand::LoadEnd();
+    }
 }
 
 // 0x180005430 — `xorps xmm0,xmm0; ret`

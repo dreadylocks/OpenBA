@@ -14,6 +14,7 @@
 #include "ao/ao_backend.h"
 #include "better_trees/foliage_aa_backend.h"
 #include "better_trees/billboard_shadow_backend.h"
+#include "async_gpu_create/async_gpu_create_backend.h"
 #include "draw_batch/smoke_vs_backend.h"
 #include "ext/render_pipe/finish_split.h"
 #include "graphics/renderer_ext_ao.h"
@@ -67,6 +68,26 @@ void Request(bool on) {
 }
 
 }  // namespace BbsBackend
+
+// ext.async_gpu_create: the Metal backend has no worker path (its resources are created where the
+// loader makes them), so the request is ignored and the answer is "not supported". MTLDevice's
+// resource creation is thread-safe, so a worker path would need no device lock: the open work is the
+// backend's own state (the buffer bookkeeping under stateMutex, ImageBufferData's members) and the
+// await before a deferred object's first use, as src/render/dx11/async_gpu_create/ does.
+namespace AsyncGpuCreateBackend {
+
+void Request(bool on) {
+    (void)on;
+}
+
+bool Supported() {
+    return false;
+}
+
+}  // namespace AsyncGpuCreateBackend
+
+// ext.compress_ao, ext.share_gpu_data and ext.create_on_demand: their bodies are compress_ao/bc4_create.mm,
+// share_gpu_data/share_create.mm and create_on_demand/lazy_create.mm (the DX11 layout).
 
 // ext.draw_batch, Idea B (merged smoke runs): the extension needs a rewritten particle vertex shader
 // that writes an emitter slot into each vertex. Metal has no such rewrite, so it answers "not

@@ -100,6 +100,7 @@
 #include "object/TypeInfo.h"
 #include "object/Internal.h"
 #include "object/External.h"
+#include "object/external_set.h"     // block PATHINDEX: rtresset::IndexClear
 #include "system/string_internal.h"
 #include "system/MemoryAllocator.h"   // B3R: rtalloc::FreeLockedIgnoringSelf (0x180009c30)
 
@@ -449,6 +450,7 @@ void RtObject_ExternalFactory_Dtor(::Object::ExternalFactory* self) {
     refs._count = 0;
 
     RtObject::ResourceSet& res = f->_resources;                  // this + 0x10
+    rtresset::IndexClear(&res);   // NOT RETAIL (block PATHINDEX): its nodes go next
     ResourceSubtreeFree(&res, res._root);
     res._root  = nullptr;
     res._count = 0;

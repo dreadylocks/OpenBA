@@ -28,6 +28,12 @@ void AppendEntry(void* ctx, const char* key, const char* value) {
 }  // namespace
 
 bool DefaultPath(std::string& out) {
+    // BANISHED_USER_DIR (harness, tools/game_dirs.sh): the override IS the
+    // "<Documents>\Banished" folder, so the file sits directly inside it.
+    if (const char* user = Platform::UserDirOverride()) {
+        out = std::string(user) + "\\settings.cfg";
+        return true;
+    }
     std::string docs;
     if (!Platform::DocumentsDir(docs))
         return false;

@@ -12,12 +12,16 @@
 # (one key=value per line), not in the registry. This deletes the ^Ach<N>= lines.
 # The registry is never touched: when settings.cfg is absent the next boot
 # imports the registry once, read-only, so boot the game once first.
-DOCS=$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')
-if [ -z "$DOCS" ]; then
-    echo "ach_reset: cannot resolve the Documents folder" >&2
-    exit 1
+if [ -n "${BANISHED_USER_DIR:-}" ]; then
+    CFG="$BANISHED_USER_DIR/settings.cfg"   # the pool's user dir (tools/game_dirs.sh)
+else
+    DOCS=$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')
+    if [ -z "$DOCS" ]; then
+        echo "ach_reset: cannot resolve the Documents folder" >&2
+        exit 1
+    fi
+    CFG="$(cygpath -u "$DOCS")/Banished/settings.cfg"
 fi
-CFG="$(cygpath -u "$DOCS")/Banished/settings.cfg"
 if [ ! -f "$CFG" ]; then
     echo "ach_reset: $CFG absent (boot the game once: it imports the registry, then writes the file)" >&2
     exit 1

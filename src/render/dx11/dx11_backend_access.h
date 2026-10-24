@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 
 #include "collection/Collection.h"   // Collection::Array<T> (runtime/types)
 // ENDGAME B.3.5 block A — the real `Video::VertexLayout` (runtime/types), which
@@ -127,6 +128,36 @@ inline ID3D11Device* Dx11Device() {
 inline ID3D11DeviceContext* Dx11Context() {
     return Dx11DeviceData()->d3dContext;
 }
+
+// ============================================================
+// The Present lock (NOT RETAIL: backend lock scope, issue #13 DEVLOCK)
+//
+// Retail's ContextData::Finish (0x1800017c0) presents and THEN drops
+// Video::Device's lock, so the lock is held from BeginCommands through the
+// Present. That lock serves two unrelated purposes: it keeps the D3D11
+// immediate context single-threaded (the device is created without
+// D3D11_CREATE_DEVICE_SINGLETHREADED, so ID3D11Device is free-threaded but the
+// context is not), and it guards the engine's intrusive resource lists
+// (`ListLink` / `ListUnlink` in every buffer's PlatformConstruct /
+// PlatformDestruct, src/engine/video/buffers.cpp). A loader thread creating a
+// buffer therefore waited out a whole Present, which is slow while the loader
+// keeps the GPU busy.
+//
+// This backend's Finish drops the device lock BEFORE the Present and presents
+// under this mutex instead. Present still never overlaps another thread's use
+// of the immediate context: every backend body a thread other than the one
+// recording the frame can reach that touches the context takes this mutex
+// (inside the device lock its caller holds, so the order is always device lock
+// -> this mutex; nothing takes the device lock while holding it):
+//   GpuBuffer_SetData (Vertex/IndexBufferData::SetData), GpuBuffer_Serialize's
+//   save arm, ImageBufferData::Update (CopyToTexture) and ::Read
+//   (CopyFromTexture). The rest of the context users (Bind / Draw / Clear /
+//   Map / Unmap of the Context's dynamic buffers / Resize) run only on the
+//   thread recording the frame, which is the thread that presents.
+// The resource-list links no longer wait for the Present. Same D3D11 calls,
+// same order on each thread, same frames; see docs/extensions/handins/DEVLOCK.md.
+// ============================================================
+std::recursive_mutex& Dx11PresentMutex();
 
 // D7: `IDXGISwapChain* Dx11SwapChain()` — the swap chain (+0x18) by name, for
 // src/app/main.cpp's two probes, which do not include this header (it pulls

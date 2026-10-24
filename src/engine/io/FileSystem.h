@@ -508,6 +508,19 @@ public:
     // macro, so the member name does not collide; the Win32 call inside the
     // body is spelled `::ReadFile` and always was.
     bool ReadFile(RtIO::FileInfo& fi, int32_t n, void* dst);
+    // NOT RETAIL (MAPREAD, the banner above ReadFile in filesystem_openfile.cpp): for a packed
+    // `fi`, the mapped bytes a ReadFile of `n` bytes at cursor `cursor` would copy, when that
+    // read would be served from the view IN FULL (got == n); null otherwise (loose, nested,
+    // not mapped, a failing seek, short at end of file). ext.decode_ahead reads a block's
+    // compressed bytes through it; PackedMapNoteRead then leaves the emulated file pointer
+    // where that ReadFile would have left it.
+    const uint8_t* PackedMapSpan(const RtIO::FileInfo& fi, int32_t cursor, int32_t n);
+    void PackedMapNoteRead(const RtIO::FileInfo& fi, int32_t cursor, int32_t n);
+    // NOT RETAIL (ext.create_on_demand, docs/extensions/handins/CREATEONDEMAND.md): where the bytes
+    // of a packed `fi` live: its package's OS handle and the entry's absolute offset in that file
+    // (the offset ReadFile's packed arm reads cursor 0 at, wide or not). False for a loose file, a
+    // nested package, an index past the package table or an offset retail could not seek to.
+    bool PackedEntryOrigin(const RtIO::FileInfo& fi, Platform::FileHandle* package, int64_t* offset) const;
     // ?PlatformOpenFile@FileSystem@IO@@AEAA_NAEAUFileInfo@12@AEBVFilename@System@@@Z
     //                                                             0x1800adce0
     // `AEAA`, private in retail, public here for the door reason above.
@@ -551,6 +564,50 @@ public:
     // bytes. Written by the ??0FileSystem door (engine/singleton_ctors.cpp).
     // PUBLIC while foreign readers still reach it (retail: private `0`).
     static FileSystem* _singleton;
+
+    // ---- fix.large_packages (NOT RETAIL, docs/extensions/handins/LARGEPKM.md) ------
+    // Engine-side seams (DESIGN.md hook rule 5), null by default and under the
+    // faithful profile. Retail reads a packed entry at the int32
+    // `baseOffset + cursor` (ReadFile 0x1800ace43), so a package past 2 GiB
+    // fails or aliases; the fix gives such a package 64-bit entry offsets.
+    //
+    // _extPackagesMounted: run at the end of LoadPackages (every mount and
+    // remount), when _packfiles has its final pack-index order. It sets
+    // _extWidePackages / _extWideCount. ClosePackages clears those two.
+    static void (*_extPackagesMounted)(FileSystem& fs);
+    // One per pack index below _extWideCount: that package's absolute entry
+    // offsets (`count` of them), or { nullptr, 0 } for a package that keeps
+    // retail's int32 read. Owned by the fix (src/ext/large_packages/).
+    struct ExtWidePackage {
+        const int64_t* offsets;
+        int32_t        count;
+    };
+    static const ExtWidePackage* _extWidePackages;
+    static int32_t               _extWideCount;
+
+    // ---- ext.package_cache (NOT RETAIL, docs/extensions/handins/PKGCACHE.md) -------
+    // Engine-side seams (DESIGN.md hook rule 5), null by default and under the faithful profile.
+    // _extIndexRestore: run by LoadPackages once _packfiles is final, before the loop that builds
+    // _packfileIndex. true = the extension built the identical tree (and its fold index) from the
+    // derived cache, and the loop does not run. _extIndexBuilt: run after the loop built the tree.
+    static bool (*_extIndexRestore)(FileSystem& fs);
+    static void (*_extIndexBuilt)(FileSystem& fs);
+
+    // ---- ext.create_on_demand (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md) ----------
+    // Engine-side seam (DESIGN.md hook rule 5), null by default and under the faithful profile:
+    // run by PlatformCloseFile (through PackedMapRelease) for every handle it is about to close,
+    // before CloseHandle. The extension keeps its own read-only mappings of the packages; a handle
+    // being closed is never used to find one again (the OS may hand the value out anew).
+    static void (*_extHandleClosing)(Platform::FileHandle h);
+
+    // The absolute offset the packed arm of ReadFile seeks to for `fi` (a
+    // PACKED FileInfo: handle = packIndex << 24 | fileIndex). With a wide
+    // table for its package, the entry's 64-bit offset + cursor, `*wide` =
+    // true. Otherwise retail's int32 `baseOffset + cursor`, sign-extended
+    // (negative = the seek retail's SetFilePointer refuses; past 4 GiB it has
+    // already wrapped, as in retail), `*wide` = false. Shared with the
+    // mapped read (block readpath, issue #13).
+    int64_t PackedReadOffset(const RtIO::FileInfo& fi, bool* wide) const;
 
     // ---- the pinned fields, at retail's offsets ---------------------------
     // PUBLIC for the same reason `IO::Serializer`'s two are: bodies outside
@@ -601,6 +658,16 @@ static_assert(!std::is_polymorphic<FileSystem>::value,
               "vptr would push every field eight bytes down under nineteen doors");
 static_assert(std::is_standard_layout<FileSystem>::value,
               "the doors reach these fields through a reinterpret_cast");
+
+// ---- PERF (NOT RETAIL, issue #13 MAPREAD): mapped package reads ------------------
+// FileSystem::ReadFile's packed arm reads a package through a read-only mapping of the
+// file behind the package's handle (Platform::FileMapOpen), made on the first packed
+// read from that handle and kept in a side table in filesystem_openfile.cpp (the
+// pinned FileSystem / PackageFile layouts gain no field). PlatformCloseFile drops a
+// handle's mapping just before it closes the handle, so ClosePackages (every remount)
+// unmaps every package. Not retail: an exact perf body, the same bytes and the same
+// results as SetFilePointer + ReadFile (the banner above ReadFile).
+void PackedMapRelease(Platform::FileHandle h);
 
 }  // namespace IO
 

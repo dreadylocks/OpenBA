@@ -47,7 +47,7 @@ void Close() { g_quality = nullptr; g_opacity = nullptr; }
 }  // namespace
 
 const Contribution& AmbientOcclusionEntry() {
-    static const Contribution c = { "ambient_occlusion", Open, Apply, Close };
+    static const Contribution c = { "ambient_occlusion", Open, Apply, Close, nullptr };
     return c;
 }
 

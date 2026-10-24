@@ -222,6 +222,9 @@ int WorldGeometry::AddDecal(int param_2, int param_3, int param_4,
              float param_12, float param_13, float param_14,
              char param_15, int param_16, int param_17, bool param_19) {
     if (material == nullptr) return -1;
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): the decal material's textures
+    // are queued for their first-use creates (WorldGeometry.h has the contract).
+    if (_extMaterialTaken != nullptr) _extMaterialTaken(material);
 
     GeometryBatchArray& decals = _decals;
     int iVar3 = 0;

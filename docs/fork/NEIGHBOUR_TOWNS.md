@@ -404,7 +404,7 @@ follow-ups (§6).
   crash. Not checked: capital letters typed (the test script could not send Shift for letters; the
   game's key table has them); a save / load holding a v2 payload in game (covered by the unit
   test only). `Save3.sav` crashes the port while loading, with or without the extension:
-  `docs/known_port_issues.md` row 1331.
+  `docs/known_port_issues.md` row 1333 (1331 until upstream took that number).
 
 ---------------------------------------------------------------------------------------------
 

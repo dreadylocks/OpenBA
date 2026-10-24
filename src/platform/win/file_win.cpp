@@ -75,6 +75,20 @@ int32_t FileWrite(FileHandle h, const void* src, uint32_t bytes, uint32_t* writt
 
 uint32_t FileSeek32(FileHandle h, int32_t pos) { return SetFilePointer(h, pos, nullptr, FILE_BEGIN); }
 uint32_t FileSize(FileHandle h)                { return GetFileSize(h, nullptr); }
+
+// fix.large_packages (NOT RETAIL, docs/extensions/handins/LARGEPKM.md).
+int32_t FileSeek64(FileHandle h, int64_t pos) {
+    if (pos < 0) return 0;
+    LARGE_INTEGER d;
+    d.QuadPart = pos;
+    return SetFilePointerEx(h, d, nullptr, FILE_BEGIN) ? 1 : 0;
+}
+
+int64_t FileSize64(FileHandle h) {
+    LARGE_INTEGER s;
+    if (!GetFileSizeEx(h, &s)) return -1;
+    return s.QuadPart;
+}
 int32_t  FileClose(FileHandle h)               { return CloseHandle(h); }
 
 int32_t FileLastWrite(FileHandle h, uint64_t* fileTime) {

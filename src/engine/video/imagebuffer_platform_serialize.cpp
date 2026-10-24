@@ -264,6 +264,8 @@ void RecreateFromFields(Video::ImageBuffer* self, int32_t kind,
 // ============================================================================
 namespace Video {
 
+ImageBuffer::ExtLevelSourceFn ImageBuffer::_extLevelSource = nullptr;
+
 void ImageBuffer::PlatformSerialize(IO::Serializer& ser) {
     // 0x1800f3154: read ONCE, at entry. The generated/rendered arm reuses this
     // value; the pixel arm reloads. See the banner.
@@ -321,7 +323,11 @@ void ImageBuffer::PlatformSerialize(IO::Serializer& ser) {
     if (ser._stream->GetDirection() == IO::kReading)
         rtcoll::AsArray<&rtcoll::kSpec_InnerArrayU8>(&levels)->SetSize(count);
 
-    SerializeLevelBlobs(ser, count, levels.GetData());
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): ext.create_on_demand -- on a
+    // read, the extension's level reader may take the blobs (ImageBuffer.h). Null: retail's read.
+    if (ser._stream->GetDirection() != IO::kReading || _extLevelSource == nullptr ||
+        !_extLevelSource(ser, *this, count, levels))
+        SerializeLevelBlobs(ser, count, levels.GetData());
 
     // 0x1800f31e2: the field reads for Create happen HERE, after the
     // serialization, and `kind` is RELOADED. Both are faithful.

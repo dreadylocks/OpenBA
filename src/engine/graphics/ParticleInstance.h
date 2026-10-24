@@ -210,6 +210,12 @@ public:
     virtual void SetParticle(Object::ExternalPtr<Particle> particle);      // [9] 0x180104a00
     // slots 4, 5, 7, 8 are Geometry's own bodies, inherited unchanged.
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md, DESIGN.md hook rule 5):
+    // ext.create_on_demand's prefetch. Null by default and under the faithful profile. Run at the end
+    // of SetParticle with the instance holding its particle: the extension queues the first-use
+    // creates of the particle's material textures, ahead of the first emission.
+    static void (*_extParticleAssigned)(const Particle& particle);
+
     // `?Update@ParticleInstance@Graphics@@QEAA_NXZ` @ 0x180104180 — NON-VIRTUAL,
     // returns bool, takes nothing. PORTED, body in `animation.cpp` (NOT this
     // block's file), so the door keeps it and this member is declared only.

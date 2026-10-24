@@ -62,6 +62,8 @@ struct Fixes {
     bool start_barn_height = true;   // docs/retail_bugs.md §4
     bool ui_scale_layout   = true;   // docs/retail_bugs.md §5 (engine seam UI::UserInterface::_extFixScaleLayout)
     bool rock_seat         = true;   // docs/retail_bugs.md §7, src/ext/rock_seat/ (docs/extensions/handins/ROCKSEAT.md): render only
+    bool terrain_resort    = true;   // docs/retail_bugs.md §8, src/ext/terrain_resort/ (docs/extensions/handins/TERRAINRESORT.md)
+    bool large_packages    = true;   // docs/retail_bugs.md §9, src/ext/large_packages/ (docs/extensions/handins/LARGEPKM.md): engine seam IO::FileSystem::_extPackagesMounted
 };
 
 // One bool per registered extension (settings key `ext.<id>`). Each extension
@@ -97,6 +99,14 @@ struct Extensions {
     bool drain_split = false; // class B: src/ext/drain_split/ (docs/extensions/handins/HITCH_DRAINSPLIT.md)
     bool background_save = false; // class A: src/ext/background_save/ (docs/extensions/handins/HITCH_SAVESNAP.md)
     bool terrain_batch = false; // class A: src/ext/terrain_batch/, seam WorldGeometry::_extTerrainBatch (docs/extensions/handins/TERRAINBATCH.md)
+    bool decode_ahead = false; // class A, next start: src/ext/decode_ahead/, seam IO::CompressedStream::_extDecodeAhead (docs/extensions/handins/DECODEAHEAD.md)
+    bool load_progress = false; // class A, next start: src/ext/load_progress/, seams LoaderLoop::_extFrame + UpdateLoop::_extLoadProgress (docs/extensions/handins/LOADPROGRESS.md)
+    bool async_gpu_create = false; // class A, next load: src/ext/async_gpu_create/, backend seam AsyncGpuCreateBackend (docs/extensions/handins/ASYNCGPUCREATE.md)
+    bool compress_ao = false; // class A, next start: src/ext/compress_ao/, backend seam CompressAoBackend + the derived cache src/ext/derived_cache/ (docs/extensions/handins/COMPRESSAO.md)
+    bool share_gpu_data = false; // class A, next start: src/ext/share_gpu_data/, backend seam ShareGpuDataBackend (docs/extensions/handins/SHAREGPUDATA.md)
+    bool package_cache = false; // class A, live at each mount: src/ext/package_cache/, seams IO::FileSystem::_extIndexRestore / _extIndexBuilt + the derived cache (docs/extensions/handins/PKGCACHE.md)
+    bool create_on_demand = false; // class A, next start: src/ext/create_on_demand/, backend seam CreateOnDemandBackend + seams IO::FileSystem::_extHandleClosing, Video::ImageBuffer::_extLevelSource, Graphics::MeshInstance::_extMeshAssigned (docs/extensions/handins/CREATEONDEMAND.md)
+    bool stream_cache = false; // class A, next start: src/ext/stream_cache/, seams Object::ExternalFactory::_extLoadBegin/_extLoadEnd, IO::CompressedStream::_extReadTap, Engine::LoaderLoop::_extLoadDone, CreateOnDemand::g_altLocate/g_altSkip + the derived cache (docs/extensions/handins/STREAMCACHE.md)
     bool neighbour = false; // class C: src/ext/neighbour/ (docs/fork/NEIGHBOUR_TOWNS.md): two towns, one relay
 #ifdef BANISHED_UNIT_TEST
     // tests/unit/ext_registry_test.cpp only: one extension per class, so the
@@ -122,6 +132,8 @@ struct Values {
     int32_t foliage_aa_mode = 2; // ext.foliage_aa_mode 1..2 (owner better_trees): 1 smooth edges, 2 + distance fill (FOLIAGE_AA.md §1 ruling 4)
     int32_t max_shadow_size = 4096; // ext.max_shadow_size 4096 | 8192 (owner max_shadow_res): the sun map at High (FAA-SHADOW2)
     int32_t rock_seat_mode = 2; // ext.rock_seat_mode 1..2 (owner fix rock_seat): 1 sink to the lowest ground under the rock, 2 tilt to the slope (the default, ROCKSEAT.md)
+    int32_t create_on_demand_idle_min = 0; // ext.create_on_demand_idle_min 0..120 (owner create_on_demand): minutes unused before a made object is given back, 0 = never, the default until re-makes are prefetched (CREATEONDEMAND.md section 7)
+    int32_t derived_cache_mb = 4096; // ext.derived_cache_mb 256..65536 (owner compress_ao, the cache's first user): the derived-data cache's cap in MB (COMPRESSAO.md)
 };
 
 // All three together: what the tables' `slot` accessors index.

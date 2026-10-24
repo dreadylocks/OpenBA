@@ -18,6 +18,7 @@
 #include "unit.h"
 #include "io/settings_file.h"
 #include "io/settings_store.h"
+#include "platform_settings.h"   // Platform::SetUserDirOverride (the BANISHED_USER_DIR test)
 
 #include <chrono>
 #include <cstdio>
@@ -191,4 +192,27 @@ UNIT_TEST(settings_store_default_path_names_the_save_folder) {
     const std::string tail = "\\Banished\\settings.cfg";
     CHECK(path.size() > tail.size());
     CHECK(path.compare(path.size() - tail.size(), tail.size(), tail) == 0);
+}
+
+UNIT_TEST(settings_store_user_dir_override_is_the_whole_folder) {
+    // BANISHED_USER_DIR (Platform::SetUserDirOverride, src/platform/common/user_dir_override.cpp)
+    // replaces "<Documents>\Banished" as a whole: settings.cfg sits directly inside it, a
+    // trailing separator is dropped, and clearing it restores the documents-folder path.
+    std::string before;
+    CHECK(IO::SettingsStore::DefaultPath(before));
+
+    Platform::SetUserDirOverride("D:\\pool\\_userdata\\");
+    CHECK(Platform::UserDirOverride() != nullptr);
+    CHECK(std::string(Platform::UserDirOverride()) == "D:\\pool\\_userdata");
+    std::string path;
+    CHECK(IO::SettingsStore::DefaultPath(path));
+    CHECK(path == "D:\\pool\\_userdata\\settings.cfg");
+
+    Platform::SetUserDirOverride("");
+    CHECK(Platform::UserDirOverride() == nullptr);
+    Platform::SetUserDirOverride(nullptr);
+    CHECK(Platform::UserDirOverride() == nullptr);
+    std::string after;
+    CHECK(IO::SettingsStore::DefaultPath(after));
+    CHECK(after == before);
 }

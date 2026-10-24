@@ -708,6 +708,13 @@ public:
     // ?DecompressFromSource@CompressedStream@IO@@AEAA_NH@Z       0x1800a96b0
     bool DecompressFromSource(int blk);
 
+    // NOT RETAIL (exact perf body, issue #13): `count` back-to-back
+    // `Read(elemSize, dst + i * elemSize)` calls with their results ignored --
+    // what IO::BinaryReader's array slots do one element at a time -- with the
+    // elements that lie wholly inside the active window copied in one memcpy.
+    // The proof is at the body (compressed_stream_read.cpp).
+    void ReadArray(int count, int elemSize, void* dst);
+
     // EXT SEAM (NOT RETAIL, docs/extensions/handins/HITCH_SAVE.md): ext.async_save_compress's hook (DESIGN.md §3 hook rule 5).
     // Null by default; src/ext/async_save_compress sets it while the class A extension
     // ext.async_save_compress has a save attached (Begin, right after Create) and clears it
@@ -725,6 +732,26 @@ public:
     static constexpr int32_t kExtAsyncEnd            = 2;
     using ExtAsyncCompressFn = bool (*)(CompressedStream& cs, int32_t point, int32_t index, uint8_t* dst);
     static ExtAsyncCompressFn _extAsyncCompress;   // defined in compressed_stream_write.cpp
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DECODEAHEAD.md): ext.decode_ahead's hook (DESIGN.md
+    // §3 hook rule 5). Null by default; src/ext/decode_ahead sets it once at boot while the class A
+    // row is on. Two points, the same single-pointer shape as _extAsyncCompress:
+    //   kExtDecodeBlock    DecompressFromSource(index), after the window's start / end are set,
+    //                      `dst` = the window buffer: true = the window holds the block, decoded by a
+    //                      worker from the same bytes, and the source is where retail's read leaves it;
+    //   kExtDecodeRelease  Release: the stream's queued blocks are dropped, running ones waited for.
+    // Null: DecompressFromSource and Release are retail's bodies plus one null test.
+    static constexpr int32_t kExtDecodeBlock   = 0;
+    static constexpr int32_t kExtDecodeRelease = 1;
+    using ExtDecodeAheadFn = bool (*)(CompressedStream& cs, int32_t point, int32_t index, uint8_t* dst);
+    static ExtDecodeAheadFn _extDecodeAhead;       // defined in compressed_stream_read.cpp
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md, DESIGN.md hook rule 5):
+    // ext.stream_cache's read tap. Null by default and under the faithful profile. Read and
+    // ReadArray's batched copy call it after the copy with the position it started at, the byte
+    // count, the destination and whether the read succeeded; the extension records what a load
+    // consumed. It changes nothing in the stream.
+    using ExtReadTapFn = void (*)(CompressedStream& cs, int32_t pos, int32_t n, const void* dst, bool ok);
+    static ExtReadTapFn _extReadTap;               // defined in compressed_stream_read.cpp
 
     // ---- the 0x68 bytes, at retail's offsets -------------------------------
     // `_unknown18` and `_unknown24` are the two gaps `??0CompressedStream`

@@ -73,6 +73,10 @@ StringTable resource
 		{ String _name = "LobbyCreate";			String _text = "Create room"; }
 		{ String _name = "LobbyJoin";			String _text = "Join"; }
 
+		// ext.load_progress's line on the boot loading screen (src/ext/load_progress/): @0 / @1 the mod numbers
+		{ String _name = "LoadProgressGameData";	String _text = "Loading game data"; }
+		{ String _name = "LoadProgressMod";			String _text = "Loading mod @0 of @1"; }
+
 		{ String _name = "ExtensionTurnedOff";		String _text = "The following extension is turned off, but this save was made with it.~n~n@0 [@1]~nSaved with extension version @2~n~nA save keeps the extensions it was made with, so it will be turned on for this game. Do you still want to load the save game?"; }
 	]
 }

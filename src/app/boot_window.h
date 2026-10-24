@@ -25,12 +25,19 @@
 //
 // We set that flag before CreateDevice reads it, so the shipped branch skips
 // its own ShowWindow with no change to the ported code path, and we take
-// responsibility for showing the window once the splash has actually presented
-// a frame. Net effect: the window appears already displaying the Shining Rock
-// splash instead of appearing empty and filling in half a second later.
+// responsibility for showing the window once the main loop has presented its
+// first frame (MarkFrame, called by Engine::MainLoop::Run after every Frame).
+// That is the first frame of WHICHEVER loop runs first: at boot the outer
+// GameLoaderLoop, whose frames are retail's black LoaderLoop::Draw clear while
+// the loader thread reads Game/GlobalResources.rsc (issue #13: with a large mod
+// set that load is about a minute, and the window has to be up and pumping
+// for it). What the deferral still buys: the window never appears unpainted
+// during Engine::Startup and the post-Startup boot; its first content is a
+// presented frame. Since the sync loader wait went (issue #13) that frame is
+// black rather than the Shining Rock splash, as in retail.
 //
 // Boot wall-clock is unchanged — this trades a visible empty window for a
-// slightly later, already-populated one.
+// slightly later, already-presented one.
 //
 // Kill-switch: BANISHED_DEFER_WINDOW_SHOW=0 restores the shipped behaviour
 // (window appears as soon as CreateDevice shows it).
@@ -55,9 +62,12 @@ void ShowNow(const char* reason);
 // True while the window is armed but still hidden.
 bool IsPending();
 
-// Per-frame safety net. If something goes wrong on the splash path and nobody
-// ever calls ShowNow, this reveals the window anyway after a timeout so the
-// game can never end up running with no visible window at all.
-void PumpWatchdog();
+// Once per main-loop frame, after the frame's Present (MainLoop::Draw ->
+// ContextData::Finish runs inside Frame; ext.render_pipe only pipelines
+// GameUpdateLoop frames, never a loader loop's). Reveals the armed window on
+// the first call. Reached from the engine through BootWindow_MarkFrame.
+void MarkFrame();
 
 } // namespace BootWindow
+
+extern "C" void BootWindow_MarkFrame();

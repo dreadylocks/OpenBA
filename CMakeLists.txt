@@ -24,7 +24,7 @@
 #   cmake --build build/linux -t unit && build/linux/unit
 #   cmake --build build/linux -t OpenBA
 cmake_minimum_required(VERSION 3.20)
-project(banished_reimpl VERSION 1.0.0 LANGUAGES CXX)
+project(banished_reimpl VERSION 1.0.1 LANGUAGES CXX)
 # OpenBA version shown beside the retail version in the main / pause menu's BuildId
 # overlay (src/game/Dialog/mainmenudialog.cpp). Bump here to cut a release (README "Versioning").
 add_compile_definitions(OPENBA_VERSION="${PROJECT_VERSION}")
@@ -191,6 +191,13 @@ include(${CMAKE_SOURCE_DIR}/src/render/${BANISHED_RENDER_BACKEND}/backend.cmake)
 message(STATUS "OpenBA render backend: ${BANISHED_RENDER_BACKEND} (ready: ${RENDER_BACKEND_READY})")
 file(GLOB_RECURSE RENDER_COMMON_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/render/common/*.cpp)
 list(APPEND RENDER_SRCS ${RENDER_COMMON_SRCS})
+# ext.compress_ao (docs/extensions/handins/COMPRESSAO.md): the BC4 encoder and the derived cache's
+# content hash run over ~2 GB of AO maps on a large-mod boot, on the loader's critical path. They are
+# built -O2 in every flavour (debug and og included; the unit build too, as these properties are
+# per source file): at -O0 the encoder does ~7 MB/s instead of ~57 MB/s per core.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/src/render/common/bc4/bc4.cpp
+                            ${CMAKE_SOURCE_DIR}/src/ext/derived_cache/hash64.cpp
+                            PROPERTIES COMPILE_OPTIONS "-O2")
 file(GLOB         APP_SRCS      CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/app/*.cpp)
 file(GLOB         DIAG_SRCS     CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/diag/*.cpp)
 # src/diag/win: the Windows-only diagnostics (crash / hang handlers, watchdog, sampler,

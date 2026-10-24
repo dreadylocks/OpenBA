@@ -1,0 +1,218 @@
+name: Release
+# Builds the release flavour on the three platforms, runs the unit tests on that flavour, packages
+# each platform (tools/release/package.sh; tools/macos/make_app.sh + make_release_zip.sh) and, on a
+# `v*` tag, publishes the GitHub release with the CHANGELOG.md section of that version as its notes.
+#
+# Dry run: a pull request that touches the release tooling, or a manual dispatch, runs every job
+# but `release`; the packages are the run's artifacts. The tag must equal `v<CMake VERSION>`
+# (README "Versioning"); the `version` job refuses anything else before a single build starts.
+#
+# Nothing here needs the game (AGENTS.md section 1): the Windows gate and the serializer check stay
+# the maintainer's steps before the tag is pushed.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - tools/release/**
+      - tools/macos/**
+      - packaging/**
+      - CHANGELOG.md
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  BUILD_JOBS: 4
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPRESS: "true"
+  CCACHE_MAXSIZE: 400M
+  CCACHE_LAUNCHERS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache
+jobs:
+  version:
+    name: Version and notes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: CMake VERSION, tag check, CHANGELOG section
+        id: v
+        run: |
+          VER="$(sed -nE 's/^project\([^)]*VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          [ -n "$VER" ] || { echo "no project(... VERSION x.y.z) in CMakeLists.txt"; exit 1; }
+          echo "CMake VERSION $VER"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            [ "$TAG" = "v$VER" ] || { echo "tag $TAG does not match CMake VERSION $VER (expected v$VER)"; exit 1; }
+          else
+            TAG="v$VER"
+          fi
+          python3 tools/release/changelog_section.py "$VER" > notes.md
+          echo "--- release notes ($TAG) ---"; cat notes.md
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+
+  windows:
+    name: Windows x64 package
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: git
+          pacboy: gcc:p cmake:p ninja:p python:p ccache:p
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-release-windows-${{ github.sha }}
+          restore-keys: ccache-release-windows-
+      - name: Build OpenBA (release)
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
+      - name: Unit tests (release)
+        run: tools/build.sh unit release
+      - name: Package
+        run: tools/release/package.sh windows "${{ needs.version.outputs.version }}" dist
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64 package
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build ccache libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxss-dev libxtst-dev libxfixes-dev libwayland-dev libxkbcommon-dev libegl-dev \
+            libdecor-0-dev libasound2-dev libpulse-dev
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-release-linux-${{ github.sha }}
+          restore-keys: ccache-release-linux-
+      - name: Fetch dxvk-native
+        run: tools/fetch_dxvk_native.sh
+      - name: Build OpenBA (release)
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
+      - name: Unit tests (release)
+        run: tools/build.sh unit release
+      - name: Package
+        run: tools/release/package.sh linux "${{ needs.version.outputs.version }}" dist
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64 package
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Packages
+        run: brew install ninja ccache meson
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-release-macos-${{ github.sha }}
+          restore-keys: ccache-release-macos-
+      # The shader converter (libairconv.dylib: DXMT + a partial LLVM 15 build) is the slow part of
+      # tools/macos/setup_deps.sh; cached under that script's hash, so a pin change rebuilds it.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            third_party/dxmt_src
+            third_party/llvm15_arm64
+            third_party/airconv_build
+          key: airconv-${{ hashFiles('tools/macos/setup_deps.sh') }}
+      - name: App bundle (release)
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/macos/make_app.sh dist/OpenBA.app
+      - name: Release zip
+        run: |
+          tools/macos/make_release_zip.sh dist/OpenBA.app dist
+          VER="${{ needs.version.outputs.version }}"
+          mv dist/OpenBA-mac-arm64.zip "dist/OpenBA-v$VER-mac-arm64.zip"
+          rm -f dist/OpenBA-mac-arm64.zip.sha256
+          (cd dist && shasum -a 256 "OpenBA-v$VER-mac-arm64.zip" > "OpenBA-v$VER-mac-arm64.zip.sha256" && cat "OpenBA-v$VER-mac-arm64.zip.sha256")
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, windows, linux, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          ls -lR artifacts
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "OpenBA $TAG" --notes-file artifacts/release-notes/notes.md \
+            artifacts/package-windows/* artifacts/package-linux/* artifacts/package-macos/*

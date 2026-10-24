@@ -46,7 +46,9 @@ retail: `1.0.7 17Se10` OpenBa: `OpenBA v1.0.0 2424a9093 2026-10-19`:
   Releases are tagged `v<version>` in git (ie `v1.0.0`) and the zip on the releases page matches the tag.    
 - **`2424a9093 2026-10-19`** is the git commit the exe was built from and the build date (UTC).  
 
-Releases bump the CMake `VERSION`, build, tag `v<version>`, and you'll see a new tagged version with zip in the "Releases" link.  
+A release bumps the CMake `VERSION`, adds its section to `CHANGELOG.md` and pushes the tag `v<version>`;   
+the Release workflow (`.github/workflows/release.yml`) then builds the Windows zip, the Linux tarball and the   
+macOS app zip and publishes them under the "Releases" link with that section as the notes.  
 
 ## Extensions
 
@@ -118,6 +120,6 @@ FreeType License; portions copyright (c) The FreeType Project, www.freetype.org)
 **Typeface:** the user-interface typeface is **FrancophilSans** by Manfred Klein (1932-2018), used  
 under his "Simple Terms of Use": free for private and commercial use, with a donation to  
 [Doctors Without Borders](https://www.msf.org/) asked for when a use makes a profit.   
-The two `.ttf` files ship beside `OpenBA.exe` in the release package only (with `FrancophilSans_README.txt`),   
-are loaded privately by the exe when the face is not installed,   
-and are not part of OpenBA's code or of its GPL-3.0 licence.  
+The two `.ttf` files are kept unchanged under `tools/release/fonts/` and ship beside `OpenBA.exe`   
+in the release package (with `FrancophilSans_README.txt`), are loaded privately by the exe when the face   
+is not installed, and are not part of OpenBA's code or of its GPL-3.0 licence.  

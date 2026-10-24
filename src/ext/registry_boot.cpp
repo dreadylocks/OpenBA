@@ -19,6 +19,14 @@
 #include "ext/ambient_occlusion/ambient_occlusion.h"      // ext.ambient_occlusion: the readable depth + the arm follow the toggle
 #include "ext/better_trees/better_trees.h"   // ext.better_trees: the render-side seams follow the toggle
 #include "ext/seamless_loops/seamless_loops.h"   // ext.seamless_loops: the SoundBuffer decode seam
+#include "ext/large_packages/large_packages.h"   // fix.large_packages: the FileSystem mount seam
+#include "ext/package_cache/package_cache.h"       // ext.package_cache: the FileSystem index seams
+#include "ext/decode_ahead/decode_ahead.h"       // ext.decode_ahead: the CompressedStream decode seam
+#include "ext/async_gpu_create/async_gpu_create.h"   // ext.async_gpu_create: the backend's request follows the toggle
+#include "ext/compress_ao/compress_ao.h"   // ext.compress_ao: the backend's request + the derived cache, at boot
+#include "ext/share_gpu_data/share_gpu_data.h"   // ext.share_gpu_data: the backend's request, at boot
+#include "ext/create_on_demand/create_on_demand.h"   // ext.create_on_demand: the backend's request + seams, at boot
+#include "ext/stream_cache/stream_cache.h"           // ext.stream_cache: the resource-record seams, at boot
 #include "ext/resources/text_provider.h"        // the Extensions dialog / Enhanced tab resources from the exe's text (KITFREE)
 #include "rsc_text_check.h"                      // src/diag: the kit cross-check, /rsccheck:1 on the command line
 #include "ext/resources/font_provider.h"         // KITFREE RSCFONT: ext.sharp_ui's font variants, provided at run time
@@ -117,6 +125,12 @@ void InitFromSettings() {
     // Engine-side fix seams: null by default, pointed at the live bool here
     // (fixes are global and live: the pointer follows the menu toggle).
     ::UI::UserInterface::_extFixScaleLayout = &Fix().ui_scale_layout;
+    // fix.large_packages: the IO::FileSystem::_extPackagesMounted seam (null under the faithful
+    // profile). The boot's .pkg mount ran inside Engine::Startup, before this; every mods mount runs it.
+    LargePackages::Sync();
+    // ext.package_cache: the IO::FileSystem::_extIndexRestore / _extIndexBuilt seams (null under the
+    // faithful profile); the hooks read the row at each mount.
+    PackageCache::Sync();
     // The save's pseudo-mods (EXT SEAM, Save::SaveLoad::_extExtraMods). Installed
     // ONCE here: the profile is fixed for the run (settings key or /profile at
     // boot; nothing changes it later), so SaveModsProvider() is final now --
@@ -158,6 +172,28 @@ void InitFromSettings() {
     // row off) or with the row off: the decode pays one null test and its PCM is the plain decode.
     ::Audio::SoundBuffer::_extLoopSeam =
         Ext().seamless_loops ? &SeamlessLoops::ApplyToLoopingBuffer : nullptr;
+    // ext.decode_ahead (class A, next start): the IO::CompressedStream::_extDecodeAhead seam, set ONCE
+    // here (boot, before the loader's first resource). Null under the faithful profile or with the row
+    // off: DecompressFromSource and Release pay one null test each.
+    DecodeAhead::Sync();
+    // ext.async_gpu_create (class A, next load): the backend's request, read when the loader opens a
+    // load (src/render/common/async_gpu_create/). Before the boot's first load, which follows this.
+    Ext::AsyncGpuCreate::Sync();
+    // ext.compress_ao (class A, next start): opens the derived-data cache (never under the faithful
+    // profile, whose row is off) and hands it with the row's value to the backend. Once, here: the
+    // boot's first load follows, and the dialog's toggle is recorded for the next start.
+    Ext::CompressAo::Boot();
+    // ext.share_gpu_data (class A, next start): the backend's request, once, before the boot's first
+    // load (src/render/common/share_gpu_data/). Off under the faithful profile (the row is off).
+    Ext::ShareGpuData::Boot();
+    // ext.create_on_demand (class A, next start): the backend's request and the engine seams, once,
+    // before the boot's first load (src/render/common/create_on_demand/). Off under the faithful
+    // profile (the row is off).
+    Ext::CreateOnDemand::Boot();
+    // ext.stream_cache (class A, next start): the resource-record seams and the derived cache, once,
+    // before the boot's first load; after create_on_demand, whose value the records are keyed on.
+    // Off under the faithful profile (the row is off).
+    Ext::StreamCache::Boot();
     // The extension resources built in the exe (docs/extensions/KITFREE.md): the
     // providers register here, never under a COMMAND-LINE faithful profile
     // (`/profile:faithful`: the gate run, no Extensions button, no Enhanced tab,
@@ -206,6 +242,7 @@ bool SetAndRecord(const Entry& e, bool on) {
     Ext::AmbientOcclusion::Sync();   // on / off: the depth rebuild is requested, the arm follows at once
     BetterTrees::Sync();        // on: the seams are set now; off: cleared at the next pixel / vertex bind
     Ext::BackgroundSave::Sync();     // on: the save seam is set now; off: cleared now, or after a running save
+    Ext::AsyncGpuCreate::Sync();     // on / off: from the next load the loader opens
     // ext.max_shadow_res: the sun map is rebuilt through Device::settingsChanged, raised HERE (main thread,
     // between frames) so render_pipe runs the resize sequentially; see SunLight.h (FAA-MENU).
     if (changedNow && std::strcmp(e.id, "max_shadow_res") == 0) ::Graphics::SunLight::ExtRequestMaxShadowResSync();

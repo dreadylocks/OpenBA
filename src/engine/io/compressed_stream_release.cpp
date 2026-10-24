@@ -52,6 +52,9 @@ void IO::CompressedStream::Release() {
     // stream destroyed without a Commit detaches (the worker must be done with the Compression
     // object freed below).
     if (_extAsyncCompress != nullptr) _extAsyncCompress(*this, kExtAsyncEnd, 0, nullptr);
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DECODEAHEAD.md): ext.decode_ahead -- the
+    // stream's look-ahead blocks are dropped (none outlives the stream or its package's mapping).
+    if (_extDecodeAhead != nullptr) _extDecodeAhead(*this, kExtDecodeRelease, 0, nullptr);
 
     // 1. the Array<void*> of compressed block buffers, +0x50 / +0x58
     {

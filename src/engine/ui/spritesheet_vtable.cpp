@@ -412,9 +412,14 @@ bool SpriteSheet::Serialize(IO::Stream& streamv) {
 
     MaterialPtrSerialize(&m_field30, &ser);  // +0x30
 
+    // EXT SEAM (NOT RETAIL): ext.create_on_demand's prefetch (SpriteSheet.h has the contract).
+    if (ser._stream->_direction == 0 && _extLoaded != nullptr) _extLoaded(*this);
+
     // The inlined ~Serializer (0x18011d825) deletes the ReaderWriter.
     return true;
 }
+
+void (*SpriteSheet::_extLoaded)(const SpriteSheet& sheet) = nullptr;
 
 }  // namespace UI
 

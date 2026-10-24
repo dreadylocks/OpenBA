@@ -263,6 +263,12 @@ public:
         m_field50 = false;                    // +0x50 (BYTE)
     }
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md, DESIGN.md hook rule 5):
+    // ext.create_on_demand's sprite-sheet prefetch. Null by default and under the faithful profile.
+    // Run at the end of a READING Serialize, with the sheet holding its material: the extension queues
+    // the first-use creates of its textures, so a window that opens draws sheets already made.
+    static void (*_extLoaded)(const SpriteSheet& sheet);
+
 public:
     // ---- the 0x38 bytes SpriteSheet adds after Object::External ------------
     // B4 X7-RT (`behaviour:`): typed members. Retail's ~SpriteSheet

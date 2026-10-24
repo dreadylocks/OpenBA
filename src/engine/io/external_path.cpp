@@ -57,7 +57,6 @@
 #include "object/expand_memo.h"      // block SAVELOAD: the memo in front of the body
 
 #include "io/FileSystem.h"
-#include "io/packfile_generation.h"  // block SAVELOAD: the memo's context
 #include "system/String.h"
 #include "system/string_internal.h"
 #include "system/setupdir_helpers.h"
@@ -248,17 +247,13 @@ System::Filename* RtObject_ExternalFactory_GetPathStackDirectory(const ExternalF
 // through the DETOUR TRAMPOLINE, never through GetProcAddress — see the
 // `RtResPathTrampoline` note at the top of this file.
 // ============================================================================
-// BLOCK SAVELOAD: the transcribed body is `ExpandRelativePathBody`, unchanged
-// but for one out-parameter, `foundInPackage`: true when the answer was decided
-// by one of the two PACKAGE probes (`hitPackfile` / `hitPackfileRetry`), the
-// only answers the memo may keep (expand_memo.h, point 5). The exported entry
-// point below takes the lock, asks the memo, and runs the body on a miss.
+// BLOCK SAVELOAD: the transcribed body is `ExpandRelativePathBody`, unchanged.
+// The exported entry point below takes the lock, asks the memo, and runs the
+// body on a miss.
 namespace {
 
 void ExpandRelativePathBody(const ExternalFactory* self, System::Filename* ret,
-                            const System::Filename* path, bool appendIdentifier,
-                            bool* foundInPackage) {
-    *foundInPackage = false;
+                            const System::Filename* path, bool appendIdentifier) {
     ++g_pc.expandCalls;
 
     // `ret` is the hidden return slot, so every write to it below CONSTRUCTS
@@ -364,7 +359,6 @@ void ExpandRelativePathBody(const ExternalFactory* self, System::Filename* ret,
         fs->ExistsInPackfile(candidate)) {                       // 0x1800ab180
         found = true; decided = true;                            // 0x1800bd7c8
         ++g_pc.hitPackfile;
-        *foundInPackage = true;                                  // SAVELOAD
     }
     if (!decided && fs->_platformExistsGate != 0) {
         ++g_pc.attrProbeEntered;
@@ -405,7 +399,6 @@ void ExpandRelativePathBody(const ExternalFactory* self, System::Filename* ret,
 
         found = fs->ExistsInPackfile(candidate2);                // 0x1800bd8fb
         if (found) ++g_pc.hitPackfileRetry; else ++g_pc.notFound;
-        *foundInPackage = found;                                 // SAVELOAD
     }
 
     // ---- 0x1800bdab5-0x1800bdc8c: the answer -------------------------------
@@ -454,17 +447,63 @@ void ExpandRelativePathBody(const ExternalFactory* self, System::Filename* ret,
     return;
 }
 
+// BLOCK PATHINDEX (NOT RETAIL, exact): the body's answer for a non-empty request
+// while the path stack is EMPTY, without the candidate and its three existence
+// probes. With no stack, `stackDir` and the stack's filename are null Filenames,
+// and the "found" arm's `<stackDir><dir><fname>.<ext>` is the "not found" arm's
+// `<dir><fname>.<ext>` character for character (expand_memo.h, point 4), so the
+// probes cannot change the answer: they are reads and a stat, and nothing else.
+// What remains is the body's own sequence for everything the answer reads -- the
+// four splits, the two defaults, the "not found" concatenation, the identifier
+// tail, the one normalise -- so the characters are the body's.
+void ExpandEmptyStack(System::Filename* ret, const System::Filename* path, bool appendIdentifier) {
+    const System::Filename& in = *path;
+
+    System::Filename ext   = in.GetPathExtension();
+    System::Filename ident = in.GetPathIdentifer();
+    System::Filename fname = in.GetPathFilename(true);
+    System::Filename dir   = in.GetPathDirectory();
+
+    if (ident.GetLength() == 0) {
+        System::Filename tmp(kResource);
+        ident = tmp;
+    }
+
+    if (fname.GetLength() == 0) {
+        // What GetPathStackFilename returns for an empty stack: a null Filename.
+        const System::Filename stackFile;
+        System::Filename tmp = stackFile.GetPathFilename(true);
+        fname = tmp;
+        tmp = stackFile.GetPathExtension();
+        ext = tmp;
+    }
+
+    System::Filename result;
+    {
+        System::String a = dir.AsString() + fname.AsString();
+        System::String b = a + kDot;
+        System::String c = b + ext.AsString();
+        result.AsString() = c;
+    }
+
+    if (appendIdentifier) {
+        System::String x = result.AsString() + kColon;
+        System::String y = x + ident.AsString();
+        result.AsString() = y;
+    }
+
+    new (ret) System::Filename(result.AsString());
+}
+
 }  // namespace
 
 // ============================================================================
 // The exported entry point: lock, memo, body (block SAVELOAD)
 // ============================================================================
 // The memo is consulted only for a non-empty request made while the path stack
-// is EMPTY (expand_memo.h, point 3: the stack's top feeds the answer) and keeps
-// only answers a package probe gave (point 5). Its context is the filesystem
-// singleton, its data-directory characters and the package directory's change
-// counter (point 4), read AFTER the body on a store, so they are the values the
-// answer was computed from. A hit returns a fresh Filename holding the cached
+// is EMPTY (expand_memo.h, point 3: the stack's top feeds the answer), and under
+// an empty stack every answer is a function of the request alone (point 4), so
+// every answer is kept. A hit returns a fresh Filename holding the cached
 // characters: `Filename(const char*)` is Set + AdjustDelimiters, and the
 // characters are the body's already-normalised output, on which AdjustDelimiters
 // changes nothing.
@@ -485,36 +524,50 @@ System::Filename* RtObject_ExternalFactory_ExpandRelativePath(const ExternalFact
     const bool memoable = (len != 0 && self->_pathStack._size == 0);
 
     if (memoable) {
-        const ::IO::FileSystem* const fs = FileSystemSingleton();
-        const std::string* hit = ExpandMemoFind(path->_data, len, appendIdentifier, fs,
-                                                fs->_dataDirectory._data,
-                                                ::IO::PackfileIndexGeneration());
+        const char* const hit = ExpandMemoFind(path->_data, len, appendIdentifier);
         if (hit != nullptr) {
 #ifdef _DEBUG
-            bool unusedFlag = false;
             System::Filename check;   // null; the body constructs into it, as into `ret`
-            ExpandRelativePathBody(self, &check, path, appendIdentifier, &unusedFlag);
-            if (check._data == nullptr || std::strcmp(check._data, hit->c_str()) != 0) {
+            ExpandRelativePathBody(self, &check, path, appendIdentifier);
+            if (check._data == nullptr || std::strcmp(check._data, hit) != 0) {
                 fprintf(stderr, "[ExpandMemo] MISMATCH path=\"%s\" memo=\"%s\" body=\"%s\"\n",
-                        path->_data, hit->c_str(), check._data ? check._data : "(null)");
+                        path->_data, hit, check._data ? check._data : "(null)");
                 fflush(stderr);
                 new (ret) System::Filename(static_cast<System::Filename&&>(check));
                 return ret;
             }
 #endif
-            new (ret) System::Filename(hit->c_str());
+            new (ret) System::Filename(hit);
             return ret;
         }
     }
 
-    bool foundInPackage = false;
-    ExpandRelativePathBody(self, ret, path, appendIdentifier, &foundInPackage);
-
-    if (memoable && foundInPackage) {
-        const ::IO::FileSystem* const fs = FileSystemSingleton();
-        ExpandMemoStore(path->_data, len, appendIdentifier, fs, fs->_dataDirectory._data,
-                        ::IO::PackfileIndexGeneration(), ret->_data, ret->GetLength());
+    if (!memoable) {
+        ExpandRelativePathBody(self, ret, path, appendIdentifier);
+        return ret;
     }
+
+    // Block PATHINDEX: a first request under an empty stack builds the answer
+    // without the existence probes (expand_memo.h, point 4). The debug exe runs
+    // the body too and compares, as for a memo hit.
+    ExpandEmptyStack(ret, path, appendIdentifier);
+#ifdef _DEBUG
+    {
+        System::Filename check;
+        ExpandRelativePathBody(self, &check, path, appendIdentifier);
+        if (check._data == nullptr || ret->_data == nullptr || std::strcmp(check._data, ret->_data) != 0) {
+            fprintf(stderr, "[ExpandMemo] MISMATCH path=\"%s\" emptyStack=\"%s\" body=\"%s\"\n", path->_data,
+                    ret->_data ? ret->_data : "(null)", check._data ? check._data : "(null)");
+            fflush(stderr);
+            ret->~Filename();
+            new (ret) System::Filename(static_cast<System::Filename&&>(check));
+            return ret;
+        }
+    }
+#endif
+
+    if (ret->_data != nullptr)
+        ExpandMemoStore(path->_data, len, appendIdentifier, ret->_data, ret->GetLength());
     return ret;
 }
 

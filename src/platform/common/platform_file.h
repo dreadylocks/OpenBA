@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace Platform {
 
@@ -59,6 +60,12 @@ int32_t  FileRead(FileHandle h, void* dst, uint32_t bytes, uint32_t* got);      
 int32_t  FileWrite(FileHandle h, const void* src, uint32_t bytes, uint32_t* written); // WriteFile
 uint32_t FileSeek32(FileHandle h, int32_t pos);    // SetFilePointer(h, pos, NULL, FILE_BEGIN)
 uint32_t FileSize(FileHandle h);                   // GetFileSize(h, NULL)
+// NOT RETAIL (fix.large_packages, docs/extensions/handins/LARGEPKM.md): the 64-bit twins of the
+// two above. Retail's file layer is 32-bit; these run only for a package the fix gave 64-bit
+// entry offsets (larger than 2 GiB). FileSeek64: 1 on success, 0 on failure (`pos` < 0 fails).
+// FileSize64: the whole size, -1 on failure.
+int32_t  FileSeek64(FileHandle h, int64_t pos);    // SetFilePointerEx(h, pos, NULL, FILE_BEGIN)
+int64_t  FileSize64(FileHandle h);                 // GetFileSizeEx(h, &size)
 int32_t  FileClose(FileHandle h);                  // CloseHandle
 // GetFileTime(h, NULL, NULL, &lastWrite): FILETIME units (100 ns since 1601 UTC),
 // low dword in the low half. `*fileTime` is written only on success.
@@ -144,5 +151,45 @@ int32_t    FindClose(FindHandle h);                               // FindClose
 // strftime("%x" / "%H:%M").
 constexpr uint32_t kDateTimeChars = 0x100;
 void FormatLocalDateTime(const uint32_t* fileTime, bool timePart, PathChar* out);
+
+// ---- read-only file mapping (NOT RETAIL; issue #13 MAPREAD) ---------------------
+// The whole file behind an open read handle, mapped read-only: FileSystem::ReadFile's
+// packed arm serves a mounted package's reads by memcpy from the view instead of
+// SetFilePointer + ReadFile on the package's one handle (filesystem_openfile.cpp).
+// Windows: CreateFileMappingW(PAGE_READONLY) + MapViewOfFile(FILE_MAP_READ), the
+// section handle in `os`. POSIX (Linux and macOS, file_map_posix.cpp): mmap(PROT_READ,
+// MAP_PRIVATE), `os` unused. FileMapOpen returns false, the mapping zeroed, for an
+// empty file or when the OS refuses; the caller then keeps the handle path.
+struct FileMapping {
+    const uint8_t* data = nullptr;
+    uint64_t       size = 0;
+    void*          os   = nullptr;
+};
+bool FileMapOpen(FileHandle h, FileMapping* out);
+void FileMapClose(FileMapping* m);
+
+// ReadFile's result over a mapped file, without the call: a read of `bytes` (a DWORD)
+// at absolute offset `pos` copies what lies before end of file and reports that count,
+// exactly what SetFilePointer(pos) + ReadFile(bytes) does on a file of `size` bytes
+// (a position at or past the end reads 0). Pure; tests/unit/file_map_read_test.cpp.
+inline uint32_t FileMapRead(const FileMapping& m, uint64_t pos, uint32_t bytes, void* dst) {
+    if (pos >= m.size) return 0;
+    const uint64_t left = m.size - pos;
+    const uint32_t got  = left < bytes ? static_cast<uint32_t>(left) : bytes;
+    std::memcpy(dst, m.data + pos, got);
+    return got;
+}
+
+// ---- an exclusive read / write file (NOT RETAIL; issue #13 COMPRESSAO) --------------------
+// The derived-data cache's files (src/ext/derived_cache/derived_cache.h). FileOpenExclusive opens
+// `path` for reading and writing, creating it when absent, and holds it exclusively: a second
+// opener, in this process or another, fails until FileClose. Windows: CreateFileW(GENERIC_READ |
+// GENERIC_WRITE, share 0, OPEN_ALWAYS, NORMAL) -- the share mode IS the lock. POSIX
+// (file_rw_posix.cpp, Linux and macOS): open(O_RDWR | O_CREAT, 0644) + flock(LOCK_EX | LOCK_NB);
+// the handle is fd + 1 as everywhere. Returns kInvalidFileHandle on failure (held elsewhere included).
+// FileTruncate sets the file's size to `size` (SetFilePointerEx + SetEndOfFile / ftruncate);
+// 1 on success. A mapped file cannot be truncated on Windows: truncate before FileMapOpen.
+FileHandle FileOpenExclusive(const PathChar* path);
+int32_t    FileTruncate(FileHandle h, int64_t size);
 
 }  // namespace Platform

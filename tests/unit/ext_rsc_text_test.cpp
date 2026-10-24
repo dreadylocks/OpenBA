@@ -110,7 +110,7 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
         CHECK(pos && pos->tokens[0].text == "TextBottom");
     }
     const Object* table = e.Find("enhancedOptions");
-    CHECK(table && table->body.Find("_items") && table->body.Find("_items")->blocks.size() == 10);
+    CHECK(table && table->body.Find("_items") && table->body.Find("_items")->blocks.size() == 12);   // six rows x two columns (COMPRESSAO: the cache row)
     const Object* opt = e.Find("textAoOption");
     CHECK(opt && opt->body.Find("_color") && opt->body.Find("_color")->tokens[0].text == "0xFFC0C0C0");
 
@@ -118,8 +118,8 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
     CHECK(ParseEmbedded("Dialog/ExtensionsStringTable.rsc", s));
     CHECK(s.objects.size() == 1 && s.objects[0].type == "StringTable" && s.objects[0].name == "resource");
     const Field* strings = s.objects[0].body.Find("_strings");
-    CHECK(strings && strings->blocks.size() == 50);   // upstream's 31 + ext.neighbour's 19 (this fork)
-    if (strings && strings->blocks.size() == 50) {
+    CHECK(strings && strings->blocks.size() == 52);   // upstream's 33 + ext.neighbour's 19 (this fork)
+    if (strings && strings->blocks.size() == 52) {
         // The load notice with two parameters (found by its text: the window and page keys sit before the
         // notices, so an index into the list moves whenever one is added).
         bool found = false;

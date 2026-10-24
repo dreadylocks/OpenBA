@@ -617,6 +617,13 @@ void WorldGeometry::BuildTerrain(TerrainGenerator* gen, int sizeIdx, uint32_t se
         wg_ResolveMaterial_fd10(&copy);
         _waterMaterialB = static_cast<Graphics::MaterialInstance*>(copy.resolved);    // +0x158
     }
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): the three materials' textures
+    // are queued for their first-use creates (WorldGeometry.h has the contract).
+    if (_extMaterialTaken != nullptr) {
+        _extMaterialTaken(_terrainMaterial);
+        _extMaterialTaken(_waterMaterialA);
+        _extMaterialTaken(_waterMaterialB);
+    }
 
     // Allocate + init the heightfield scratch struct (heap; retail's is b0230's
     // 0xA30-byte stack record; the tree allocates 0x10 bytes of margin past it).

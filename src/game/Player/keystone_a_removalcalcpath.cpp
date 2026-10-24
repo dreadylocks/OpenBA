@@ -74,6 +74,7 @@
 #include "Game/WorkScheduler.h"
 #include "Game/WorkSchedulerNodes.h"
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 
 // (The removal-eligibility checks are RemovalTool members: tool_base_path.cpp.)
 
@@ -441,6 +442,7 @@ uint64_t Map::RemovePendingRoad(int param_2) {
         result = 0;  // uVar8 & 0xff..00
     } else {
         if (found) {
+            CellTrace::NoteCount(this, cell, cell->footprintCount, -r13, "RemovePendingRoad");
             cell->footprintCount = static_cast<uint8_t>(cell->footprintCount - r13);
             cell->field_0x2A = static_cast<uint8_t>(removeKind);
             cell->field_0x2B = r7;

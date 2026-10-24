@@ -177,6 +177,7 @@
 #include "io/Serializer.h"
 #include "io/Stream.h"
 #include "object/External.h"
+#include "object/external_visit.h"   // block VISITPASS: the mode-1 visit
 #include "system/Filename.h"
 #include "system/String.h"
 
@@ -225,13 +226,12 @@ bool ExternalPtrSerializeBody(External* cur, IO::Serializer& ser,
     if (ser._stream->_encoding->GetKind() == 3) {
         if (cur == nullptr) return false;
 
-        System::Filename scratch = cur->GetPath();                  // [rbp+0x38]
-        const External* found = ExternalFactory::_singleton->FindOrLoad(scratch);
-        if (found != nullptr) {
-            // The answer is genuinely discarded — retail calls it for the side
-            // effect of nothing, and keeps the pointer it already had.
-            (void)found->IsDerivedFrom(typeInfo.typeId);
-        }
+        // `scratch = cur->GetPath(); found = FindOrLoad(scratch); if (found)
+        // (void)found->IsDerivedFrom(T)` -- the answer genuinely discarded, retail
+        // calls it for the side effect of nothing and keeps the pointer it
+        // already had. Block VISITPASS (external_visit.cpp) runs that walk, or
+        // its exact shortcut onto the object's own row.
+        RtObject::VisitExternal(cur, typeInfo);
         return false;
     }
 

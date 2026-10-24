@@ -145,8 +145,11 @@
 #include "system/Filename.h"
 #include "system/WideString.h"
 #include "system/string_internal.h"
+#include "io/packfile_fold_index.h"   // block PATHINDEX: the hash index beside _packfileIndex
 
 #include <new>        // placement new into a raw FileInfo Filename slot
+#include <atomic>     // MAPREAD: the emulated file pointer
+#include <mutex>      // MAPREAD: the side table's lock
 
 // ENDGAME B.3.1 step 2: this file no longer forward-declares lane String's
 // `RtSystem_Filename_AdjustDelimiters` (0x1800c6970). Every call it made was
@@ -284,6 +287,199 @@ bool FileSystem::PlatformOpenFile(RtIO::FileInfo& fiRef,
 }
 
 // ============================================================================
+// fix.large_packages (NOT RETAIL, docs/extensions/handins/LARGEPKM.md)
+// ============================================================================
+// The seams FileSystem.h declares; src/ext/large_packages/ sets them.
+void (*FileSystem::_extPackagesMounted)(FileSystem& fs) = nullptr;
+const FileSystem::ExtWidePackage* FileSystem::_extWidePackages = nullptr;
+int32_t FileSystem::_extWideCount = 0;
+
+// ext.package_cache (NOT RETAIL, docs/extensions/handins/PKGCACHE.md): src/ext/package_cache/ sets them.
+bool (*FileSystem::_extIndexRestore)(FileSystem& fs) = nullptr;
+void (*FileSystem::_extIndexBuilt)(FileSystem& fs) = nullptr;
+
+int64_t FileSystem::PackedReadOffset(const RtIO::FileInfo& fi, bool* wide) const {
+    const uint32_t tag = static_cast<uint32_t>(fi.handle);
+    const uint32_t packIndex = tag >> 24;
+    const uint32_t fileIndex = tag & 0x00FFFFFFu;
+    if (_extWidePackages != nullptr && packIndex < static_cast<uint32_t>(_extWideCount)) {
+        const ExtWidePackage& w = _extWidePackages[packIndex];
+        // The low dword must be the FileInfo's own offset: a FileInfo opened
+        // before a remount (a different package at this index) keeps retail's read.
+        if (fileIndex < static_cast<uint32_t>(w.count) &&
+            static_cast<uint32_t>(w.offsets[fileIndex]) == static_cast<uint32_t>(fi.baseOffset)) {
+            *wide = true;
+            return w.offsets[fileIndex] + fi.cursor;
+        }
+    }
+    *wide = false;
+    // Retail's int32 sum (1800ace43/46), wrapping as the 32-bit ADD does.
+    return static_cast<int32_t>(static_cast<uint32_t>(fi.baseOffset) + static_cast<uint32_t>(fi.cursor));
+}
+
+// ============================================================================
+// PERF (NOT RETAIL, issue #13 MAPREAD): the packed arm's mapped read
+// ============================================================================
+// Retail serves a packed read with SetFilePointer + ReadFile on the package's one
+// handle: two syscalls per read, 1.4 M of them on a MegaMod boot (6.3 GB). Here the
+// file behind that handle is mapped once (Platform::FileMapOpen, on the first packed
+// read from it) and the read is a memcpy from the view, with the result ReadFile
+// would give: the bytes before end of file, `got == n`.
+//
+// EXACT, INCLUDING THE FAILURES. SetFilePointer(h, abs, NULL, FILE_BEGIN) with a
+// 32-bit `abs`:
+//   * abs >= 0 always succeeds (also past end of file, where ReadFile then reads 0);
+//   * abs < 0 fails, returns INVALID_SET_FILE_POINTER (0xFFFFFFFF) and leaves the file
+//     pointer where it was. Retail compares that return to `abs`, so every abs < -1
+//     fails the read, and abs == -1 PASSES: ReadFile then reads at the stale pointer,
+//     wherever the previous read left it. The table keeps that pointer (`pointer`,
+//     what SetFilePointer + ReadFile would have left), so abs == -1 reads there too.
+//     Until the first mapped read the OS pointer is still the true one, and an
+//     abs == -1 read takes the handle path.
+// A read of n < 0 (a DWORD past 2 GiB) also takes the handle path: ReadFile's
+// behaviour on a buffer that short is the OS's, not a memcpy's.
+// The handle path is retail's body, unchanged, and is all that runs for a package
+// whose file did not map (empty, or the OS refused).
+//
+// LIFETIME: the mapping lives as long as the handle; PlatformCloseFile releases it
+// before CloseHandle (ClosePackages, so every remount and mod toggle). The table is
+// read by the loader and the audio stream thread (a streamed .wav inside a package
+// reaches this arm through its own FileStream), so it is locked; the emulated pointer
+// is an atomic, where retail's OS pointer was shared by both threads unlocked.
+namespace {
+
+constexpr int64_t kPointerUnknown = INT64_MIN;
+
+struct PackedMap {
+    Platform::FileHandle  handle = nullptr;   // null: free slot
+    Platform::FileMapping map;                // data null: did not map, the handle path
+    std::atomic<int64_t>  pointer{kPointerUnknown};
+};
+
+std::mutex g_packedMapLock;
+PackedMap  g_packedMaps[256];                 // the pack index is one byte: <= 256 handles
+
+// The mapping of `h`, made on first use. Null only when the table is full.
+PackedMap* PackedMapFor(Platform::FileHandle h) {
+    std::lock_guard<std::mutex> lock(g_packedMapLock);
+    PackedMap* free = nullptr;
+    for (PackedMap& m : g_packedMaps) {
+        if (m.handle == h) return &m;
+        if (m.handle == nullptr && free == nullptr) free = &m;
+    }
+    if (free == nullptr) return nullptr;
+    free->handle = h;
+    Platform::FileMapOpen(h, &free->map);
+    free->pointer.store(kPointerUnknown, std::memory_order_relaxed);
+    return free;
+}
+
+// True when the read was served from the view (`*ok` is its result); false sends it
+// down retail's handle path.
+bool PackedMapRead(PackedMap& m, int64_t abs, int32_t n, void* dst, bool* ok) {
+    if (m.map.data == nullptr || n < 0) return false;
+    int64_t pos = abs;
+    if (abs < 0) {
+        if (abs != -1) {
+            *ok = false;                       // SetFilePointer failed: no read
+            return true;
+        }
+        pos = m.pointer.load(std::memory_order_relaxed);
+        if (pos == kPointerUnknown) return false;
+    }
+    const uint32_t got = Platform::FileMapRead(m.map, static_cast<uint64_t>(pos),
+                                               static_cast<uint32_t>(n), dst);
+    m.pointer.store(pos + got, std::memory_order_relaxed);
+    *ok = static_cast<int32_t>(got) == n;
+    return true;
+}
+
+}  // namespace
+
+namespace {
+
+// The mapping behind a packed `fi`'s package, with the read's absolute offset (retail's int32
+// sum, 1800ace43/46); null for a loose or nested FileInfo or an unmapped package.
+PackedMap* PackedMapOfEntry(Collection::Array<PackageFile*>& packfiles, const RtIO::FileInfo& fi,
+                            int32_t cursor, int64_t* abs) {
+    if (static_cast<uint32_t>(fi.handle) > 0xFFFFFFFDu) return nullptr;    // loose
+    const uint32_t packIndex = static_cast<uint32_t>(fi.handle) >> 24;
+    if (packIndex >= static_cast<uint32_t>(packfiles._size)) return nullptr;
+    const PackageFile* const pkg = packfiles[packIndex];
+    if (static_cast<uint32_t>(pkg->_file.handle) <= 0xFFFFFFFDu) return nullptr;   // nested
+    PackedMap* const m = PackedMapFor(pkg->_file.winHandle);
+    if (m == nullptr || m->map.data == nullptr) return nullptr;
+    *abs = static_cast<int32_t>(static_cast<uint32_t>(fi.baseOffset) + static_cast<uint32_t>(cursor));
+    return m;
+}
+
+}  // namespace
+
+const uint8_t* FileSystem::PackedMapSpan(const RtIO::FileInfo& fi, int32_t cursor, int32_t n) {
+    int64_t abs = 0;
+    const PackedMap* const m = PackedMapOfEntry(_packfiles, fi, cursor, &abs);
+    if (m != nullptr && _extWidePackages != nullptr) {
+        // fix.large_packages: the 64-bit offset the packed arm reads at (PackedReadOffset is
+        // relative to fi.cursor: the entry's wide base plus `cursor`).
+        bool wide = false;
+        const int64_t at = PackedReadOffset(fi, &wide);
+        if (wide) abs = at - fi.cursor + cursor;
+    }
+    if (m == nullptr || n < 0 || abs < 0) return nullptr;
+    if (static_cast<uint64_t>(abs) + static_cast<uint64_t>(n) > m->map.size) return nullptr;
+    return m->map.data + abs;
+}
+
+void FileSystem::PackedMapNoteRead(const RtIO::FileInfo& fi, int32_t cursor, int32_t n) {
+    int64_t abs = 0;
+    PackedMap* const m = PackedMapOfEntry(_packfiles, fi, cursor, &abs);
+    if (m == nullptr) return;
+    if (_extWidePackages != nullptr) {
+        bool wide = false;
+        const int64_t at = PackedReadOffset(fi, &wide);
+        if (wide) abs = at - fi.cursor + cursor;
+    }
+    m->pointer.store(abs + n, std::memory_order_relaxed);
+}
+
+// NOT RETAIL (ext.create_on_demand, FileSystem.h): PackedMapSpan's arithmetic for cursor 0, without
+// needing the engine's own mapping.
+bool FileSystem::PackedEntryOrigin(const RtIO::FileInfo& fi, Platform::FileHandle* package,
+                                   int64_t* offset) const {
+    if (static_cast<uint32_t>(fi.handle) > 0xFFFFFFFDu) return false;    // loose
+    const uint32_t packIndex = static_cast<uint32_t>(fi.handle) >> 24;
+    if (packIndex >= static_cast<uint32_t>(_packfiles._size)) return false;
+    const PackageFile* const pkg = _packfiles[packIndex];
+    if (static_cast<uint32_t>(pkg->_file.handle) <= 0xFFFFFFFDu) return false;   // nested
+    int64_t abs = static_cast<int32_t>(static_cast<uint32_t>(fi.baseOffset));
+    if (_extWidePackages != nullptr) {
+        bool wide = false;
+        const int64_t at = PackedReadOffset(fi, &wide);
+        if (wide) abs = at - fi.cursor;
+    }
+    if (abs < 0) return false;
+    *package = pkg->_file.winHandle;
+    *offset  = abs;
+    return true;
+}
+
+void (*FileSystem::_extHandleClosing)(Platform::FileHandle h) = nullptr;
+
+void PackedMapRelease(Platform::FileHandle h) {
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): ext.create_on_demand forgets
+    // this handle before it is closed. Null by default and under the faithful profile.
+    if (FileSystem::_extHandleClosing != nullptr) FileSystem::_extHandleClosing(h);
+    std::lock_guard<std::mutex> lock(g_packedMapLock);
+    for (PackedMap& m : g_packedMaps) {
+        if (m.handle != h) continue;
+        Platform::FileMapClose(&m.map);
+        m.handle = nullptr;
+        m.pointer.store(kPointerUnknown, std::memory_order_relaxed);
+        return;
+    }
+}
+
+// ============================================================================
 // ?ReadFile@FileSystem@IO@@QEAA_NAEAUFileInfo@12@HPEAX@Z      retail 0x1800ace00
 // ============================================================================
 bool FileSystem::ReadFile(RtIO::FileInfo& fiRef, int32_t n, void* dst) {
@@ -308,17 +504,37 @@ bool FileSystem::ReadFile(RtIO::FileInfo& fiRef, int32_t n, void* dst) {
     RtIO::FileInfo pack = pkg->IO::PackageFile::GetFileInfo();  // 1800ace3d
 
     const int32_t abs = fi->baseOffset + fi->cursor;         // 1800ace43/46
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/LARGEPKM.md): fix.large_packages gives a
+    // package past 2 GiB 64-bit entry offsets; every other package takes retail's int32 seek.
+    bool wide = false;
+    const int64_t abs64 = (_extWidePackages != nullptr) ? PackedReadOffset(*fi, &wide) : 0;
     bool ok;
+    PackedMap* map = nullptr;                                // MAPREAD (banner above)
     if (static_cast<uint32_t>(pack.handle) <= 0xFFFFFFFDu) {  // 1800ace4d  JBE
         // The containing .pkg is itself packed — no seek, just recurse.
         ok = true;
     } else {
-        ok = (static_cast<int32_t>(Platform::FileSeek32(
-                  pack.winHandle, abs)) == abs);             // 1800ace61/67 SetFilePointer
+        map = PackedMapFor(pack.winHandle);
+        if (map != nullptr && PackedMapRead(*map, wide ? abs64 : abs, n, dst, &ok)) {
+            if (ok) fi->cursor += n;                         // 1800ace87
+            return ok;
+        }
+        if (wide)
+            ok = Platform::FileSeek64(pack.winHandle, abs64) != 0;
+        else
+            ok = (static_cast<int32_t>(Platform::FileSeek32(
+                      pack.winHandle, abs)) == abs);         // 1800ace61/67 SetFilePointer
     }
     if (ok) {
+        const int32_t before = pack.cursor;
         ok = ReadFile(pack, n, dst);                         // 1800ace7e — ITSELF
         if (ok) fi->cursor += n;                             // 1800ace87
+        // MAPREAD: a handle-path read moved the OS pointer to abs + got; once mapped
+        // reads have run, the emulated pointer must follow it (an abs == -1 read with
+        // the pointer still unknown leaves it unknown: the OS pointer stays true).
+        const int64_t at = wide ? abs64 : abs;
+        if (map != nullptr && at >= 0)
+            map->pointer.store(at + (pack.cursor - before), std::memory_order_relaxed);
     }
 
     // ~pack (FileInfo's dtor: 1800acea1 +0x28, then 1800aceda +0x20) runs at
@@ -361,6 +577,14 @@ RtIO::FileInfo FileSystem::OpenFile(const System::Filename& name) {
             // retail's release point at 0x1800ac991, before the node is used.
             System::Filename key(name._data + dirLen);       // 1800ac91a..932
 
+            // NOT RETAIL (block PATHINDEX): the hash index answers when it can
+            // (it declines while any node key is null, the arm this walk treats
+            // differently from the others).
+            RtIO::PackfileIndexNode* indexed = nullptr;
+            const bool answered = ::IO::PackIndexFind(&_packfileIndex, key._data, &indexed);
+            if (answered && !OPENBA_PATHINDEX_CHECK)
+                node = nullptr;
+
             while (node != nullptr) {                        // 1800ac98c
                 const char* const nk = node->element.key._data;            // 1800ac945
                 if (nk != nullptr && key._data != nullptr &&
@@ -375,6 +599,9 @@ RtIO::FileInfo FileSystem::OpenFile(const System::Filename& name) {
                 }
                 break;                                       // found
             }
+            ::IO::PackIndexCheck(answered, key._data, indexed, node);
+            if (answered && !OPENBA_PATHINDEX_CHECK)
+                node = indexed;
         }                                                    // ~key  1800ac991
 
         if (node != nullptr && _existsInPackfileGate != 0) {  // 1800ac9bf

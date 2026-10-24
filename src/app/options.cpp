@@ -99,6 +99,7 @@ void OptionsInit() {
     o.metalStats = On("BANISHED_METAL_STATS");
     o.inputTrace = On("BANISHED_INPUT_TRACE");
     o.background = On("BANISHED_BACKGROUND");
+    o.userDir = Raw("BANISHED_USER_DIR");
 
     // ── harness drivers: menu → game ─────────────────────────────────────────
     o.autostart       = On("BANISHED_AUTOSTART");
@@ -229,8 +230,6 @@ void OptionsInit() {
         o.deferWindowShow = !v || (std::strcmp(v, "0") != 0 && std::strcmp(v, "false") != 0); }
     {   const char* v = Raw("BANISHED_SKIP_ENGINE_LOADER");
         o.skipEngineLoader = v && v[0] != '0'; }
-    {   const char* v = Raw("BANISHED_SYNC_ENGINE_LOADER");
-        o.syncEngineLoader = !(v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F')); }
     {   const char* v = Raw("BANISHED_NO_FOL_LOCK");
         o.noFolLock = v && v[0] != '0'; }
 
@@ -257,6 +256,7 @@ void OptionsInit() {
     o.forceSnow              = Raw("BANISHED_FORCE_SNOW");
     o.forceDeviceLost        = Raw("BANISHED_FORCE_DEVICE_LOST");
     o.screenshotAt           = Raw("BANISHED_SCREENSHOT_AT");
+    o.showroom               = Raw("BANISHED_SHOWROOM");
     o.captureIngame          = Raw("BANISHED_CAPTURE_INGAME");
     o.achIgnoreMods          = Raw("BANISHED_ACH_IGNORE_MODS");
     o.fastTrig               = Raw("BANISHED_FAST_TRIG");
@@ -387,6 +387,9 @@ void OptionsInit() {
     o.disasterFrame[3] = Raw("BANISHED_FORCE_INFEST_FRAME");
     o.disasterPeriod[3]= Raw("BANISHED_FORCE_INFEST_PERIOD");
     o.forceSickDisease = Raw("BANISHED_FORCE_SICK_DISEASE");
+
+    o.cellDump  = Raw("BANISHED_CELL_DUMP");
+    o.cellTrace = On("BANISHED_CELL_TRACE");
 
     // The stress town rewrites the run's world setup, so it goes LAST — and it
     // is the only thing in the process that writes the environment.

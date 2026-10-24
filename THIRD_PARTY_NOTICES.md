@@ -45,5 +45,6 @@ and relinks the exe.
 
 ## Not third-party code in the tree
 
-The FrancophilSans typeface (Manfred Klein) is not in the tree; it ships beside the exe in the
-release package only. Its terms are in `README.md`.
+The FrancophilSans typeface (Manfred Klein) is kept unchanged under `tools/release/fonts/` with his
+notice (`FrancophilSans_README.txt`) and ships beside the exe in the release packages. It is not
+part of OpenBA's code or of its GPL-3.0 licence; its terms are in `README.md`.

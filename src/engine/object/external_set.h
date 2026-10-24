@@ -154,6 +154,25 @@ void   FreeEntryNode(void* ignored, Node* node);                          // 0x1
 void   Erase        (Set* set, Node* z);                                  // 0x18002cf60
 Node*  Find         (const Set* set, const System::Filename* key);        // 0x18002dd70
 
+// ---- NOT RETAIL (block PATHINDEX): the hash index beside the tree ----------
+// src/engine/collection/fold_index.h has the exactness argument. InsertCore and
+// Erase keep it in step; `IndexedFind` answers for `set` when it can (true, and
+// `*out` is what `Find`'s descent returns for `key`) and declines otherwise
+// (false: the caller walks). `IndexClear` is for a set whose nodes were freed
+// wholesale (~ExternalFactory).
+bool   IndexedFind (const void* set, int32_t count, const char* key, Node** out);
+void   IndexClear  (const void* set);
+
+// ---- NOT RETAIL (block VISITPASS): which node holds an External --------------
+// src/engine/collection/ptr_index.h has the claim; external_visit.cpp is the
+// reader. `VisitIndexFind` answers for `set` when it can (true; `*out` is the
+// node whose element holds `ext`, or null when none does, and `*verified` that
+// row's flag) and declines otherwise (false: the caller walks). The flag is
+// external_visit.cpp's "the path walk for this object lands on its own row".
+bool   VisitIndexFind(const void* set, int32_t count, const ::Object::External* ext, Node** out, bool* verified);
+bool   VisitIndexSetVerified(const void* set, const ::Object::External* ext);
+void   VisitIndexStats(uint64_t* size, bool* broken, uint64_t* duplicates);
+
 void   ArrayDestroyRange(void* ignored, System::Filename* first, int count); // 0x18002e3d0
 void   ArrayResize      (FilenameArray* self, int newSize,
                          const System::Filename* fill);                       // 0x18002dff0
@@ -163,4 +182,7 @@ void   ArrayResize      (FilenameArray* self, int newSize,
 namespace RtObject {
 // ?Clean@ExternalFactory@Object@@QEAAXXZ   retail 0x1800be310
 void RtObject_ExternalFactory_Clean(ExternalFactory* self);
+// Add's HIT arm (1800be68b..1800be6c7) on a node already in hand: OR the clean
+// bit in, visit on a first touch (external_add.cpp; block VISITPASS reaches it).
+void RtObject_ExternalFactory_AddHit(ExternalFactory* self, rtresset::Node* node, ::Object::External* external);
 }  // namespace RtObject

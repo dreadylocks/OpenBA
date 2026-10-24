@@ -78,8 +78,10 @@
 //     *after* the previous one was written — that is the RLE idiom every LZ77
 //     depends on. A `memcpy` or `memmove` here compiles, runs, and produces
 //     different bytes for exactly the inputs that compress best. The two
-//     unrolled bytes at 0x1800c46fa..0x1800c470e are part of the same chain and
-//     are transcribed in place rather than folded into the loop.
+//     unrolled bytes at 0x1800c46fa..0x1800c470e are part of the same chain.
+//     (Issue #13: the body below copies the chain in pieces no longer than the
+//     distance, each a non-overlapping memcpy -- the same bytes; see its
+//     banner. A plain memcpy/memmove of the whole match is still wrong.)
 //
 //  2. **Total copied is `2 + len`, and the loop runs `len` times.** Two bytes
 //     are copied unrolled before the `do { } while (--len)`, which is why the
@@ -184,51 +186,76 @@
 // arrangement B34_BRIEFS §A.2 established (anonymous-namespace members ARE
 // reachable as `RtSystem::X` from elsewhere in the same translation unit).
 //
-// NEITHER BODY LOST ITS BRANCH COUNTERS. `g_branch` / `g_cbranch` are the
-// effectiveness controls the Wave-9 and Wave-22 oracles drove; they are null on
-// every shipped call and the bodies keep the one predictable null test each.
+// THE DECODER'S BRANCH COUNTERS ARE GONE (issue #13). `g_branch` was a
+// file-static pointer that only the Wave-9 oracle ever pointed at storage, and
+// that oracle died with the cutover: nothing in the tree set it, nothing read
+// it, so every shipped call paid a null test per op for a counter that was
+// always null. Removing it changes nothing observable. The ENCODER's
+// `g_cbranch` is the same kind of dead control and is left as it is (the
+// encoder runs only on a save).
 // ============================================================================
 
 namespace RtSystem {
-
-// Branch counters. Null on every normal call — the probe points this at its own
-// storage for the duration of the sweep, so the shipped path pays one
-// predictable null test and nothing else.
-// The first three count branches ENTERED, not branches that succeeded — all
-// three are incremented before that branch's bounds checks, so
-// `literalRun + matchShort + matchExtended` is the total control bytes decoded
-// and the three fail counters are a disjoint tally of how those entries ended.
-// Counting entries for two of them and successes for the third would make the
-// printed line quietly incomparable across buckets.
-struct CompressionBranchCounts {
-    int64_t literalRun    = 0;   // c < 0x20
-    int64_t matchShort    = 0;   // c >= 0x20, len != 7
-    int64_t matchExtended = 0;   // c >= 0x20, len == 7 (reads an extra byte)
-    int64_t failLiteral   = 0;   // op + n > dstEnd
-    int64_t failMatchDst  = 0;   // op + 2 + len > dstEnd
-    int64_t failMatchSrc  = 0;   // mp < dst
-    // How each successful decode LEFT THE READ CURSOR — see the note on the
-    // lossy-transform hazard below.
-    int64_t exitExact     = 0;   // sp landed exactly on srcEnd
-    int64_t exitOvershoot = 0;   // sp landed PAST srcEnd (a run straddled the end)
-};
-static CompressionBranchCounts* g_branch = nullptr;
-
-// The oracle's scratch size. A live CompressedStream window is 0x8000; 0x10000
-// leaves headroom and still fits comfortably in .bss.
-static constexpr uint32_t kOracleScratch = 0x10000;
-
 namespace {
 
-typedef int (*DecompressFn)(const void*, uint32_t, void*, uint32_t);
+// The decoder's copies, as fixed-width loads and stores (issue #13). Each writes
+// EXACTLY [d, d + n): an overlapping tail store rewrites bytes it already wrote,
+// with the same values, and never touches a byte past the run.
+inline void Copy8(uint8_t* d, const uint8_t* s) {
+    uint64_t v;
+    std::memcpy(&v, s, 8);
+    std::memcpy(d, &v, 8);
+}
+inline void Copy4(uint8_t* d, const uint8_t* s) {
+    uint32_t v;
+    std::memcpy(&v, s, 4);
+    std::memcpy(d, &v, 4);
+}
 
-// ENDGAME B.3.4b SYSTEM (4b): `DecompressBody` and `CompressBody` are GONE as
-// free functions. They were "factored out so the oracle can run the identical
-// code onto scratch", and the oracles they served died with the cutover; the
-// two bodies are now `System::Compression::Decompress` and
-// `System::Compression::Compress`, defined at global scope below this
-// namespace. Nothing else about either body changed — see the tally in the
-// commit message.
+// n bytes, s and d in different buffers (a literal run, 1..32).
+inline void CopyDisjoint(uint8_t* d, const uint8_t* s, uint32_t n) {
+    if (n >= 8u) {
+        uint32_t k = 0;
+        for (; k + 8u <= n; k += 8u)
+            Copy8(d + k, s + k);
+        if (k < n)
+            Copy8(d + n - 8u, s + n - 8u);
+    } else if (n >= 4u) {
+        Copy4(d, s);
+        Copy4(d + n - 4u, s + n - 4u);
+    } else {
+        d[0] = s[0];
+        if (n > 1u) {
+            d[1] = s[1];
+            if (n > 2u)
+                d[2] = s[2];
+        }
+    }
+}
+
+// A match at distance >= 8: op[i] = op[i - dist] for i in [0, total). The
+// 8-byte step at k reads [k - dist, k - dist + 8), which ends at or before k,
+// so every byte it reads is already final; the tail step at total - 8 reads
+// below total - 8, which is already written. 3..7-byte matches read only below
+// op. Byte for byte retail's chain.
+inline void CopyMatchFar(uint8_t* op, size_t dist, uint32_t total) {
+    const uint8_t* const mp = op - dist;
+    if (total >= 8u) {
+        uint32_t k = 0;
+        for (; k + 8u <= total; k += 8u)
+            Copy8(op + k, mp + k);
+        if (k < total)
+            Copy8(op + total - 8u, mp + total - 8u);
+    } else if (total >= 4u) {
+        Copy4(op, mp);
+        Copy4(op + total - 4u, mp + total - 4u);
+    } else {
+        op[0] = mp[0];
+        op[1] = mp[1];
+        op[2] = mp[2];
+    }
+}
+
 }  // namespace
 }  // namespace RtSystem
 
@@ -239,9 +266,36 @@ typedef int (*DecompressFn)(const void*, uint32_t, void*, uint32_t);
 // by instruction. `SA`, so no `this` and no instance state is touched — which
 // is exactly why `src/engine/io/compressed_stream_read.cpp` can reach it from
 // two `RT_EXPORT_ONCE` sites with no receiver at all.
+//
+// AN EXACT PERF BODY, NOT RETAIL'S SHAPE (issue #13). Retail copies every byte
+// of a literal run and of a match one at a time (§2 note 1). This body makes
+// the same decisions in the same order -- the same control-byte walk, the same
+// two bounds checks with the same `return 0`, the same do-while with its
+// unsigned `sp < srcEnd` exit, the same return value -- and only the COPIES
+// are wider:
+//   * A literal run copies sp[0..n) to op[0..n) in 8- / 4-byte steps
+//     (CopyDisjoint). Retail's loop reads and writes them in order; the two
+//     ranges are in different buffers, so the order cannot be observed, and no
+//     byte outside either range is read or written. It reads up to 31 bytes
+//     past srcEnd when a run straddles the end exactly as retail does (the
+//     overshoot exit).
+//   * A match of `total = len + 2` bytes at distance `dist` is op[i] =
+//     op[i - dist] for i = 0..total in order, so each byte may be one the same
+//     match just wrote. dist >= 8 copies 8 bytes a step (CopyMatchFar: each
+//     step reads only bytes already final); dist == 1 is a run of one byte,
+//     memset; dist 2..7 keeps retail's byte loop. Byte for byte the same
+//     result as retail's chain, and nothing is written past op + total.
+//   * `mp < dst` (retail's unsigned JC) is tested as `dist > op - dst`. With
+//     op inside the destination buffer and dist <= 8192, op - dist cannot wrap
+//     the address space, so the two tests agree; this form never forms the
+//     out-of-buffer pointer.
+// PRECONDITION, as for retail's loop: src and dst do not overlap. Both callers
+// (CompressedStream::DecompressFromSource, from a stack scratch block, and
+// SetWindow's in-memory arm, from a block buffer) decode into a window buffer.
+// Pure and reentrant: no state outside the arguments, safe from any thread.
 int System::Compression::Decompress(const void* src, uint32_t srcLen,
                                     void* dst, uint32_t dstCap) {
-    const uint8_t* sp          = static_cast<const uint8_t*>(src);  // CAST-OK: byte_io
+    const uint8_t* sp           = static_cast<const uint8_t*>(src);  // CAST-OK: byte_io
     const uint8_t* const srcEnd = sp + srcLen;          // 1800c4672, zero-extended
     uint8_t* const dstBase      = static_cast<uint8_t*>(dst);  // CAST-OK: byte_io
     uint8_t* const dstEnd       = dstBase + dstCap;     // 1800c467b, zero-extended
@@ -251,80 +305,41 @@ int System::Compression::Decompress(const void* src, uint32_t srcLen,
     do {
         const uint32_t c = *sp++;                       // 1800c4680
         if (c < 0x20u) {                                // 1800c468a  JNC -> match
-            // ---- literal run -------------------------------------------
-            if (RtSystem::g_branch) ++RtSystem::g_branch->literalRun;
-            uint32_t n = c + 1u;                        // 1800c468c
-            if (op + n > dstEnd) {                      // 1800c4696  JA
-                if (RtSystem::g_branch) ++RtSystem::g_branch->failLiteral;
+            // ---- literal run: 1..32 bytes ------------------------------
+            const uint32_t n = c + 1u;                  // 1800c468c
+            if (op + n > dstEnd)                        // 1800c4696  JA
                 return 0;
-            }
-            do {                                        // 1800c46a0
-                *op++ = *sp++;
-            } while (--n);
+            RtSystem::CopyDisjoint(op, sp, n);          // 1800c46a0 loop
+            op += n;
+            sp += n;
         } else {
-            // ---- match --------------------------------------------------
+            // ---- match ----------------------------------------------------
             uint32_t len = c >> 5;                      // 1800c46bf   1..7
-            // mp = op - ((c & 0x1f) << 8) - 1, computed exactly as retail does
-            // it (1800c46b6/bc/c5/c8), before the low byte is subtracted.
-            const uint8_t* mp = op - ((c & 0x1fu) << 8) - 1;
-            if (len == 7u) {                            // 1800c46cf
+            // dist = ((c & 0x1f) << 8) + 1 + lo: retail's mp = op - dist, built
+            // in the same two steps (1800c46b6/bc/c5/c8, then the low byte).
+            size_t dist = (static_cast<size_t>(c & 0x1fu) << 8) + 1u;
+            if (len == 7u)                              // 1800c46cf
                 len = 7u + *sp++;                       // 1800c46d1..d9
-                if (RtSystem::g_branch) ++RtSystem::g_branch->matchExtended;
-            } else if (RtSystem::g_branch) {
-                ++RtSystem::g_branch->matchShort;
-            }
-            mp -= *sp++;                                // 1800c46dc/e7, the low offset byte
-            if (op + 2 + len > dstEnd) {                // 1800c46f3  JA
-                if (RtSystem::g_branch) ++RtSystem::g_branch->failMatchDst;
+            dist += *sp++;                              // 1800c46dc/e7, the low offset byte
+            const uint32_t total = len + 2u;            // 2 unrolled + len looped
+            if (op + total > dstEnd)                    // 1800c46f3  JA
                 return 0;
-            }
-            // UNSIGNED compare (JC at 1800c46f8): mp can wrap below the buffer.
-            if (reinterpret_cast<uintptr_t>(mp) < reinterpret_cast<uintptr_t>(dstBase)) {  // CAST-OK: ptr_int
-                if (RtSystem::g_branch) ++RtSystem::g_branch->failMatchSrc;
+            if (dist > static_cast<size_t>(op - dstBase))   // 1800c46f8  JC: mp < dst
                 return 0;
+            if (dist >= 8u) {
+                RtSystem::CopyMatchFar(op, dist, total);
+            } else if (dist == 1u) {
+                std::memset(op, op[-1], total);
+            } else {
+                for (uint32_t k = 0; k < total; ++k)    // 1800c46fa..1800c4711
+                    op[k] = op[k - dist];
             }
-            // The two unrolled bytes, then `len` more — 2 + len total, and
-            // BYTE AT A TIME because mp and op overlap whenever the distance is
-            // less than the length (§2 note 1). This is not a memcpy.
-            op[0] = mp[0];                              // 1800c46fa/4706
-            op[1] = mp[1];                              // 1800c4709/470e
-            op += 2;
-            mp += 2;
-            do {                                        // 1800c4711
-                *op++ = *mp++;
-            } while (--len);
+            op += total;
         }
     } while (sp < srcEnd);                              // 1800c4727  JC (unsigned)
 
-    // THE READ CURSOR, and why it is counted here and not compared.
-    //
-    // Lane PICK's finding generalises to: if a result is observed only through a
-    // lossy transform, the oracle is blind to everything the transform discards.
-    // The decompressor's analogue is comparing the output bytes while ignoring
-    // where the decode LEFT THE STREAM — two bodies can emit identical bytes and
-    // stop at different source positions.
-    //
-    // For THIS function that hazard does not apply, and the reason is worth
-    // stating rather than assuming: `sp` is a LOCAL. Decompress is `static`, it
-    // owns no object, and its only observable outputs are the returned length and
-    // the destination bytes. Both are compared, and the destination is compared
-    // OVER THE WHOLE dstCap rather than the prefix the return value claims — so a
-    // body that returned the right length while writing a different amount fails.
-    // There is no cursor field, no checksum and no end-of-block state to miss.
-    //
-    // It is counted anyway, because "the corpus never exercised the overshoot
-    // exit" and "the overshoot exit does not exist" look identical in a report
-    // that prints neither. A literal run may straddle srcEnd, so an exact landing
-    // is not guaranteed and both outcomes are real.
-    //
-    // AT RUNG 2 THIS BECOMES LOAD-BEARING. CompressedStream carries `position`
-    // (+0x1c), `activeWindow` (+0x20) and per-window use counts; there, comparing
-    // returned bytes alone IS the lossy transform, and the oracle must compare
-    // the object's state too. Recorded in WAVE9_READPACKFILE_PLAN.md.
-    if (RtSystem::g_branch) {
-        if (sp == srcEnd) ++RtSystem::g_branch->exitExact;
-        else              ++RtSystem::g_branch->exitOvershoot;
-    }
+    // The read cursor `sp` is a local: the returned length and the destination
+    // bytes are this function's only outputs.
     return static_cast<int>(op - dstBase);              // 1800c472d
 }
 

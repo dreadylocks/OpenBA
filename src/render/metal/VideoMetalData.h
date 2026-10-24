@@ -88,11 +88,14 @@ public:
     // Point-filtered twin of `sampler`, built on first use: sharp_ui draws UI batches with
     // Video::ImageBufferData::_extPointSampling.
     id<MTLSamplerState> pointSampler = nil;
+    // NOT RETAIL (ext.share_gpu_data, share_gpu_data/share_create.h): `texture` is in the share table; this
+    // user drops itself before letting go of it, and Update refuses it.
+    bool shared = false;
 };
 class IndexBufferData final : public Video::IndexBufferData {
 public:
     explicit IndexBufferData(Owner* o) : Video::IndexBufferData(o) {}
-    ~IndexBufferData() override = default;
+    ~IndexBufferData() override;
     bool Create(uint32_t sizeBytes, uint8_t dynamic, const void* data) override;
     bool SetData(int32_t sizeBytes, int32_t offsetBytes, const void* src) override;
     void* Lock(int32_t sizeBytes, int32_t* outByteOffset) override;
@@ -102,6 +105,9 @@ public:
     id<MTLBuffer> buffer = nil;
     size_t cursor = 0;
     uint64_t generation = ~uint64_t(0);
+    // NOT RETAIL (ext.share_gpu_data, share_gpu_data/share_create.h): `buffer` is in the share table; this
+    // user drops itself before letting go of it, and SetData / Lock refuse it.
+    bool shared = false;
 };
 class VertexBufferData final : public Video::VertexBufferData {
 public:
@@ -116,6 +122,9 @@ public:
     id<MTLBuffer> buffer = nil;
     size_t cursor = 0;
     uint64_t generation = ~uint64_t(0);
+    // NOT RETAIL (ext.share_gpu_data, share_gpu_data/share_create.h): `buffer` is in the share table; this
+    // user drops itself before letting go of it, and SetData / Lock refuse it.
+    bool shared = false;
 };
 class ConstantBufferData final : public Video::ConstantBufferData {
 public:

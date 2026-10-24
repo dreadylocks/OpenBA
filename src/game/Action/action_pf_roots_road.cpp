@@ -32,6 +32,9 @@
 #include <cstdint>
 #include "Component/still_terrain.h"   // STILLTERRAIN: StillTerrain::Bump (the terrain epoch)
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
+#include "ext/registry.h"   // Ext::Fix().terrain_resort
+#include "ext/terrain_resort/terrain_resort.h"   // fix.terrain_resort (docs/extensions/handins/TERRAINRESORT.md)
 
 typedef unsigned int  uint;
 typedef unsigned short ushort;
@@ -158,6 +161,7 @@ void Map::ResetTerrainHeights(int param_2, int param_3, int param_4, int param_5
     Math::Vector3 co;   // co.x=local_88, co.y=local_84, co.z=local_80
     Math::Vector3 local_78;  // Ghidra `Vector3 local_78 [80]` — only [0] was ever used (B.3.1: one Vector3)
 
+    const int firstRow = param_3;   // FIX terrain_resort: the loop below advances param_3
     fVar4 = RdataF(kRdata_140172230);   // 0x140172230
     fVar3 = kRdata_140172114;           // 0x140172114
     lVar2 = GameUpdateLoop::_singleton->m_worldGeometry;
@@ -183,6 +187,11 @@ void Map::ResetTerrainHeights(int param_2, int param_3, int param_4, int param_5
             } while (iVar6 <= param_4);
         }
     }
+    // FIX terrain_resort (NOT RETAIL, docs/extensions/handins/TERRAINRESORT.md): the cells
+    // around the flattened ones keep the type they were sorted with; heal the stale "steep".
+    if (Ext::Fix().terrain_resort) {
+        Ext::TerrainResort::HealAround(this, param_2, firstRow, param_4, param_5);
+    }
     GameUpdateLoop::_singleton->m_worldGeometry->RebuildRoadMesh(this);   // 0x1400af370
 }
 
@@ -203,6 +212,7 @@ void Map::FinishRoadCell(int param_2, uint8_t param_3, uint param_4) {
 
     lVar4 = &cells.GetData()[param_2];
     if (param_4 == 2) {
+        CellTrace::NoteCount(this, lVar4, lVar4->footprintCount, -1, "FinishRoadCell");
         lVar4->footprintCount = lVar4->footprintCount + -1;
         lVar4->field_0x2A = 0xff;          // disasm: MOV word ptr,0xff over +0x2a / +0x2b (H7)
         lVar4->field_0x2B = 0;

@@ -73,38 +73,25 @@ bool SkipEngineLoader() {
     return Opt().skipEngineLoader;
 }
 
-// After fn_Loader_Load spawns the engine Loader thread (Loader::Run ->
-// LoadResources -> recursive External::Load = thousands of Allocate calls), the
-// stub Update normally transitions IMMEDIATELY, so that thread loads the
-// achievement/scenario tree CONCURRENTLY with the main thread's menu-scene build.
-// HISTORICAL (true when written, NOT true now): the raw member Allocate/Free
-// were then reachable without the allocator CS, so the two threads corrupted
-// the free-list -> intermittent crash inside Free (Runtime 0x1800c6c00), see
-// [[project_menu_heap_crash]]. Today every door into the free list is locked:
-// src/engine/system/allocator.cpp's RegisterAllocatorExports/Addresses hand
-// out the composed stubs of src/diag/alloc_cutover_arm.cpp for ?Allocate@/
-// ?Free@ (by name and by address), and MemAlloc/MemFree lock themselves. That
-// is retail's arrangement too: its Allocate call sites are an inlined
-// Enter(_singleton+0x640) / Allocate / Leave (checked: operator new
-// 0x18000107d/94/9f, String::SetLength 0x1800c827f/9d/a8, MemAlloc 0x1800c7a50).
-// The wait below stays for loader EXCLUSIVITY (LOADER_READ_SPIN.md), not heap
-// safety.
-//
-// Fix: block here until the loader finishes (Thread::WaitForFinish waits on the
-// loader thread's completion event). The main thread is parked (not allocating)
-// while the loader runs alone -> no concurrent allocation -> no free-list race.
-// If the loader crashes mid-run, the standalone CrashHandler ExitProcess'es, so
-// this can't deadlock. Env opt-OUT: BANISHED_SYNC_ENGINE_LOADER=0.
-bool SyncEngineLoader() {
-    return Opt().syncEngineLoader;
-}
-
-void WaitForEngineLoader() {
-    if (!SyncEngineLoader()) return;
-    printf("[EngineLoader] waiting for loader thread to finish (sync)...\n");
-    Engine::LoaderLoop::_loader.WaitForFinish();   // ENDGAME B.3.9 ENG W2: the class static
-    printf("[EngineLoader] loader thread finished\n");
-}
+// No wait follows the kick (issue #13). Retail's LoaderLoop::Startup is the
+// three-instruction tail call to Loader::Load and returns at once; the main
+// loop then runs LoaderLoop::Update (Sleep 14 + advance) and Draw (a black
+// clear) + Present every frame while the loader thread works, and the
+// transition waits on the loader's run flag (LoaderLoopAdvance, loops.cpp).
+// The standalone used to park the main thread in Thread::WaitForFinish here
+// (BANISHED_SYNC_ENGINE_LOADER), for two reasons that are both gone:
+//   - heap safety: the raw member Allocate/Free were once reachable without the
+//     allocator CS. Today every door into the free list is locked
+//     (src/engine/system/allocator.cpp hands out the composed stubs of
+//     src/diag/alloc_cutover_arm.cpp for ?Allocate@/?Free@, and MemAlloc/MemFree
+//     lock themselves), which is retail's arrangement: its Allocate call sites
+//     are an inlined Enter(_singleton+0x640) / Allocate / Leave (operator new
+//     0x18000107d/94/9f, String::SetLength 0x1800c827f/9d/a8, MemAlloc
+//     0x1800c7a50);
+//   - loader exclusivity (docs/history/endgame_b/LOADER_READ_SPIN.md): the
+//     second loader thread that raced the Engine::Loader for the one package
+//     handle was deleted in 09a74987b. The loader is the only reader again, and
+//     nothing the loader loops' frames run reads a package.
 
 // Slot 2 Shutdown is INHERITED (ENDGAME B.3.8 LOOP): Engine::LoaderLoop::Shutdown
 // (Runtime 0x1800dc280) is retail's unconditional join of the loader thread
@@ -121,11 +108,10 @@ void WaitForEngineLoader() {
 //
 // [1] Startup is overridden anyway — a STANDALONE DIVERGENCE, not a port: its
 // body IS retail's LoaderLoop::Startup (Loader::Load(_nextLoop) on the one
-// static loader) plus the two standalone loader options
-// (BANISHED_SKIP_ENGINE_LOADER skips the kick; BANISHED_SYNC_ENGINE_LOADER,
-// default on, blocks until the loader thread is done — loader exclusivity,
-// LOADER_READ_SPIN.md). The transition itself is the inherited
-// LoaderLoop::Update: next loop once the loader is idle and the delay passed.
+// static loader, returning at once) plus the standalone investigation option
+// BANISHED_SKIP_ENGINE_LOADER, which skips the kick. The transition itself is
+// the inherited LoaderLoop::Update: next loop once the loader is idle and the
+// delay passed; until then every frame is LoaderLoop::Draw's black clear.
 
 // Retail 0x140001150 (slot 0): CALL ??1LoaderLoop@Engine@@ (import
 // 0x140152ba8), then MemFree on &1. The compiler's chain runs ~LoaderLoop ->
@@ -149,7 +135,6 @@ void InnerLoaderLoop::Startup() {
         // old "g_pLoader null" branch cannot happen and went with them.
         Engine::LoaderLoop::_loader.Load(_nextLoop);
         printf("[InnerLL::Startup] Loader::Load returned\n");
-        WaitForEngineLoader();
     }
 }
 
@@ -250,7 +235,6 @@ void GameLoaderLoop::Startup() {
         // old "g_pLoader null" branch cannot happen and went with them.
         Engine::LoaderLoop::_loader.Load(_nextLoop);
         printf("[OuterLL::Startup] Loader::Load returned\n");
-        WaitForEngineLoader();
     }
 }
 

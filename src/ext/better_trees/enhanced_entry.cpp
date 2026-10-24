@@ -39,7 +39,7 @@ void Close() { g_combo = nullptr; }
 }  // namespace
 
 const Contribution& BetterTreesEntry() {
-    static const Contribution c = { "better_trees", Open, Apply, Close };
+    static const Contribution c = { "better_trees", Open, Apply, Close, nullptr };
     return c;
 }
 

@@ -6,7 +6,8 @@ tools/resave_gate/resave_gate.sh Gate <outdir> <secs>
 GATE_MODE=file tools/resave_gate/resave_gate.sh Gate  # smoke test of the on-disk save path only
 ```
 
-Run it under `tools/game_dir_lock.sh`. It needs `Documents/Banished/Save/Gate.sav` (the
+Run it under `tools/game_dir_lock.sh` (or a dir from `tools/game_dirs.sh`). It needs
+`<user dir>/Save/Gate.sav` -- `Documents/Banished` or `$BANISHED_USER_DIR` (the
 golden was cut against md5 `68f99e06e6cdce6c17a8fb06e867b2c8`, a copy of the 2026-09-12
 autosave; copy any save to that name and delete the golden to start over). Exit 0 is PASS.
 

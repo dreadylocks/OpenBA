@@ -3,6 +3,10 @@
 # tools/game_dir_lock.sh -- a mutex over the ONE shared game directory
 # =============================================================================
 #
+# TWO DIRECTORIES: tools/game_dirs.sh pools this one (perf) with a second copy
+# (functional) that has a user dir of its own (BANISHED_USER_DIR); take a dir
+# from it rather than calling this script with BANISHED_DIR by hand.
+#
 # WHY THIS EXISTS
 #
 # Lanes work in isolated git worktrees, so their SOURCE never collides. But every

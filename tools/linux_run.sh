@@ -52,7 +52,7 @@ esac
 # window loses it as soon as the desktop is used (2026-10-11: two stress runs at 0.00 sim
 # iterations per frame). The option is switched off for the stress route (or any route with
 # LINUX_NO_AUTOPAUSE=1) and restored afterwards; route.txt records it.
-CFG="$HOME/.local/share/Banished/settings.cfg"; CFG_SAVED=""
+CFG="${BANISHED_USER_DIR:-$HOME/.local/share/Banished}/settings.cfg"; CFG_SAVED=""   # tools/game_dirs.sh
 if { [ "$ROUTE" = stress ] || [ "${LINUX_NO_AUTOPAUSE:-0}" = 1 ]; } && [ -f "$CFG" ]; then
   CFG_SAVED="$(mktemp)"; cp -f "$CFG" "$CFG_SAVED"
   sed -i 's/^GameAutoPause=.*/GameAutoPause=false/' "$CFG"

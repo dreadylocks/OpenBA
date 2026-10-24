@@ -39,6 +39,7 @@
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
 #include "Game/PlayerToolManager.h" // B4: PlayerToolManager::OpenPauseMenu (0x140101ce0)
 #include "options.h"
+#include "pausemenu_harness.h"   // the two entry points this file defines
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -266,4 +267,18 @@ extern "C" void PauseMenuHarness_Tick(PlayerToolManager* entityUI, int frameNum)
 
     s_clickedAt = frameNum;
     std::fprintf(stderr, "[PauseMenu] OnCommand returned\n");
+}
+
+// pausemenu_harness.h: another harness's sequence is over, the run ends through the in-game Quit.
+// Arming = what BANISHED_PAUSEMENU=1 would have read, applied to the current world: the per-world
+// rearm in Tick sees a "new" world on its next call, counts from there, opens the menu one frame
+// later and clicks Quit Game (id 6) after the usual delay.
+extern "C" void PauseMenuHarness_QuitGame() {
+    Init();
+    if (s_opened || s_clicked || s_feeding) return;
+    s_openFrame = 1;
+    s_buttonId  = 6;   // kButton_Quit
+    s_forWorld  = nullptr;
+    std::fprintf(stderr, "[PauseMenu] quit requested - opening on the next frame, click id=6 %d frames later\n",
+                 s_quitDelay);
 }

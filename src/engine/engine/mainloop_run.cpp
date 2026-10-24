@@ -166,6 +166,8 @@
 // here rather than including a standalone/ header so runtime/ keeps no
 // dependency on the harness's include path.
 extern "C" void BootState_MarkFrame();
+// src/app/boot_window.cpp -- the deferred window reveal (NOT RETAIL, boot_window.h).
+extern "C" void BootWindow_MarkFrame();
 
 using RtEngine::MainLoop;
 
@@ -317,6 +319,11 @@ void Engine::MainLoop::Run(UpdateLoop* loop) {
         // src/diag/win/boot_state_watchdog.cpp turns that into STATE=HUNG and an
         // all-thread stack dump instead of a ten-minute caller timeout.
         BootState_MarkFrame();
+
+        // NOT RETAIL. The deferred window reveal (src/app/boot_window.h): the
+        // window CreateDevice left hidden is shown once this first Frame has
+        // presented, whichever loop drew it. A null test after the reveal.
+        BootWindow_MarkFrame();
     }
 
     // Teardown, 0x1800dd4c0..0x1800dd4dd. Both reads of _currentLoop are fresh,

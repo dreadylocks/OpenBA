@@ -68,6 +68,8 @@
 #include "object/External.h"
 #include "object/Type.h"     // B.4 P2: ExternalList::Find takes Object::Type
 #include "system/string_internal.h"
+#include "object/external_set.h"        // block PATHINDEX: rtresset::IndexedFind
+#include "collection/fold_index.h"
 
 namespace RtObject {
 
@@ -108,14 +110,23 @@ static inline bool FilenameLess(const char* a, const char* b) {
 // FUN_18002dd70 for this one element width. Node tail offsets are baked in per
 // instantiation (WAVE2.md "the Set node trap"), so this body serves the 0x18
 // element and nothing else.
+//
+// NOT RETAIL (block PATHINDEX): the tree's hash index answers when it can
+// (src/engine/collection/fold_index.h; the same tree header as rtresset's view).
 static ResourceSet::Node* ResourceSetFind(const ResourceSet* set, const char* key) {
+    rtresset::Node* indexed = nullptr;
+    const bool answered = rtresset::IndexedFind(set, set->_count, key, &indexed);
+    ResourceSet::Node* const fromIndex = reinterpret_cast<ResourceSet::Node*>(indexed);  // CAST-OK: elem_stride
+    if (answered && !OPENBA_PATHINDEX_CHECK)
+        return fromIndex;
     ResourceSet::Node* n = set->_root;
     while (n != nullptr) {
         if (FilenameLess(key, n->element.path._data))      n = n->left;
         else if (FilenameLess(n->element.path._data, key)) n = n->right;
-        else                                              return n;
+        else                                              break;
     }
-    return nullptr;
+    Collection::FoldIndex::Check("resources/external", key, answered, fromIndex, n);
+    return n;
 }
 
 // The in-order successor walk both FindNext and SerializeReferenceTable inline:

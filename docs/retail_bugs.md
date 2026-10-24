@@ -240,3 +240,131 @@ serialized and read by nothing that draws, so the seated transform goes only int
 
 Fix: `fix.rock_seat` (tier 1), default on, render only; `ext.rock_seat_mode` picks sink (1) or
 tilt (2). `src/ext/rock_seat/`, docs/extensions/handins/ROCKSEAT.md.
+
+## 8. "Red squares": cells that turn unbuildable and stay that way
+
+**Symptom.** Reported by a player 2026-10-20 (with a screenshot: one isolated red cell, nothing
+on it, inside an otherwise green placement rectangle). A cell that was buildable turns red in
+the placement overlay for no visible reason. Three shapes:
+- a house demolished and re-placed one cell over: one cell is red;
+- a mountain road built in one drag succeeds, the same road built tile by tile hits red cells;
+- a bridge deleted and then rebuilt over the same span is refused.
+
+**Status: the flat-ground case is reproduced from player saves and fixed (`fix.terrain_resort`,
+below); the bridge case is read in Ghidra; the house's count candidates are unconfirmed.**
+`tools/cell_dump/` (README alongside) dumps a save's cells, with what the classifier says of each
+today, and diffs two dumps; `BANISHED_CELL_TRACE=1` logs the count wraps and re-sorts named below
+while a game runs.
+
+**Reproduced (2026-10-22): flat ground stays "too steep".** A player sent two before / after save
+pairs on two maps, each with the quarry overlay over a narrow strip between a stream and a
+mountain: the green band of the early save has shrunk in the late one. The cell dumps show two
+causes, one retail by design and one a desync:
+1. *Trees hid steep ground.* A cell holding a tree is type 4, which the quarry's mask and the
+   road mask (`0xa17`) accept. When the tree goes, `0x14009dee0` re-sorts the cell from its
+   heights. On one map 474 of the 533 cleared-tree cells that turned red were already steep in
+   the early save at unchanged heights. World generation (`0x1400a12b0`) scatters trees and ore
+   in their templates' windows, height 0.00..1.00 and normal z >= 0.75, while the classifier
+   calls buildable only height <= 0.75 and normal z >= 0.9 (rocks: 0.00..0.25 and >= 0.99, always
+   buildable). A fresh map (seed 12345) has 950 of 20,297 trees and 89 of 2,274 ore on ground the
+   classifier calls steep. So a road placeable over such a tree is not placeable once it is cut.
+2. *The type grid drifts from the heights.* `ResetTerrainHeights` (`0x14009e0e0`: every finished
+   road cell, a building's clear area) zeroes height words and re-sorts no cell. The cells
+   around it keep the type they were sorted with: a cell sorted 10 while steep stays red after
+   the ground under it is flat (cell (163,169) on the first map: height 0.000, normal z 1.000,
+   type 10). The reverse also happens: a removed road is set to type 2 without a classify, and
+   a cell beside a flattened road can be steeper than its stored 2.
+
+A fresh map holds no such cell (classifier and stored type agree everywhere). The four player
+saves hold 227 / 294 / 222 / 445 cells stored 10 that the classifier calls 2, free of any
+entity, count or road.
+
+Fix: `fix.terrain_resort` (tier 1), default on, two levers. (a) After every
+`ResetTerrainHeights`, over its rectangle grown by one cell, and once over the whole map on a
+load, a free cell stored 10 that the classifier now calls 2 is set to 2; a stored 2 is never
+demoted. (b) When a lone occupant (a tree, ore, a goods pile: type 4, no other entity's zone
+on the cell) leaves and the re-sort says 10, the cell becomes 2 instead (ruled 2026-10-22: what
+was placeable over the tree stays placeable; lever in `StartTown_UnmarkResourceCellGrid`, the live
+body of the removal re-sort). Goods piles are in because a hunter's dropped leather or venison,
+picked up from a cell stored 2 that the classifier calls steep, turns that cell red the same way
+(seen in a fix-on run of a player's save). Lever (b) cannot reach cells already cleared in an
+existing save: nothing records that a stored 10 held a tree. `src/ext/terrain_resort/`,
+docs/extensions/handins/TERRAINRESORT.md. With the fix on, the four saves load with 0 such
+cells left.
+
+**What red means.** `Map::TestPlacement` (`0x14009f5d0`, `Player/tool_base_path.cpp`) fails a
+cell on any of: (a) its terrain type (MapCell `+0x29`) is outside the tool's mask; (b) a
+blocker entity (`+0x00`); (c) `footprintCount` (`+0x28`) non-zero while the tested cell is not
+a '.' cell of the new footprint; (d) height. `footprintCount` is one `uint8_t` refcount shared
+by roads (+1 in `Map::PlaceRoadCell` `0x14009c960`, -1 in `Map::FinishRoadCell` `0x14009c640`
+type 2 and `Map::RemovePendingRoad` `0x14009c700`) and the '.' cells of building footprints
+(±1 in the stamp `0x14009d360`, from `ZoneComponent::OnAdded` / `OnRemove`). The loader's
+fix-up pass in `Map::Serialize` (`0x14009f100`) turns a count of 0xFF back into 0, so retail's
+author met the count wrapping below 0.
+
+**The house: its own lifecycle is symmetric.** Placement, clearing, construction, demolition,
+fire / tornado and save / load write and undo the same cells with the same rectangle and
+rotation: blocker and '.' count through `0x14009d360` on add and remove, occupant and terrain
+through `0x14009dc20` / `0x14009dee0` gated on component flag `0x100000` (saved), and a load
+does not re-run `OnAdded`. The single red cell most likely comes from a road sharing the count
+on the house's door cell. Candidates, both unconfirmed:
+1. Removal of one road cell completes twice (the removal tool dragged over a road twice while a
+   worker is already on its first marker): `FinishRoadCell` type 2 subtracts 1 unconditionally,
+   so a door cell holding a road (count 2) reaches 0, and the house's removal wraps it to 0xFF.
+   Red for the rest of the session; a reload clears it (the 0xFF fix-up).
+2. A pending road cancelled while a citizen already carries its `CompleteRoad`, then a save /
+   load: the fix-up pass sets the count to 1 on a road cell, and `RemovePendingRoad`'s
+   `+0x2A == 0xFF` arm never subtracts. Survives a reload.
+
+**The tile-by-tile road: the removal re-sort.** `FinishRoadCell` resets the height grid at the
+finished cell's four corners (`Map::ResetTerrainHeights` `0x14009e0e0`). When an entity later
+leaves a neighbouring cell (a tree, rock or pile cleared, a building demolished), `0x14009dee0`
+re-sorts that cell with `ClassifyTerrain` (`0x14009e2c0`) from the changed heights; on a slope
+it can come out as type 10 (too steep), outside the road mask `0xa17`, and nothing sorts it
+again. In one long drag the neighbouring cells are already queued, and finishing them
+overwrites the re-sorted type. Open: what the height grid `ResetTerrainHeights` writes really
+is, and whether the port's slope sample (`MapQuery_SampleNormal`, `Game/mapquery.cpp`) matches
+retail's `0x14009a810` at the 0.9 threshold.
+
+**The bridge: the far bank must not be road (Ghidra-confirmed).** Deleting a bridge undoes
+everything it wrote (body cells re-sorted back to water, the zone stamp cleared, no road and no
+heights written). `BridgeTool::ValidatePath` (`0x1400fb2d0`, `Player/bridgetool_validate.cpp`)
+runs its clearance ring from the first body cell to `bodyCol + bodyCount` inclusive, so it also
+tests the first bank cell past the water on the higher-index end (east, or south), and that
+cell must hold no road (terrain 0 / 1, `+0x2A` set, or pending). The near bank is never
+tested. A bridge's connecting road on the far bank therefore blocks the rebuild, and the
+preview paints the whole span red without naming the cell. Removing that road tile makes the
+span valid. Looks like an off-by-one, not a rule.
+
+**Levers, if these are ever changed** (each a `fix.*` row, `docs/extensions/DESIGN.md` §3):
+end the bridge ring at the last body cell; clamp the count at 0 in `FinishRoadCell`; exclude
+road-adjacent cells from the removal re-sort. (Re-sorting the cells around a flattened tile is
+`fix.terrain_resort`, above.)
+## 9. A mod package larger than 2 GiB crashes the content load
+
+**Symptom.** A single-file mod package past 2 GiB (the reporter's MegaMod "All In One" build,
+`MegaMod.pkm`, 10,757,625,300 bytes; GitHub fran-cap/OpenBA#13) mounts, and about 2 s into the
+content load the game dies with an access violation in `MaterialInstance::BuildParameters`
+(retail Runtime `0x180103933`). The same content split into seven packages under 2 GiB loads.
+
+**Retail mechanism.**
+- The package index stores each entry's offset as a uint32 (`ReadPackfile` `0x1800b5de3`), and
+  `OpenFile` copies it into the FileInfo's int32 `baseOffset` (`0x1800aca0c`).
+- `FileSystem::ReadFile` (`0x1800ace00`) reads a packed entry at the int32
+  `baseOffset + cursor` (`0x1800ace43`) with `SetFilePointer(h, abs, NULL, FILE_BEGIN)`
+  (`0x1800ace61`): no high dword. An entry in [2, 4) GiB seeks negative and the read fails; an
+  entry past 4 GiB has a stored offset already wrapped mod 2^32 and reads bytes from the wrong
+  place. `GetFileSize` is called with no high dword too.
+- The packer lays the data out contiguously in index order, so the stored offsets decrease
+  exactly where the true offset crosses 4 and 8 GiB (twice in this file).
+
+**Proof it is retail.** Retail and OpenBA crash identically on the file (issue #13 scoping);
+the read path above is byte-faithful in the port.
+
+**Lever.** The packed read's absolute offset. `FileInfo` and `PackageFile` layouts are pinned,
+so the 64-bit offsets live in a side table built when the packages are mounted.
+
+Fix: `fix.large_packages` (tier 1), default on: a mounted package larger than 2 GiB gets 64-bit
+entry offsets, unwrapped from its index and validated, and its packed reads seek 64-bit; packages
+up to 2 GiB are read exactly as retail. `src/ext/large_packages/`,
+docs/extensions/handins/LARGEPKM.md.

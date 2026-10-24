@@ -55,6 +55,25 @@ const Entry kEntries[] = {
       "meet them.",
       0, [](State& s) -> bool& { return s.fix.rock_seat; } },
 
+    // TERRAINRESORT (docs/extensions/handins/TERRAINRESORT.md, docs/retail_bugs.md section 8): a cell
+    // sorted "too steep" is re-sorted once flattening has made the ground under it buildable, after
+    // every flatten and once on a load; a tree, ore or goods pile cleared from steep ground leaves its
+    // cell buildable.
+    // Sim-visible: the healed cells take buildings and trees.
+    { "terrain_resort", Tier::Fix, Class::None, true,
+      "No red squares on flat ground",
+      "Ground stays buildable after a tree on a hill edge is cut, and ground flattened by a road or "
+      "building next to it can be built on again, instead of staying marked as too steep.",
+      0, [](State& s) -> bool& { return s.fix.terrain_resort; } },
+    // LARGEPKM (docs/extensions/handins/LARGEPKM.md, docs/retail_bugs.md section 9): a mod package
+    // larger than 2 GiB is read with 64-bit offsets. Only which bytes a packed read fetches changes;
+    // packages up to 2 GiB, the mod list and the save are retail's. Applies at the next mount.
+    { "large_packages", Tier::Fix, Class::None, true,
+      "Mods larger than 2 GB",
+      "A mod package larger than 2 GB loads instead of crashing the game. Takes effect at the next "
+      "start.",
+      0, [](State& s) -> bool& { return s.fix.large_packages; } },
+
     // Extensions. Each one adds a field to Ext::Extensions and a row here:
     // Tier::Extension, its Class, default true for class A / false for B or C, and for class B or C its
     // formatVersion (>= 1). The id is [a-z0-9_]+ (the unit tests check every row).
@@ -230,6 +249,74 @@ const Entry kEntries[] = {
       "Blends the end of each looping ambient sound into its start, removing the dropout at the loop "
       "point. Takes effect at the next start.",
       0, [](State& s) -> bool& { return s.ext.seamless_loops; } },
+    // DECODEAHEAD (docs/extensions/handins/DECODEAHEAD.md, issue #13): while a resource loads, the
+    // next compressed blocks of its file are decoded on worker threads. The same bytes, the same load
+    // order; the seam IO::CompressedStream::_extDecodeAhead is installed at boot (next start).
+    { "decode_ahead", Tier::Extension, Class::A, true,
+      "Parallel resource decoding",
+      "Decodes the next parts of a resource on other cores while it loads, so large mods load "
+      "faster. Same game data. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.decode_ahead; } },
+    // LOADPROGRESS (docs/extensions/handins/LOADPROGRESS.md, issue #13): while the boot loads the
+    // game data and the enabled mods' lists, the black loader frames show the game's own loading
+    // screen and which mod is loading. Only with a mod enabled; read at the next start.
+    { "load_progress", Tier::Extension, Class::A, true,
+      "Mod loading screen",
+      "While mods load at start-up, shows the loading screen and which mod is loading instead of a "
+      "black window. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.load_progress; } },
+    // ASYNCGPUCREATE (docs/extensions/handins/ASYNCGPUCREATE.md, issue #13): while the loader reads a
+    // resource file, the GPU buffers and textures it makes are created on worker threads. The same
+    // resources, all made before the load ends; the backend reads the request at the next load.
+    { "async_gpu_create", Tier::Extension, Class::A, true,
+      "Parallel graphics loading",
+      "Creates the graphics resources of loading content on other cores, so large mods load faster. "
+      "Same game data. Takes effect at the next load.",
+      0, [](State& s) -> bool& { return s.ext.async_gpu_create; } },
+    // COMPRESSAO (docs/extensions/handins/COMPRESSAO.md, issue #13): the baked AO maps (2D R8 textures
+    // from the resource files) are created as BC4, half the memory, the same look; the encode is kept
+    // in the derived-data cache in the user's documents folder. Read once at boot (next start).
+    { "compress_ao", Tier::Extension, Class::A, true,
+      "Compressed AO maps",
+      "Keeps the models' baked shading maps compressed: half the memory, the same look. Prepared once "
+      "after a mod change, then reused. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.compress_ao; } },
+    // SHAREGPUDATA (docs/extensions/handins/SHAREGPUDATA.md, issue #13): immutable vertex / index
+    // buffers and file-seeded textures with the same descriptor and the same bytes are created once
+    // and shared by every engine object that loads them. Read once at boot (next start).
+    { "share_gpu_data", Tier::Extension, Class::A, true,
+      "Shared graphics data",
+      "Keeps one copy of graphics data that several models or mods load identically: less memory, "
+      "the same look. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.share_gpu_data; } },
+    // CREATEONDEMAND (docs/extensions/handins/CREATEONDEMAND.md, issue #13): static vertex / index
+    // buffers and file-seeded textures are created at their first use (or when the world places a
+    // mesh that uses them) instead of at load; their bytes are read again from the mapped package.
+    // Read once at boot (next start). ON by default (the user ruled 2026-10-23).
+    { "create_on_demand", Tier::Extension, Class::A, true,
+      "Load graphics on demand",
+      "Prepares a model's graphics when the game first shows it instead of at start-up: much less "
+      "memory with large mods. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.create_on_demand; } },
+    // STREAMCACHE (docs/extensions/handins/STREAMCACHE.md, issue #13): the part of each compiled
+    // resource a load reads (all of a small one; a mesh's or texture's header and size fields when
+    // create_on_demand skips the payloads) is kept decoded in the derived-data cache and read from
+    // there at the next start, instead of through the compressed stream. Read once at boot (next
+    // start). ON by default, like the other derived-cache rows.
+    { "stream_cache", Tier::Extension, Class::A, true,
+      "Cache decoded resources",
+      "Keeps the small part of every resource file the game reads at start-up decoded on disk "
+      "(in the cache folder), so the next start skips the decompression. Takes effect at the next start.",
+      0, [](State& s) -> bool& { return s.ext.stream_cache; } },
+    // PKGCACHE (docs/extensions/handins/PKGCACHE.md, issue #13): the merged directory of the mounted
+    // packages, built at every mount by one search and one insert per package entry, is kept in the
+    // derived-data cache and built back node for node at the next mount of the same packages. Read
+    // at each mount (live).
+    { "package_cache", Tier::Extension, Class::A, true,
+      "Remembered mod file lists",
+      "Keeps the combined file list of the mounted mods in the cache folder, so starting the game or "
+      "reloading mods skips rebuilding it. Same game data.",
+      0, [](State& s) -> bool& { return s.ext.package_cache; } },
     // NOFOG (docs/extensions/handins/NOFOG.md): the fog is taken off the finished lighting each frame, so
     // the far map stays clear when the camera is zoomed out. Class A: a picture-only change, no sim effect,
     // nothing saved, live. OFF by default: how the map looks is the player's choice (like eye_camera).
@@ -287,6 +374,16 @@ const ValueKey kValueKeys[] = {
     // fix's bool is the off switch.
     { "rock_seat_mode", "rock_seat", 1, 2, 2,
       [](State& s) -> int32_t& { return s.val.rock_seat_mode; }, nullptr, 0 },
+    // COMPRESSAO: the derived-data cache's size cap in MB (src/ext/derived_cache/derived_cache.h "THE
+    // CAP"). Owned by compress_ao, the cache's first user; a later user shares the one cache and the
+    // one cap. 4096 holds a MegaMod 7-part boot's AO maps (~1.04 GB) four times over.
+    { "derived_cache_mb", "compress_ao", 256, 65536, 4096,
+      [](State& s) -> int32_t& { return s.val.derived_cache_mb; }, nullptr, 0 },
+    // CREATEONDEMAND section 7: minutes a made object may go unused before it is given back (released,
+    // re-made from its package at the next use); 0 = never. Read once at boot. Default 0 until re-makes
+    // are prefetched: a re-made object is otherwise created on the render thread in the frame that draws it.
+    { "create_on_demand_idle_min", "create_on_demand", 0, 120, 0,
+      [](State& s) -> int32_t& { return s.val.create_on_demand_idle_min; }, nullptr, 0 },
 };
 
 constexpr int kValueKeyCount = static_cast<int>(sizeof(kValueKeys) / sizeof(kValueKeys[0]));

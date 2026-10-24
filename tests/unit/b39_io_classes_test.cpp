@@ -132,39 +132,8 @@ UNIT_TEST(b39_io_encoding_ctor_is_one_vptr_store_with_retails_constants) {
 // -- rows 14 / 15 / 150 / 109.
 // ===========================================================================
 
-// Host stand-ins for the out-of-line virtual bodies (src/engine/io/
-// serialize_family.cpp), so the REAL classes' vtables land in the test binary.
-// The tests below never dispatch them.
-namespace IO {
-void BinaryReader::Skip() {}
-#define B39_IO_RW_STUBS(CLS)                                                      \
-    void CLS::SerializeCharArray  (int, char*,          const char*) {}          \
-    void CLS::SerializeBoolArray  (int, bool*,          const char*) {}          \
-    void CLS::SerializeFloatArray (int, float*,         const char*) {}          \
-    void CLS::SerializeUInt64Array(int, uint64_t*,      const char*) {}          \
-    void CLS::SerializeInt64Array (int, int64_t*,       const char*) {}          \
-    void CLS::SerializeUIntArray  (int, uint32_t*,      const char*) {}          \
-    void CLS::SerializeIntArray   (int, int32_t*,       const char*) {}          \
-    void CLS::SerializeUShortArray(int, uint16_t*,      const char*) {}          \
-    void CLS::SerializeShortArray (int, int16_t*,       const char*) {}          \
-    void CLS::SerializeUCharArray (int, unsigned char*, const char*) {}          \
-    void CLS::SerializeSCharArray (int, signed char*,   const char*) {}          \
-    void CLS::SerializeChar  (char&,          const char*) {}                    \
-    void CLS::SerializeBool  (bool&,          const char*) {}                    \
-    void CLS::SerializeFloat (float&,         const char*) {}                    \
-    void CLS::SerializeUInt64(uint64_t&,      const char*) {}                    \
-    void CLS::SerializeInt64 (int64_t&,       const char*) {}                    \
-    void CLS::SerializeUInt  (uint32_t&,      const char*) {}                    \
-    void CLS::SerializeInt   (int32_t&,       const char*) {}                    \
-    void CLS::SerializeUShort(uint16_t&,      const char*) {}                    \
-    void CLS::SerializeShort (int16_t&,       const char*) {}                    \
-    void CLS::SerializeUChar (unsigned char&, const char*) {}                    \
-    void CLS::SerializeSChar (signed char&,   const char*) {}                    \
-    void CLS::SerializeBytes (int, void*,     const char*) {}
-B39_IO_RW_STUBS(BinaryReader)
-B39_IO_RW_STUBS(BinaryWriter)
-#undef B39_IO_RW_STUBS
-}  // namespace IO
+// The out-of-line virtual bodies are the real ones: src/engine/io/serialize_family.cpp
+// is linked (tests/unit/sources.cmake, issue #13). The tests below never dispatch them.
 
 namespace {
 

@@ -17,25 +17,26 @@
 // WHAT THE ANSWER DEPENDS ON (read off the body, every input):
 //   1. the request's characters                      -> the KEY
 //   2. `appendIdentifier`                            -> the KEY
-//   3. the factory's path-stack top (filename, directory) -> the memo is used
+//   3. the factory's path-stack top (filename, directory). The memo is used
 //      ONLY while the stack is EMPTY (the caller tests it); a request made
-//      while an .rsc is being parsed always runs the body
-//   4. `FileSystem::_singleton` and its `_dataDirectory` characters, which
-//      build the probed candidate                    -> the CONTEXT
-//   5. whether the candidate exists. Three probes decide it: the gated package
-//      probe, GetFileAttributesW (gated), the ungated package probe. The memo
-//      STORES ONLY an answer a PACKAGE probe gave (the caller passes that
-//      flag). If the package directory holds the candidate, the outcome is
-//      "found" whatever the two gate bytes and the disk say (gate set: the
-//      first probe finds it; gate clear: the disk probe finds it or the retry
-//      does), so such an answer depends on the package directory alone
-//                                                    -> the CONTEXT's generation
-//      (src/engine/io/packfile_generation.h, bumped on every change of
-//      `FileSystem::_packfileIndex`). A "not found" answer, or one the disk
-//      probe gave, is never stored: those requests run the body every time.
-// When the context differs from the one the entries were made under, every
-// entry is dropped before the lookup. So an entry can only be returned under
-// the inputs that produced it.
+//      while an .rsc is being parsed always runs the body. (Nothing in this
+//      tree pushes the stack today: `PushPath` has no caller.)
+//   4. whether the candidate `<dataDir><stackDir><dir><fname>_<ident>.crs`
+//      exists (three probes: the gated package probe, GetFileAttributesW, the
+//      ungated package probe). Block PATHINDEX: WITH AN EMPTY STACK THE ANSWER
+//      DOES NOT DEPEND ON IT. "Found" builds `<stackDir><dir><fname>.<ext>`,
+//      "not found" builds `<dir><fname>.<ext>`, and an empty stack makes
+//      `stackDir` a null Filename, which `operator+` (string.cpp: a null or
+//      empty side ADOPTS the other side) turns into exactly `<dir>`'s
+//      characters. The empty filename's fallback reads the stack's filename,
+//      also null, so `fname` and `ext` come out empty either way. The data
+//      directory and the package directory feed only the candidate, so they
+//      do not feed the answer either.
+// So with an empty stack the answer is a function of the key alone, and an
+// entry stays true for the life of the process: there is no context to drop.
+// (Block SAVELOAD's first version kept only package answers under a
+// filesystem / data-directory / package-generation context; PATHINDEX dropped
+// both restrictions; the debug exe's check in external_path.cpp covers it.)
 //
 // WHAT A HIT SKIPS. Only work with no effect outside the body: its own
 // allocations, the probes (reads; GetFileAttributesW is a stat), the `g_pc`
@@ -52,21 +53,17 @@
 // it first), so the state below is never touched by two threads at once.
 // ============================================================================
 
-#include <cstdint>
-#include <string>
+#include <cstddef>
 
 namespace RtObject {
 
-// The cached answer for (path[0..len), appendIdentifier) under the context
-// (fs, dataDir, generation), or null. A context that differs from the stored
-// one drops every entry first. `dataDir` may be null.
-const std::string* ExpandMemoFind(const char* path, int len, bool appendIdentifier,
-                                  const void* fs, const char* dataDir, uint32_t generation);
+// The cached answer for (path[0..len), appendIdentifier), NUL-terminated, or
+// null. When the answer is the request's own characters the result is `path`
+// itself, so `path` must be NUL-terminated at `len` (a Filename's buffer is).
+const char* ExpandMemoFind(const char* path, int len, bool appendIdentifier);
 
-// Remember `result` (resultLen characters) for that request under that context.
-void ExpandMemoStore(const char* path, int len, bool appendIdentifier,
-                     const void* fs, const char* dataDir, uint32_t generation,
-                     const char* result, int resultLen);
+// Remember `result` (resultLen characters) for that request.
+void ExpandMemoStore(const char* path, int len, bool appendIdentifier, const char* result, int resultLen);
 
 // For the unit tests: the entry count, and a full reset.
 size_t ExpandMemoSize();

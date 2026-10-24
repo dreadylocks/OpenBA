@@ -159,6 +159,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <new>                // placement new -- see ReloadEntry::file below
 
 #include "io/FileSystem.h"
@@ -179,6 +180,10 @@
 #include "io/Modification.h"         // RtColl_ArrayFilenameDtor_1800098d0
 #include "../collection/set_avl_pathid.h"          // rtpathid::Insert / SubtreeFree, PathIdNode / PathIdSet
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
+#include "collection/fold_index.h"   // block PKGCACHE: OPENBA_PATHINDEX_CHECK (the debug exe's check)
+
+#include <cstring>
+#include <vector>
 
 namespace RtIO {
 
@@ -271,6 +276,117 @@ PathIdNode* SnapshotFind(PathIdNode* node, const char* search) {
     return nullptr;
 }
 
+// BLOCK PKGCACHE (NOT RETAIL): the snapshot as an open-addressing table over the compiled paths'
+// own buffers (act 1 has the exactness argument). The table holds a reference on each key's
+// buffer, the one retail's tree node takes, so a key stays readable until the table goes.
+class SnapshotTable {
+public:
+    explicit SnapshotTable(int32_t expected) {
+        size_t cap = 1024;
+        while (cap < static_cast<size_t>(expected > 0 ? expected : 0) * 2)
+            cap *= 2;
+        _slots.assign(cap, Slot{});
+        _held.reserve(static_cast<size_t>(expected > 0 ? expected : 0));
+    }
+
+    // rtpathid::Insert's answer: an equal key keeps its first value.
+    void Insert(const System::String& key, uint32_t value) {
+        if ((_used + 1) * 2 > _slots.size())
+            Grow();
+        const uint64_t h = Collection::FoldIndex::Hash(key._data);
+        size_t i = static_cast<size_t>(h) & (_slots.size() - 1);
+        while (_slots[i].key != nullptr) {
+            if (_slots[i].hash == h && std::strcmp(_slots[i].key, key._data) == 0)
+                return;
+            i = (i + 1) & (_slots.size() - 1);
+        }
+        _held.push_back(key);   // the reference (String's copy ctor adopts the buffer)
+        _slots[i] = Slot{ h, key._data, value };
+        ++_used;
+    }
+
+    // SnapshotFind's answer: the value under the key with exactly these characters, or null.
+    const uint32_t* Find(const char* key) const {
+        const uint64_t h = Collection::FoldIndex::Hash(key);
+        for (size_t i = static_cast<size_t>(h) & (_slots.size() - 1); _slots[i].key != nullptr;
+             i = (i + 1) & (_slots.size() - 1)) {
+            if (_slots[i].hash == h && std::strcmp(_slots[i].key, key) == 0)
+                return &_slots[i].value;
+        }
+        return nullptr;
+    }
+
+private:
+    struct Slot {
+        uint64_t    hash = 0;
+        const char* key = nullptr;
+        uint32_t    value = 0;
+    };
+
+    void Grow() {
+        std::vector<Slot> old;
+        old.swap(_slots);
+        _slots.assign(old.size() * 2, Slot{});
+        for (const Slot& s : old) {
+            if (s.key == nullptr)
+                continue;
+            size_t i = static_cast<size_t>(s.hash) & (_slots.size() - 1);
+            while (_slots[i].key != nullptr)
+                i = (i + 1) & (_slots.size() - 1);
+            _slots[i] = s;
+        }
+    }
+
+    std::vector<Slot> _slots;
+    std::vector<System::String> _held;
+    size_t _used = 0;
+};
+
+// BLOCK PKGCACHE (NOT RETAIL, exact): act 1's compiled path of each resource, kept for act 3, which
+// asks GetCompiledPath again for the very same resources (~376,000 under MegaMod, each answer four
+// splits, five concatenations and their allocations). The answer is a function of the path's
+// characters and the data directory's characters alone (BuildCompiledPath, external_compiled.cpp:
+// the rest are literals); the data directory is set once at boot (filesystem_setupdirs.cpp) and
+// ClosePackages / LoadPackages between the two acts touch only the packages. So act 3 takes the
+// kept answer when the resource's path has the characters act 1 compiled, and runs GetCompiledPath
+// otherwise. The kept answer shares its buffer with act 1's copy where retail's is a fresh one with
+// the same characters; act 3 only reads it (the snapshot, GetPackfileId, ExistsInPackfile,
+// PlatformFileExists), and Filename(const String&)'s AdjustDelimiters finds it already normalised.
+// A pointer match is not trusted alone: the path's characters decide. The debug exe runs
+// GetCompiledPath behind every reuse and compares ([CompiledReuse] MISMATCH).
+class CompiledPaths {
+public:
+    explicit CompiledPaths(int32_t expected) {
+        _kept.reserve(static_cast<size_t>(expected > 0 ? expected : 0));
+    }
+
+    // Act 1, in its FindNext order. The Strings share the buffers (a copy only adds a reference).
+    void Keep(const void* resource, const System::Filename& raw, const System::Filename& compiled) {
+        _kept.push_back(Entry{ resource, raw.AsString(), compiled.AsString() });
+    }
+
+    // Act 3 walks the same resources in the same order, so the next kept entry is normally this
+    // resource's; anything else (or a path that changed) answers null and act 3 compiles it.
+    const System::String* Next(const void* resource, const System::Filename& raw) {
+        if (_cursor >= _kept.size() || _kept[_cursor].resource != resource)
+            return nullptr;
+        const Entry& e = _kept[_cursor];
+        ++_cursor;
+        if (e.raw._data == nullptr || raw._data == nullptr || std::strcmp(e.raw._data, raw._data) != 0)
+            return nullptr;
+        return &e.compiled;
+    }
+
+private:
+    struct Entry {
+        const void*    resource;
+        System::String raw;
+        System::String compiled;
+    };
+    std::vector<Entry> _kept;
+    size_t _cursor = 0;
+};
+
 // THE ONE WIN32 CALL, isolated — see the banner. `GetFileAttributesW` on a
 // UTF-16 copy of the path; anything but INVALID_FILE_ATTRIBUTES counts as
 // present, INCLUDING a directory. Retail compares against -1 and nothing else
@@ -347,7 +463,19 @@ void Modification::SetupFileSystem() {
     const ::Object::ExternalFactory* const extFactoryObj = extFactory;
 
     // ========================= ACT 1 — SNAPSHOT =============================
-    PathIdSet snapshot = { nullptr, 0, 0 };                    // [RBP-0x49]
+    // BLOCK PKGCACHE (NOT RETAIL, exact): the snapshot is a hash table (SnapshotTable above) from the
+    // compiled path's characters to its packfile id instead of retail's case-SENSITIVE AVL tree (a ~376,000-node
+    // tree under MegaMod, two signed-strcmp descents per resource). The tree is a local of this
+    // function: nothing but act 3's SnapshotFind reads it and act 5 frees it, so what it holds is
+    // only the answers SnapshotFind gives. Its comparator is a total order whose equality is
+    // byte equality, so SnapshotFind finds the node whose key has the very characters searched
+    // for, and rtpathid::Insert keeps the FIRST value inserted under a key (an equal key inserts
+    // nothing): the table's Insert answers the same. A compiled path is never null (it always
+    // holds "_" and ".crs"), so the null arms never run. The debug exe still builds retail's tree
+    // beside the table and compares every lookup ([Snapshot] MISMATCH).
+    SnapshotTable snapshotIndex(extFactory->_resources._count);   // sized for one key per resource
+    PathIdSet snapshot = { nullptr, 0, 0 };                    // [RBP-0x49] (the debug exe's check only)
+    CompiledPaths compiledPaths(extFactory->_resources._count);   // PKGCACHE: act 1's answers, for act 3
 
     for (const ::Object::External* ext = extFactoryObj->FindNext(kExternalTypeId, nullptr);
          ext != nullptr; ) {
@@ -359,13 +487,17 @@ void Modification::SetupFileSystem() {
             System::Filename raw(ext->GetPath());        // 0x1800aec29
             ::new (&compiled) System::Filename(                // 0x1800aec36
                 ::Object::ExternalFactory::GetCompiledPath(raw));
+            compiledPaths.Keep(ext, raw, compiled);            // PKGCACHE: for act 3
         }  // ~raw releases here, exactly where retail's 0x1800aec3c release sat
 
         const uint32_t id = fsObj->GetPackfileId(compiled);    // 0x1800aec9f
-        PathIdNode* outSlot = nullptr;                         // [RBP-0x4?]
-        rtpathid::Insert(&snapshot,                         // 0x1800aecb7
-                         &outSlot,
-                         &compiled._data, &id);
+        snapshotIndex.Insert(compiled.AsString(), id);         // PKGCACHE: in place of the insert
+        if (OPENBA_PATHINDEX_CHECK) {
+            PathIdNode* outSlot = nullptr;                     // [RBP-0x4?]
+            rtpathid::Insert(&snapshot,                     // 0x1800aecb7
+                             &outSlot,
+                             &compiled._data, &id);
+        }
 
         ext = extFactoryObj->FindNext(kExternalTypeId, ext);   // 0x1800aecc8
         // ~compiled releases here, exactly where retail's 0x1800aecd3 release sat.
@@ -402,15 +534,37 @@ void Modification::SetupFileSystem() {
         System::Filename compiled;                             // [RBP+0x7f]
         {
             System::Filename raw(ext->GetPath());        // 0x1800aedc7  [RBP-0x59]
-            ::new (&compiled) System::Filename(                // 0x1800aedd4
-                ::Object::ExternalFactory::GetCompiledPath(raw));
+            // PKGCACHE: act 1's answer when the path is unchanged (CompiledPaths above).
+            const System::String* const kept = compiledPaths.Next(ext, raw);
+            if (kept != nullptr) {
+                ::new (&compiled) System::Filename(*kept);
+                if (OPENBA_PATHINDEX_CHECK) {
+                    const System::Filename body(::Object::ExternalFactory::GetCompiledPath(raw));
+                    if (body._data == nullptr || std::strcmp(body._data, compiled._data) != 0) {
+                        std::fprintf(stderr, "[CompiledReuse] MISMATCH path=\"%s\"\n", raw._data);
+                        std::fflush(stderr);
+                    }
+                }
+            } else {
+                ::new (&compiled) System::Filename(            // 0x1800aedd4
+                    ::Object::ExternalFactory::GetCompiledPath(raw));
+            }
         }  // ~raw releases here, exactly where retail's 0x1800aedda release sat
 
-        PathIdNode* const hit = SnapshotFind(snapshot.root, compiled._data);
+        // PKGCACHE: the table's answer (see act 1); the debug exe compares it with retail's descent.
+        const uint32_t* const hit = snapshotIndex.Find(compiled._data);
+        const bool inSnapshot = hit != nullptr;
+        if (OPENBA_PATHINDEX_CHECK) {
+            PathIdNode* const node = SnapshotFind(snapshot.root, compiled._data);
+            if ((node != nullptr) != inSnapshot || (inSnapshot && node->element.value != *hit)) {
+                std::fprintf(stderr, "[Snapshot] MISMATCH key=\"%s\"\n", compiled._data);
+                std::fflush(stderr);
+            }
+        }
 
         // `TEST RBX,RBX` at 0x1800aeefd is redundant on the found path and is
         // kept; the id compare is what decides.
-        if (hit != nullptr && hit->element.value != fsObj->GetPackfileId(compiled)) {
+        if (inSnapshot && *hit != fsObj->GetPackfileId(compiled)) {
             System::Filename compiled2;                         // [RBP+0x77]
             {
                 System::Filename raw2(ext->GetPath());   // 0x1800aef22  [RBP-0x51]

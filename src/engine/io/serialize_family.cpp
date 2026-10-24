@@ -206,6 +206,9 @@
 
 #include "io/Serializer.h"
 #include "io/Stream.h"   // B3X W0: the stream is called by name
+#include "io/FileStream.h"   // IO::CompressedFileStream (the array slots' exact-type test)
+
+#include <typeinfo>
 
 // ---- stream dispatch ------------------------------------------------------
 // Shapes (1) and (2) tail-jump through the STREAM's vtable: Write (+0x10,
@@ -238,11 +241,51 @@
 //     `this->Serialize<T>(arr[i], nullptr)`. The minted tables that once made
 //     a raw slot read necessary were retired in B.3.9, and both classes are
 //     `final`, so the member the call reaches is the one the slot held.
+//     (Issue #13: on a compressed stream the READER's arrays take an exact
+//     batched body instead; ReadArrayFromWindows below says why it is exact.)
 //
 // `Visitor`'s 24 bodies are `= {}` inline in the header: the shipped bodies are
 // three bytes of `RET` each, and giving each its own out-of-line function would
 // invent distinctions the binary does not make.
 namespace IO {
+
+// ---------------------------------------------------------------------------
+// NOT RETAIL: the reader's array slots, an exact perf body (issue #13)
+// ---------------------------------------------------------------------------
+// Retail's array body (shape 3 above) is one virtual SerializeX per element,
+// each a tail jump to Stream::Read(sizeof(T), &arr[i]) with the result ignored.
+// On a compressed stream -- every External::Load and every package read -- that
+// is one SetWindow and one memcpy per byte of every byte array (strings,
+// ImageBuffer and mesh blobs): a third of the loader thread on a large mod set.
+//
+// When the stream is EXACTLY a CompressedFileStream or a CompressedMemoryStream,
+// the elements go through CompressedStream::ReadArray instead, which makes the
+// same Read calls retail makes except the ones it proves are a plain copy
+// inside the active window, and batches those into one memcpy (its banner, in
+// compressed_stream_read.cpp, has the proof). Why that is not observable here:
+//   * The scalar slots are a raw Stream::Read of sizeof(T) bytes: no byte
+//     swap, no per-element transform, nothing but the stream sees an element,
+//     so the batch is exact for all eleven element types, not only the
+//     byte-sized ones.
+//   * BinaryReader is `final` and nothing re-stamps its vptr (the minted tables
+//     were retired in B.3.9), so the per-element call retail re-dispatches
+//     always reaches the scalar body above; there is no override to skip.
+//   * The exact-type test keeps the proof honest: neither class overrides Read
+//     (Stream.h, FileStream.h: slots 7 and 8 only), and a future subclass that
+//     did would not match and would take retail's loop. Every other stream
+//     (MemoryStream, FileStream, TextFileStream, the ext text reader) takes
+//     retail's loop unchanged.
+// The writer's array slots stay per element: a save is small, and the write
+// path's SetWindow grows the stream, which this proof does not cover.
+static bool ReadArrayFromWindows(Stream* s, int count, int32_t elemSize, void* arr) {
+    if (s == nullptr)
+        return false;   // retail's loop faults on the first element, as before
+    const std::type_info& t = typeid(*s);
+    if (t != typeid(CompressedFileStream) && t != typeid(CompressedMemoryStream))
+        return false;
+    static_cast<CompressedStream*>(s)->ReadArray(count, elemSize, arr);
+    return true;
+}
 
 #define RT_RW_READER_BODY(METHOD, T)                                           \
     void BinaryReader::Serialize##METHOD(T& v, const char* name) {             \
@@ -253,6 +296,8 @@ namespace IO {
                                                 const char* name) {            \
         (void)name;                 /* dropped, not forwarded */               \
         if (count <= 0) return;                                                \
+        if (ReadArrayFromWindows(stream, count, (int32_t)sizeof(T), arr))      \
+            return;                 /* exact perf body, see above */           \
         for (int32_t i = 0; i < count; ++i)                                    \
             this->Serialize##METHOD(arr[i], nullptr);                          \
     }

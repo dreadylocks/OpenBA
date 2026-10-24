@@ -9,24 +9,24 @@
 #include "object/expand_memo.h"
 
 #include <cstring>
+#include <string>
 #include <unordered_map>
 
 namespace RtObject {
 
 namespace {
 
-// More distinct requests than this (a whole game asks for ~20k) only means
-// something is generating names; drop everything rather than grow.
-constexpr size_t kMaxEntries = 1u << 16;
+// More distinct requests than this only means something is generating names;
+// drop everything rather than grow. (Measured, block PATHINDEX: the retail game
+// asks for ~20k, the seven-part MegaMod between 262k and 524k; the old 65,536
+// bound emptied the memo over and over during a MegaMod load.)
+constexpr size_t kMaxEntries = 1u << 20;
 
 struct Memo {
-    // The context the entries were made under.
-    const void* fs = nullptr;
-    bool        hasDataDir = false;
-    std::string dataDir;
-    uint32_t    generation = 0;
-    bool        valid = false;   // false until the first context is recorded
-
+    // An EMPTY value means "the answer is the request's own characters", which is
+    // what nearly every request gets (measured: all but 4 of 262,144 under
+    // MegaMod). An answer is never empty (it holds at least the '.'), so the
+    // two cannot be confused.
     std::unordered_map<std::string, std::string> entries;
     std::string key;             // reused scratch: no allocation per lookup
 };
@@ -38,53 +38,34 @@ Memo& State() {
     return *m;
 }
 
-bool SameContext(const Memo& m, const void* fs, const char* dataDir, uint32_t generation) {
-    if (!m.valid || m.fs != fs || m.generation != generation)
-        return false;
-    if ((dataDir != nullptr) != m.hasDataDir)
-        return false;
-    return dataDir == nullptr || std::strcmp(dataDir, m.dataDir.c_str()) == 0;
-}
-
-// Make the stored context this one, dropping every entry when it changes.
-void UseContext(Memo& m, const void* fs, const char* dataDir, uint32_t generation) {
-    if (SameContext(m, fs, dataDir, generation))
-        return;
-    m.entries.clear();
-    m.fs = fs;
-    m.hasDataDir = (dataDir != nullptr);
-    m.dataDir.assign(dataDir != nullptr ? dataDir : "");
-    m.generation = generation;
-    m.valid = true;
-}
-
 void BuildKey(Memo& m, const char* path, int len, bool appendIdentifier) {
     m.key.assign(path, static_cast<size_t>(len));
-    m.key.push_back(appendIdentifier ? '\1' : '\0');
+    m.key.push_back(static_cast<char>(appendIdentifier ? 1 : 0));
 }
 
 }  // namespace
 
-const std::string* ExpandMemoFind(const char* path, int len, bool appendIdentifier,
-                                  const void* fs, const char* dataDir, uint32_t generation) {
+const char* ExpandMemoFind(const char* path, int len, bool appendIdentifier) {
     Memo& m = State();
-    UseContext(m, fs, dataDir, generation);
     if (m.entries.empty())
         return nullptr;
     BuildKey(m, path, len, appendIdentifier);
     auto it = m.entries.find(m.key);
-    return it == m.entries.end() ? nullptr : &it->second;
+    if (it == m.entries.end())
+        return nullptr;
+    return it->second.empty() ? path : it->second.c_str();
 }
 
-void ExpandMemoStore(const char* path, int len, bool appendIdentifier,
-                     const void* fs, const char* dataDir, uint32_t generation,
-                     const char* result, int resultLen) {
+void ExpandMemoStore(const char* path, int len, bool appendIdentifier, const char* result, int resultLen) {
     Memo& m = State();
-    UseContext(m, fs, dataDir, generation);
     if (m.entries.size() >= kMaxEntries)
         m.entries.clear();
     BuildKey(m, path, len, appendIdentifier);
-    m.entries[m.key].assign(result, static_cast<size_t>(resultLen));
+    std::string& value = m.entries[m.key];
+    if (resultLen == len && std::memcmp(result, path, static_cast<size_t>(len)) == 0)
+        value.clear();
+    else
+        value.assign(result, static_cast<size_t>(resultLen));
 }
 
 size_t ExpandMemoSize() {
@@ -92,9 +73,7 @@ size_t ExpandMemoSize() {
 }
 
 void ExpandMemoClear() {
-    Memo& m = State();
-    m.entries.clear();
-    m.valid = false;
+    State().entries.clear();
 }
 
 }  // namespace RtObject

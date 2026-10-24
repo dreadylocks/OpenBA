@@ -32,5 +32,6 @@ Not part of OpenBA's code
 -------------------------
 The typeface is NOT part of OpenBA and is NOT covered by OpenBA's GPL-3.0
 licence (LICENSE). It is Manfred Klein's work under his own terms above;
-OpenBA only reads it at run time. The font files are not in OpenBA's source
-repository; they ship in the release package only.
+OpenBA only reads it at run time. The two files are kept unchanged under
+tools/release/fonts/ in OpenBA's source repository, with this notice, so the
+release packages can be built from the repository alone.

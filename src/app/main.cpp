@@ -40,6 +40,7 @@
 #include "object/TypeInfo.h"           // ENDGAME B.3.9 RF: BaseTypeInfo::_firstTypeInfo for the self-test
 #include "platform_window.h"   // Phase D.4 SDL W6: the pump observer
 #include "platform_app.h"      // Platform::App: the lifecycle hooks around SDL_Init / SDL_Quit
+#include "platform_settings.h" // Platform::SetUserDirOverride (BANISHED_USER_DIR, tools/game_dirs.sh)
 #include "engine/MainLoop.h"   // ENDGAME B.3.9 SS2: Engine::MainLoop::_singleton
 // WAVE 11 follow-up 5 (lane TINFO): the BaseTypeInfo::factoryFn dispatch census.
 
@@ -1005,6 +1006,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     setvbuf(stderr, NULL, _IONBF, 0);
     LoadTime::Stamp("main");   // NOT RETAIL: print-only (the logs are open)
 
+    // ENDGAME C.3: the ONE read of the environment. Every BANISHED_* flag lands
+    // in the Options struct here and nothing else in standalone/ calls getenv.
+    // It also expands BANISHED_STRESS=1 into its bundle (autostart, medium map,
+    // uncapped, pinned camera, demo buildings, in-game quit), which is why it
+    // must come before every other reader — HarnessGuardUnattendedBoot below
+    // keys off the autostart flag that bundle sets. Before Cpu::Boot, because
+    // the user-dir override below must be in place when Boot reads settings.cfg.
+    OptionsInit();
+    // BANISHED_USER_DIR (harness, tools/game_dirs.sh): the whole "<Documents>\Banished"
+    // folder. The platform layer never reads Options, so the app hands it over once.
+    Platform::SetUserDirOverride(Opt().userDir);
+
     // Block CPULIMIT (NOT RETAIL; src/platform/common/cpu/topology.h): settings.cfg's `sys.cpu_limit`
     // -> the process affinity mask, then the core topology every thread-count rule reads
     // (src/platform/common/cpu/roster.h). FIRST, before any thread of ours exists -- the crash
@@ -1015,14 +1028,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     // Open dedicated crash log (FILE_FLAG_WRITE_THROUGH) — survives the OS
     // tearing the crashing thread down before stderr buffers commit.
     CrashHandler_OpenLog();
-
-    // ENDGAME C.3: the ONE read of the environment. Every BANISHED_* flag lands
-    // in the Options struct here and nothing else in standalone/ calls getenv.
-    // It also expands BANISHED_STRESS=1 into its bundle (autostart, medium map,
-    // uncapped, pinned camera, demo buildings, in-game quit), which is why it
-    // must come before every other reader — HarnessGuardUnattendedBoot below
-    // keys off the autostart flag that bundle sets.
-    OptionsInit();
 
     // The stress town's own state (home-loss watch, the [Stress] banner).
     StressHarness_Init();
@@ -1161,13 +1166,16 @@ int main(int argc, char** argv) {
     setvbuf(stderr, NULL, _IONBF, 0);
     LoadTime::Stamp("main");   // NOT RETAIL: print-only (the logs are open)
 
+    // The one environment read, then the user-dir override, before Cpu::Boot reads
+    // settings.cfg: as in WinMain.
+    OptionsInit();
+    Platform::SetUserDirOverride(Opt().userDir);
+
     // Block CPULIMIT, as in WinMain. On Linux the order is load-bearing: sched_setaffinity
     // binds only the calling thread and the threads created after it.
     Cpu::Boot();
 
     CrashHandler_OpenLog();
-
-    OptionsInit();
 
     StressHarness_Init();
 

@@ -65,6 +65,7 @@
 #include "Component/UIComponent.h"
 #include "application/Application.h"   // Application::IsPaused (Update)
 #include "Game/GameSettings.h"          // g_gameSettings->autoPause (Update)
+#include "showroom.h"                   // HARNESS: Showroom_Enabled (Update, the paused arm)
 #include "ext/toolbar/toolbar.h"         // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTHOSTS.md): RestoreWindow
 
 // ============================================================
@@ -889,6 +890,13 @@ int32_t PlayerToolManager::Update(System::Time time, bool inputFlag) {
     if (::Application::Application::_singleton->IsPaused()) {
         if (g_gameSettings->autoPause)   // GameSettings +0x18
             OpenPauseMenu();             // 0x140101ce0
+        // HARNESS, not retail (BANISHED_SHOWROOM, src/diag/showroom.h): the application is paused
+        // while its window has no focus, and this arm then skips the camera update, so a showroom
+        // left in the background kept its camera wherever it was while its shot sequence went on
+        // (whole passes of the same frame). Under the showroom only, the camera still follows the
+        // harness's pin; no input is read (inputFlag 0). Normal play keeps retail's arm unchanged.
+        if (Showroom_Enabled())
+            UpdateCamera(0, time._ticks);
         return 1;
     }
 

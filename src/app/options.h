@@ -43,6 +43,11 @@ struct Options {
                                         //   --background sets it; the launcher scripts of the packaging PR also set it)
     bool metalStats = false;            // BANISHED_METAL_STATS: Metal allocation / frame diagnostics (tools/macos/handtest/run_handtest.sh sets it)
 
+    // ── harness: a second game directory (tools/game_dirs.sh) ─────────────
+    const char* userDir = nullptr;      // BANISHED_USER_DIR: replaces "<Documents>\Banished" AS A WHOLE (the directory itself
+                                        //   holds settings.cfg, Save\, Cache\); tools/game_dirs.sh sets it for the functional
+                                        //   dir. Handed to Platform::SetUserDirOverride by main.cpp; nothing else reads it.
+
     // ── harness drivers: menu → game (src/diag/autostart.cpp) ──────────────
     bool        autostart            = false;  // Makefile sa-run, tools/cutover_run.sh, perf/mintsel, CLAUDE.md
     int         autostartFrames      = 0;      //   numeric value > 1 overrides the 60-frame menu settle; 0 = default
@@ -146,7 +151,6 @@ struct Options {
                                                //   AUTOTUTORIAL/AUTOMENU_BUTTON/PAUSEMENU_BUTTON says nobody is watching
     bool        deferWindowShow      = true;   // src/app/boot_window.cpp — default ON, "0"/"false" shows the window early
     bool        skipEngineLoader     = false;  // src/game/Game/loader_loop_stubs.cpp [no tool reader]
-    bool        syncEngineLoader     = true;   // src/game/Game/loader_loop_stubs.cpp — default ON, "0"/"f" goes async
     bool        noFolLock            = false;  // src/app/res_load_lock.cpp — kill switch for the resource-load lock
 
 
@@ -175,6 +179,8 @@ struct Options {
     const char* forceDeviceLost      = nullptr;// BANISHED_FORCE_DEVICE_LOST — src/render/dx11/contextdata.cpp; "bgsave" =
                                                //   on the first Present after a background save starts (src/diag/device_lost_drive.h)
     const char* screenshotAt         = nullptr;// BANISHED_SCREENSHOT_AT — gameupdateloop.cpp
+    const char* showroom             = nullptr;// BANISHED_SHOWROOM=<template list> — src/diag/showroom.cpp; set by the
+                                               //   issue #13 showroom run script (scratchpad showroom/run.sh)
     const char* captureIngame        = nullptr;// BANISHED_CAPTURE_INGAME — gameupdateloop.cpp
     const char* achIgnoreMods        = nullptr;// BANISHED_ACH_IGNORE_MODS — gameupdateloop.cpp achievements
     const char* fastTrig             = nullptr;// BANISHED_FAST_TRIG — src/game/Component/character_trig.cpp
@@ -300,6 +306,10 @@ struct Options {
     const char* disasterFrame[4]     = {nullptr, nullptr, nullptr, nullptr};
     const char* disasterPeriod[4]    = {nullptr, nullptr, nullptr, nullptr};
     const char* forceSickDisease     = nullptr;
+
+    // ── the map-cell diagnostics (src/diag/cell_trace.cpp; tools/cell_dump/cell_dump.sh)
+    const char* cellDump             = nullptr;// BANISHED_CELL_DUMP — directory; each save load writes cells_raw.txt / cells_fixed.txt
+    bool        cellTrace            = false;  // BANISHED_CELL_TRACE — log footprintCount wraps and buildable -> unbuildable re-sorts
 
     // ── NOT read by the exe ──────────────────────────────────────────────────
     // BANISHED_DIR      — Makefile only (where sa-deploy copies the exe).

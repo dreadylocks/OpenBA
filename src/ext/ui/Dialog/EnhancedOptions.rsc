@@ -15,6 +15,8 @@ StringTable aoStrings
 		{ String _name = "BetterTrees";		String _text = "Better trees"; }
 		{ String _name = "MaxShadowRes";	String _text = "Max shadow resolution"; }
 		{ String _name = "SeamlessLoops";	String _text = "Seamless ambient loops"; }
+		{ String _name = "DerivedCache";	String _text = "Data cache on disk: @0"; }
+		{ String _name = "DerivedCacheClear";	String _text = "Clear cache"; }
 	]
 }
 
@@ -98,8 +100,8 @@ LabelDescription labelEnhanced
 	String _spriteName = "OptionsEnhanced";
 }
 
-// The page: Options.rsc:gameOptionsTable's shape, five rows (AO combo, AO slider, Better trees, shadow,
-// loops).
+// The page: Options.rsc:gameOptionsTable's shape, six rows (AO combo, AO slider, Better trees, shadow,
+// loops, the derived-data cache's size + its "Clear cache" button: COMPRESSAO).
 TableDescription enhancedOptions
 {
 	int _leftPad = 6;
@@ -110,7 +112,7 @@ TableDescription enhancedOptions
 	Alignment _alignment = TopLeft;
 
 	int _width = 2;
-	int _height = 5;
+	int _height = 6;
 
 	TableItem _items
 	[
@@ -119,12 +121,14 @@ TableDescription enhancedOptions
 		{ int _x = 0; int _y = 2; ElementDescription _element = "textBetterTrees"; }
 		{ int _x = 0; int _y = 3; ElementDescription _element = "textMaxShadowRes"; }
 		{ int _x = 0; int _y = 4; ElementDescription _element = "textSeamlessLoops"; }
+		{ int _x = 0; int _y = 5; ElementDescription _element = "textDerivedCache"; }
 
 		{ int _x = 1; int _y = 0; ElementDescription _element = "comboAoQuality"; }
 		{ int _x = 1; int _y = 1; ElementDescription _element = "sliderAoOpacity"; }
 		{ int _x = 1; int _y = 2; ElementDescription _element = "comboBetterTrees"; }
 		{ int _x = 1; int _y = 3; ElementDescription _element = "comboMaxShadowRes"; }
 		{ int _x = 1; int _y = 4; ElementDescription _element = "comboSeamlessLoops"; }
+		{ int _x = 1; int _y = 5; ElementDescription _element = "buttonDerivedCacheClear"; }
 	]
 }
 
@@ -141,6 +145,20 @@ TextDescription textAoOpacity : "textAoOption" { String _text = "AoOpacity"; }
 TextDescription textBetterTrees : "textAoOption" { String _text = "BetterTrees"; }
 TextDescription textMaxShadowRes : "textAoOption" { String _text = "MaxShadowRes"; }
 TextDescription textSeamlessLoops : "textAoOption" { String _text = "SeamlessLoops"; }
+TextDescription textDerivedCache : "textAoOption" { String _text = "DerivedCache"; }
+
+// The derived-data cache's "Clear cache" (COMPRESSAO): SharedElements.rsc's Apply button with our
+// caption (the Options dialog's own buttons are that object, so the packages hold it).
+ButtonDescription buttonDerivedCacheClear : "SharedElements.rsc:buttonApply"
+{
+	ElementDescription _content = "textDerivedCacheClear";
+}
+
+TextDescription textDerivedCacheClear : "SharedElements.rsc:buttonApplyText"
+{
+	StringTable _stringTable = "EnhancedOptions.rsc:aoStrings";
+	String _text = "DerivedCacheClear";
+}
 
 ComboDescription comboAoQuality : "Options.rsc:comboAutosave"
 {

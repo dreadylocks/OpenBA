@@ -30,6 +30,7 @@
 #include "Entity/ComponentEntity.h"   // B4 S4 RT2: InternalPtr<ComponentEntity>::Get() needs the class complete
 #include "stress_harness.h"   // PFBENCH: PfMainTimer (pf_sync_wait_ms; stress harness only)
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 
 // Match the action_pf_*.cpp decompile token aliases.
 typedef unsigned int  uint;
@@ -186,6 +187,7 @@ LAB_clear:
                         char cVar5 = -1;
                         if (owner->Get() != nullptr) cVar5 = '\x01';
                         uint8_t& count = cellsAtStart[iVar15].footprintCount;
+                        CellTrace::NoteCount(map, &cellsAtStart[iVar15], count, cVar5, "footprint");
                         count = static_cast<uint8_t>(count + cVar5);
                     }
                     uVar8 = static_cast<uint64_t>(w);

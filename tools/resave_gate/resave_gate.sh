@@ -23,9 +23,11 @@ MODE="${GATE_MODE:-roundtrip}"
 # The game directory: env BANISHED_DIR (tools/build.sh), MSYS /c/ form when cygpath is available.
 G="${BANISHED_DIR:-C:/GOG Games/Banished}"
 command -v cygpath >/dev/null 2>&1 && G="$(cygpath -u "$G")"
-# The save directory: Documents/Banished/Save under the Windows profile; the Linux build's
-# ~/.local/share/Banished/Save when USERPROFILE is unset. BANISHED_SAVE_DIR overrides both.
+# The save directory: Save/ under the user dir -- BANISHED_USER_DIR (tools/game_dirs.sh) when set,
+# else Documents/Banished under the Windows profile, else the Linux build's ~/.local/share/Banished.
+# BANISHED_SAVE_DIR overrides all three.
 if [ -n "${BANISHED_SAVE_DIR:-}" ]; then S="$BANISHED_SAVE_DIR"
+elif [ -n "${BANISHED_USER_DIR:-}" ]; then S="$BANISHED_USER_DIR/Save"
 elif [ -n "${USERPROFILE:-}" ]; then S="$USERPROFILE/Documents/Banished/Save"
 else S="$HOME/.local/share/Banished/Save"; fi
 NAME="${1:?usage: resave_gate.sh <save-name> [outdir] [seconds]}"

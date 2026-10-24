@@ -382,6 +382,21 @@ uint32_t FileSize(FileHandle h) {
     return static_cast<uint32_t>(st.st_size);
 }
 
+// fix.large_packages (NOT RETAIL, docs/extensions/handins/LARGEPKM.md). off_t is 64-bit on every
+// target this twin builds for.
+static_assert(sizeof(off_t) == 8, "a 64-bit seek needs a 64-bit off_t");
+
+int32_t FileSeek64(FileHandle h, int64_t pos) {
+    if (pos < 0) return 0;
+    return ::lseek(Fd(h), static_cast<off_t>(pos), SEEK_SET) == static_cast<off_t>(pos) ? 1 : 0;
+}
+
+int64_t FileSize64(FileHandle h) {
+    struct stat st;
+    if (::fstat(Fd(h), &st) != 0) return -1;
+    return static_cast<int64_t>(st.st_size);
+}
+
 int32_t FileClose(FileHandle h) { return ::close(Fd(h)) == 0 ? 1 : 0; }
 
 int32_t FileLastWrite(FileHandle h, uint64_t* fileTime) {

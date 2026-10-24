@@ -261,6 +261,11 @@ bool IO::CompressedStream::DecompressFromSource(int blk) {
     w->start = blk << 15;                               // 1800a96d9 / 1800a9700
     w->end   = w->start + h->uncompressedSize;          // 1800a9703 / 1800a9709
 
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/DECODEAHEAD.md): ext.decode_ahead -- a block a
+    // worker already decoded from the mapped package bytes is copied into the window.
+    if (_extDecodeAhead != nullptr && _extDecodeAhead(*this, kExtDecodeBlock, blk, w->buffer))
+        return true;
+
     // The source's Stream virtuals, through the object's own vtable as retail
     // does (`[RAX+0x20]` SetCurrentPos, `[RAX+0x18]` Read).
     Stream* const src = _source;                        // 1800a970c
@@ -408,6 +413,11 @@ bool IO::CompressedStream::SetWindow(int pos) {
 // report, not a win.
 namespace IO {
 
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/DECODEAHEAD.md): ext.decode_ahead (Stream.h).
+CompressedStream::ExtDecodeAheadFn CompressedStream::_extDecodeAhead = nullptr;
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md): ext.stream_cache (Stream.h).
+CompressedStream::ExtReadTapFn CompressedStream::_extReadTap = nullptr;
+
 // ?Read@CompressedStream@IO@@UEAA_NHPEAX@Z                   retail 0x1800aa780
 //   while (n > 0) {
 //       if (!SetWindow(position)) return false;
@@ -420,9 +430,14 @@ namespace IO {
 bool CompressedStream::Read(int n, void* dst) {
 
     uint8_t* out = static_cast<uint8_t*>(dst);          // CAST-OK: byte_io
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md): what this read started at,
+    // for the tap below. Reads nothing retail does not read.
+    const int32_t tapPos = _position;
+    const int32_t tapN   = n;
 
     while (n > 0) {                                     // 1800aa7a2 / 1800aa806
         if (!SetWindow(_position)) {                    // 1800aa7b6
+            if (_extReadTap != nullptr) _extReadTap(*this, tapPos, tapN, dst, false);
             return false;                               // 1800aa825
         }
         const RtIo::CompressedStreamWindow* const w =
@@ -437,7 +452,87 @@ bool CompressedStream::Read(int n, void* dst) {
         out += chunk;                                   // 1800aa801
     }
 
+    if (_extReadTap != nullptr) _extReadTap(*this, tapPos, tapN, dst, true);   // EXT SEAM (STREAMCACHE)
     return true;                                        // 1800aa808
+}
+
+// ============================================================================
+// CompressedStream::ReadArray -- NOT RETAIL: an exact perf body (issue #13)
+// ============================================================================
+// Retail's IO::BinaryReader array slots (0x1800a8410.., serialize_family.cpp
+// shape 3) read an array ONE ELEMENT PER VIRTUAL CALL: SerializeX(arr[i]) ->
+// Stream::Read(sizeof(T), &arr[i]), result ignored. Over a package that is one
+// SetWindow + one memcpy per byte of every byte array, about a third of the
+// loader thread's time on a large mod set. This body is that loop with the
+// calls that provably do nothing but copy batched into one memcpy.
+//
+// WHY THE BATCH IS THE SAME AS THE CALLS IT REPLACES. Take an element at q with
+// the active window w (`_activeWindow` in range, w.start >= 0), and
+//     w.start <= q   and   q + elemSize <= min(w.end, w.start + kWin).
+// Read(elemSize) at q then runs exactly this, and nothing else:
+//   * SetWindow(q) takes the fast path (activeStart >= 0, q >= activeStart,
+//     q < activeStart + kWin): it stores _position = q (unchanged), bumps the
+//     g_swBranch.fastPath tally (read by nothing) and returns true. No window,
+//     useCount or _activeWindow changes, no decode.
+//   * chunk = elemSize, because q + elemSize <= w.end.
+//   * memcpy(dst, w.buffer + (q - w.start), elemSize); _position += elemSize.
+// So every element up to `limit = min(w.end, w.start + kWin)` costs a copy of
+// the bytes right after the previous element's, and m of them in a row are one
+// memcpy of m * elemSize bytes and _position += m * elemSize. Every element
+// that does NOT satisfy that condition -- the one that straddles a window end,
+// the first one after it, a miss, an eviction, the DecompressFromSource at a
+// 32 KB boundary, a failing SetWindow, the zero-chunk spin past a short last
+// block -- goes through the real Read, one element, exactly as retail calls it.
+// After it the state is whatever retail's would be, and the loop re-derives the
+// condition from that state. There is no case analysis of the failure paths to
+// get wrong: they are never batched.
+//
+// The failure case in particular. Retail keeps calling Read for every element
+// after a failed SetWindow (each fails again, at the same _position, and each
+// runs GetAvailableWindow, which ages the useCounts). Here a failed element
+// leaves the active window with start -1 (GetAvailableWindow freed it and the
+// failing DecompressFromSource returned before refilling it), so the batch
+// condition is false and every remaining element goes through Read: the same
+// calls, the same useCount ageing, the same untouched destination bytes.
+//
+// Two notes on the arithmetic: limit and the room are int64 so `start + kWin`
+// cannot wrap, and a window whose start is within kWin of INT32_MAX (where
+// retail's int32 `activeStart + kWin` would wrap) is never batched. The
+// destination is never inside a window buffer (the callers deserialize into
+// their own objects), so one memcpy and m small ones copy the same bytes.
+void CompressedStream::ReadArray(int count, int elemSize, void* dst) {
+    uint8_t* out = static_cast<uint8_t*>(dst);          // CAST-OK: byte_io
+    int32_t i = 0;
+    while (i < count) {
+        const int32_t a = _activeWindow;
+        if (elemSize > 0 && a >= 0 && a < _windowSize) {
+            const RtIo::CompressedStreamWindow& w = _windowData[a];
+            const int64_t start = w.start;
+            const int64_t pos   = _position;
+            if (start >= 0 && start <= INT32_MAX - RtIo::kWin && pos >= start) {
+                int64_t limit = start + RtIo::kWin;
+                if (w.end < limit) limit = w.end;
+                int64_t m = (limit - pos) / elemSize;   // limit - pos may be <= 0
+                if (m > count - i) m = count - i;
+                if (m > 0) {
+                    const int64_t bytes = m * elemSize;
+                    std::memcpy(out, w.buffer + (pos - start), static_cast<size_t>(bytes));
+                    _position = static_cast<int32_t>(pos + bytes);
+                    // EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md): the batched copy,
+                    // as the m Reads it stands for would each have been tapped.
+                    if (_extReadTap != nullptr)
+                        _extReadTap(*this, static_cast<int32_t>(pos), static_cast<int32_t>(bytes), out, true);
+                    out += bytes;
+                    i += static_cast<int32_t>(m);
+                    continue;
+                }
+            }
+        }
+        // Not provably a plain copy: retail's own call, for one element.
+        Read(elemSize, out);
+        out += elemSize;
+        ++i;
+    }
 }
 
 }  // namespace IO

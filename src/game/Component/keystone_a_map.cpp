@@ -52,6 +52,7 @@
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
 #include "Game/Minimap.h"   // Minimap::ClearTerrain (0x1400a4d30)
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 
 // dc20 stale-occupant EVICTION tally. Counts only the arm that actually destroys
 // (MarkForRemoval + push onto the world removal queue), not the arm that skips an
@@ -326,6 +327,7 @@ void CreateNaturalResource_impl_dee0(Map* param_1, ComponentEntity* const* owner
                                 bVar13 = 2;
                             }
                         }
+                        CellTrace::NoteResort(param_1, iVar14, plVar11->terrainType, bVar13);
                         param_1->SetTerrainType(iVar14, (uint32_t)bVar13);   // 0x14009f2f0
                     }
 

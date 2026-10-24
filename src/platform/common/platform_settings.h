@@ -41,6 +41,17 @@ bool DocumentsDir(System::String& out);
 // dropped), so both overloads spell one folder byte-identically.
 bool DocumentsDir(std::string& out);
 
+// NOT RETAIL, harness only (src/platform/common/user_dir_override.cpp). The
+// BANISHED_USER_DIR override of the game's per-user folder "<Documents>\Banished"
+// AS A WHOLE: the directory itself holds settings.cfg, Save\ and Cache\. Set once
+// by src/app/main.cpp after OptionsInit (the platform layer never reads Options);
+// null / empty clears it. UserDirOverride() is null when unset, so the two
+// consumers (IO::SettingsStore::DefaultPath, FileSystem::GetSaveDirectory) fall
+// through to their retail DocumentsDir arm untouched. UTF-8, no trailing
+// separator.
+void SetUserDirOverride(const char* dirUtf8);
+const char* UserDirOverride();
+
 // The whole file as bytes. false when it cannot be opened (absent included);
 // `out` is then untouched.
 bool ReadWholeFile(const char* pathUtf8, std::string& out);

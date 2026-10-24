@@ -365,6 +365,7 @@
 #include "system/string_internal.h"
 #include "system/widestring_internal.h"
 #include "collection/array_internal.h"
+#include "io/packfile_fold_index.h"   // block PATHINDEX: the hash index beside _packfileIndex
 
 #include <new>        // placement new into a raw Array<Filename> element
 #include <utility>    // std::move -- the pointer steal out of a POD out-param
@@ -526,8 +527,15 @@ bool FileSystem::ExistsInPackfile(const System::Filename& pathRef) const {
         System::Filename relPath(pathData + dataDirLen);
 
         const char* str1 = relPath._data;
+        // NOT RETAIL (block PATHINDEX): the hash index answers when it can.
+        RtIO::PackfileIndexNode* indexed = nullptr;
+        const bool answered = ::IO::PackIndexFind(&_packfileIndex, str1, &indexed);
         RtIO::PackfileIndexNode* node = _packfileIndex.root;
         RtIO::PackfileIndexNode* found = nullptr;
+        if (answered && !OPENBA_PATHINDEX_CHECK) {
+            found = indexed;
+            node = nullptr;
+        }
         while (node) {
             const char* key = node->element.key._data;
             // condA == "relPath >= key" in retail's null-extended ordering.
@@ -551,6 +559,7 @@ bool FileSystem::ExistsInPackfile(const System::Filename& pathRef) const {
             }
         }
 
+        ::IO::PackIndexCheck(answered, str1, indexed, found);
         ours = (found != nullptr);   // 0x1800ab281: TEST RBX,RBX ; SETNZ AL
         // ~relPath is retail's release at 0x1800ab28e.
     }

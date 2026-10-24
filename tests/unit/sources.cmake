@@ -26,6 +26,9 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/engine/object/external_class.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/object/internal_class.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/io/serializer_class.cpp
+  ${CMAKE_SOURCE_DIR}/src/engine/io/serialize_family.cpp       # decode_exact_test.cpp (issue #13): the reader's array slots
+  ${CMAKE_SOURCE_DIR}/src/engine/io/compressed_stream_read.cpp #   CompressedStream::Read / SetWindow / ReadArray
+  ${CMAKE_SOURCE_DIR}/src/engine/system/compression.cpp        #   Compress / Decompress
   ${CMAKE_SOURCE_DIR}/src/engine/system/crc.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/picking/picking_type_records.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/pathfinding/pathfinding_type_records.cpp
@@ -47,12 +50,15 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/platform/common/event_std.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/io/settings_file.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/io/settings_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/platform/common/user_dir_override.cpp   # DefaultPath's BANISHED_USER_DIR arm
   ${CMAKE_SOURCE_DIR}/src/ext/registry.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/savetail.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/load_notice.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/resources/text_parser.cpp   # ext_rsc_text_test.cpp (block RSCTEXT)
   ${CMAKE_SOURCE_DIR}/src/ext/eye_camera/eye_math.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/rock_seat/rock_seat_math.cpp   # ext_rock_seat_test.cpp (ROCKSEAT)
+  ${CMAKE_SOURCE_DIR}/src/ext/large_packages/large_packages_unwrap.cpp   # ext_large_packages_test.cpp (LARGEPKM)
+  ${CMAKE_SOURCE_DIR}/src/ext/package_cache/index_codec.cpp      # ext_package_cache_test.cpp (PKGCACHE)
   ${CMAKE_SOURCE_DIR}/src/ext/sharp_ui/sharp_math.cpp
   ${CMAKE_SOURCE_DIR}/src/ext/resources/font_tables.cpp         # ext_font_raster_test.cpp (block RSCFONT)
   ${CMAKE_SOURCE_DIR}/src/platform/win/font_raster_win.cpp      #   the GDI rasteriser (the posix twin is FreeType over the next file)
@@ -92,6 +98,19 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/platform/win/settings_win.cpp
   ${CMAKE_SOURCE_DIR}/src/engine/system/widestring.cpp
   ${CMAKE_SOURCE_DIR}/src/platform/win/file_win.cpp
+  ${CMAKE_SOURCE_DIR}/src/platform/win/file_map_win.cpp   # file_map_read_test.cpp (MAPREAD)
+  ${CMAKE_SOURCE_DIR}/src/platform/win/file_rw_win.cpp    # ext_derived_cache_test.cpp (COMPRESSAO)
+  ${CMAKE_SOURCE_DIR}/src/ext/derived_cache/derived_cache.cpp   # ext_derived_cache_test.cpp (COMPRESSAO)
+  ${CMAKE_SOURCE_DIR}/src/ext/derived_cache/hash64.cpp          #   its content hash
+  ${CMAKE_SOURCE_DIR}/src/render/common/bc4/bc4.cpp             # bc4_test.cpp (COMPRESSAO)
+  ${CMAKE_SOURCE_DIR}/src/render/common/share_gpu_data/share_table.cpp   # ext_share_gpu_data_test.cpp (SHAREGPUDATA)
+  ${CMAKE_SOURCE_DIR}/src/render/common/create_on_demand/payload.cpp      # ext_create_on_demand_test.cpp (CREATEONDEMAND)
+  ${CMAKE_SOURCE_DIR}/src/render/common/create_on_demand/lazy_table.cpp   #   the deferred-create table
+  ${CMAKE_SOURCE_DIR}/src/render/common/create_on_demand/use_tracker.cpp  #   its use stamps (eviction)
+  ${CMAKE_SOURCE_DIR}/src/ext/decode_ahead/block_cache.cpp   # ext_decode_ahead_test.cpp (DECODEAHEAD)
+  ${CMAKE_SOURCE_DIR}/src/engine/system/compression.cpp       # ext_decode_ahead_test.cpp: the real Decompress
+  ${CMAKE_SOURCE_DIR}/src/ext/stream_cache/stream_record.cpp   # ext_stream_cache_test.cpp (STREAMCACHE)
+  ${CMAKE_SOURCE_DIR}/src/ext/stream_cache/segment_stream.cpp  #   the record stream and its fallback
   ${CMAKE_SOURCE_DIR}/src/platform/common/window_messages.cpp
   ${CMAKE_SOURCE_DIR}/src/platform/common/display_geometry.cpp
   ${CMAKE_SOURCE_DIR}/src/platform/common/cursor_planes.cpp

@@ -165,6 +165,15 @@ public:
     void TessellateDecal(int param_2, char param_3, int param_4, int param_5);   // 0x1400ace40 (Player/tool_base_highlight_tess.cpp)
     uint8_t TerrainMarch(float* param_2, float* param_3, float* param_4, float* param_5, float* param_6);   // 0x1400aa530 (Player/tool_base_ray.cpp)
     void StoreBatchMaterial(int index, Graphics::MaterialInstance* decal);   // 0x1400acd90 (Player/roadtool_calcpath.cpp)
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md, DESIGN.md hook rule 5):
+    // ext.create_on_demand's prefetch. Null by default and under the faithful profile. Run with each
+    // material the terrain draws with as it takes it (BuildTerrain's ground and water materials, the
+    // same and the batches' at the end of a loading Serialize / SerializeLegacyBatches, AddDecal's,
+    // StoreBatchMaterial's):
+    // the extension queues the first-use creates of its textures, ahead of the first frame that draws
+    // the terrain, and keeps them out of its idle eviction.
+    static void (*_extMaterialTaken)(const Graphics::MaterialInstance* material);
 };
 
 static_assert(sizeof(WorldGeometry) == 0x230, "WorldGeometry is MemAlloc(0x230)");

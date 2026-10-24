@@ -548,7 +548,12 @@ void ParticleInstance::SetParticle(Object::ExternalPtr<Particle> particle) {
         lb.max.x = 0.0f; lb.max.y = 0.0f; lb.max.z = 0.0f;
         _dirtyFlags |= RtGraphics::kDirtyBounds;
     }
+
+    // EXT SEAM (NOT RETAIL): ext.create_on_demand's prefetch (ParticleInstance.h has the contract).
+    if (_extParticleAssigned != nullptr) _extParticleAssigned(*p);
 }
+
+void (*ParticleInstance::_extParticleAssigned)(const Particle& particle) = nullptr;
 
 }  // namespace Graphics
 

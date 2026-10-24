@@ -60,11 +60,12 @@
 // The copy ctor zeroes each member of the destination immediately before
 // filling it, which is what makes the raw stack storage safe; that is retail's
 // own arrangement (modification.cpp:434) and `Modification::Swap` already
-// relies on it.
+// relies on it. Block PKGCACHE trades the bytes instead (ModSwap's note).
 // ============================================================================
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>   // block PKGCACHE: ModSwap
 
 #include "io/Modification.h"
 #include "../collection/introsort_msvc.h"
@@ -86,12 +87,27 @@ bool ModLess(const Mod& a, const Mod& b) {
     return RtSystem::RtString_StrCompare(a.name._data, b.name._data) < 0;   // JNS -> not less
 }
 
-// 0x1800287f4 — tmp from the FIRST argument, as retail writes it.
+// 0x1800287f4 — retail: `Mod tmp(*a); *a = *b; *b = tmp;` (0x1800101e0, 0x180026ef0 twice,
+// ~tmp 0x180011460).
+//
+// BLOCK PKGCACHE (NOT RETAIL, exact): the two Mods trade their bytes instead. Retail's three copies
+// clone each Mod's path set node by node (a MegaMod part holds 50,000-90,000 paths) only to leave
+// each slot holding what the other held: the same strings (a copy shares the buffer), the same
+// arrays' contents, a set of the same paths in the same shape. A Mod's members are a String /
+// Filename buffer pointer each, plain ints, Array headers and the set's {root, count} header;
+// nothing points back into a Mod (the set's root has no parent), so a Mod is relocated by copying
+// its bytes. What differs is only which allocations hold the values (the clones' node addresses,
+// the arrays' capacities), and nothing reads those. A self-swap (the selection pass swaps an
+// element already in place) left everything as it was in retail too: each assignment guards its
+// self-assign.
 void ModSwap(Mod* a, Mod* b) {
-    Mod tmp(*a);   // 0x1800101e0
-    *a = *b;       // 0x180026ef0
-    *b = tmp;      // 0x180026ef0
-}   // ~tmp: 0x180011460
+    if (a == b)
+        return;
+    alignas(Mod) unsigned char tmp[sizeof(Mod)];
+    std::memcpy(tmp, static_cast<void*>(a), sizeof(Mod));
+    std::memcpy(static_cast<void*>(a), static_cast<const void*>(b), sizeof(Mod));
+    std::memcpy(static_cast<void*>(b), tmp, sizeof(Mod));
+}
 
 }  // namespace
 

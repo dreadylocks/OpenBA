@@ -21,6 +21,7 @@
 #include "options.h"
 #include "device_lost_drive.h"   // BANISHED_FORCE_DEVICE_LOST=bgsave (src/diag)
 #include "dx11_backend_access.h"
+#include "async_gpu_create/async_create.h"   // NOT RETAIL: ext.async_gpu_create
 #include "system/Error.h"
 #include "video/Context.h"
 #include "video/CompanionData.h"
@@ -118,6 +119,8 @@ void FinishRecover(Video::Device& device, int32_t hrIn) {
     std::fflush(stderr);
     if (onLost) onLost();
 
+    // NOT RETAIL (ext.async_gpu_create): creates queued against the lost device finish first.
+    ::VideoDX11::AsyncCreate::Drain();
     owner->ReleaseDynamic();
 
     dd->d3dDevice = nullptr;

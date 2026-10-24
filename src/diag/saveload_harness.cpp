@@ -24,8 +24,8 @@
 #include <sys/stat.h>
 #include <ctime>
 #include <string>
-#include "platform_settings.h"   // Platform::DocumentsDir
 #endif
+#include "platform_settings.h"   // Platform::DocumentsDir (POSIX listing), Platform::UserDirOverride
 #include "save/SaveLoad.h"   // -Iruntime/types: ENDGAME B.3.7 callers (K5)
 #include "Game/GameUpdateLoop.h"   // B4: m_userInterface by name
 
@@ -63,9 +63,14 @@ int TriggerFrame() {
 #if defined(_WIN32)
 void DumpSaveDir(const char* tag) {
     char path[MAX_PATH];
-    const char* prof = Opt().userProfile;
-    if (!prof) return;
-    snprintf(path, sizeof(path), "%s\\Documents\\Banished\\Save\\*", prof);
+    // BANISHED_USER_DIR (tools/game_dirs.sh) is the whole "<Documents>\Banished" folder.
+    if (const char* user = Platform::UserDirOverride()) {
+        snprintf(path, sizeof(path), "%s\\Save\\*", user);
+    } else {
+        const char* prof = Opt().userProfile;
+        if (!prof) return;
+        snprintf(path, sizeof(path), "%s\\Documents\\Banished\\Save\\*", prof);
+    }
 
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(path, &fd);

@@ -20,11 +20,6 @@ namespace {
 // depend on the renderer's internal header.
 constexpr size_t kCfgSkipShow = 0x42;
 
-// Reveal the window regardless after this long, so a broken splash path can
-// never leave the process running with nothing on screen. Generous: a cold
-// first boot legitimately spends >1s before the splash presents.
-constexpr double kWatchdogMs = 4000.0;
-
 void*  g_hwnd      = nullptr;
 bool   g_armed     = false;
 bool   g_shown     = false;
@@ -54,7 +49,7 @@ bool ArmDeferredShow(::Video::Configuration* videoConfig, void* hwnd) {
     g_shown     = false;
     g_armedAtMs = StallDebug::NowMs();
     printf("[BootWindow] armed: Configuration+0x42 set, hwnd=%p stays hidden "
-           "until the splash presents a frame\n", hwnd);
+           "until the main loop presents a frame\n", hwnd);
     std::fflush(stdout);
     return true;
 }
@@ -73,13 +68,17 @@ bool IsPending() {
     return g_armed && !g_shown;
 }
 
-void PumpWatchdog() {
+void MarkFrame() {
     if (!IsPending()) return;
-    if (StallDebug::NowMs() - g_armedAtMs < kWatchdogMs) return;
-    printf("[BootWindow] WARN: watchdog fired — no splash frame presented "
-           "within %.0fms; revealing the window anyway\n", kWatchdogMs);
-    std::fflush(stdout);
-    ShowNow("watchdog");
+    printf("[BootWindow] first frame presented %.0f ms after the arm\n",
+           StallDebug::NowMs() - g_armedAtMs);
+    ShowNow("main loop presented its first frame");
 }
 
 } // namespace BootWindow
+
+// Engine::MainLoop::Run calls this after every Frame (src/engine/engine/mainloop_run.cpp),
+// declared there the way BootState_MarkFrame is, so the engine includes no app header.
+extern "C" void BootWindow_MarkFrame() {
+    BootWindow::MarkFrame();
+}

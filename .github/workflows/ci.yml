@@ -32,7 +32,7 @@ jobs:
       run:
         shell: msys2 {0}
     env:
-      CCACHE_MAXSIZE: 1500M   # debug + perf object sets
+      CCACHE_MAXSIZE: 800M    # the debug object set
     steps:
       - uses: actions/checkout@v5
         with:
@@ -59,9 +59,6 @@ jobs:
         run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build debug
       - name: Unit tests (debug)
         run: tools/build.sh unit debug
-      # The perf flavour is the -O2 exe the gate deploys (-fno-lifetime-dse bugs show only here).
-      - name: Build OpenBA (perf)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build perf
       - name: ccache statistics
         if: always()
         run: ccache -s

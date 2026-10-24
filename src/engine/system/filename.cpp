@@ -212,14 +212,21 @@ bool Filename::operator<(const Filename& other) const {
 // only when a triple exists. tests/unit/filename_adjust_test.cpp compares this
 // body with the pre-SAVELOAD one on every string of length <= 8 over
 // { a / \ . : } and on the game's resource names.
+//
+// BLOCK PATHINDEX (perf:, exact): both scans find their byte with memchr. Phase
+// 1 writes exactly the '/' it finds, as the byte loop did; phase 2's window test
+// visits every '\' starting in [0, len-3] and tests the two bytes after it.
 void Filename::AdjustDelimiters() {
     // Phase 1: '/' -> '\\'
     {
         const int len = AsString().GetLength();
         char* const d = _data;
-        for (int k = 0; k < len; ++k) {
-            if (d[k] == '/')
-                d[k] = '\\';
+        if (len > 0) {
+            char* const end = d + len;
+            for (char* p = static_cast<char*>(std::memchr(d, '/', static_cast<size_t>(len))); p != nullptr;
+                 p = static_cast<char*>(std::memchr(p + 1, '/', static_cast<size_t>(end - (p + 1))))) {
+                *p = '\\';
+            }
         }
     }
 
@@ -236,11 +243,15 @@ void Filename::AdjustDelimiters() {
         // splice, and retail's scan then returns.
         {
             bool triple = false;
-            for (int t = 0; t <= len - 3; ++t) {
-                if (base[t] == '\\' && base[t + 1] == '.' && base[t + 2] == '.') {
+            const char* const windowEnd = base + (len - 2);   // a triple starts before here
+            const char* p = base;
+            while ((p = static_cast<const char*>(std::memchr(p, '\\', static_cast<size_t>(windowEnd - p)))) !=
+                   nullptr) {
+                if (p[1] == '.' && p[2] == '.') {
                     triple = true;
                     break;
                 }
+                ++p;
             }
             if (!triple)
                 return;

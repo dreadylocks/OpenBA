@@ -42,7 +42,7 @@ const Ext::ValueKey& K(const char* id) {
 }  // namespace
 
 UNIT_TEST(ext_values_table_shape) {
-    CHECK_EQ(Ext::ValueKeyCount(), 5);   // ao_quality, ao_opacity, foliage_aa_mode (ext_better_trees_test.cpp), max_shadow_size (below), rock_seat_mode (ext_rock_seat_test.cpp)
+    CHECK_EQ(Ext::ValueKeyCount(), 7);   // ao_quality, ao_opacity, foliage_aa_mode (ext_better_trees_test.cpp), max_shadow_size (below), rock_seat_mode (ext_rock_seat_test.cpp), derived_cache_mb (ext_compress_ao_test.cpp), create_on_demand_idle_min (ext_create_on_demand_test.cpp)
     const Ext::ValueKey& q = K("ao_quality");
     const Ext::ValueKey& o = K("ao_opacity");
     CHECK_EQ(q.minValue, 1); CHECK_EQ(q.maxValue, 3); CHECK_EQ(q.defaultValue, 2);

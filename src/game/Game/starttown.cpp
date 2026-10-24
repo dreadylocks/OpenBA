@@ -27,8 +27,10 @@
 #include "graphics/Camera.h"
 #include "Game/exe_bodies.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
-#include "ext/registry.h"            // Ext::Fix().start_barn_height, Ext::Fix().rock_seat
+#include "ext/registry.h"            // Ext::Fix().start_barn_height, Ext::Fix().rock_seat, Ext::Fix().terrain_resort
 #include "ext/rock_seat/rock_seat.h"   // fix.rock_seat (docs/extensions/handins/ROCKSEAT.md)
+#include "ext/terrain_resort/terrain_resort_rule.h"   // fix.terrain_resort (docs/extensions/handins/TERRAINRESORT.md)
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 #include "system/MemoryAllocator.h"   // System::MemoryAllocator::MemAlloc / MemFree
 #include "Game/worldgen_cells.h"     // [PERLINPRE] WgCells_PerlinTable (row-parallel scatter noise)
 #include "math/Math.h"
@@ -41,6 +43,7 @@
 #include "Component/pickingcomponent_funcs.h"   // PickingComponent_RegisterMesh (mesh-precise picking)
 #include "Component/spawncomponent_funcs.h"     // SpawnComponent_InitialSpawn (5cc0 seed)
 #include "stress_harness.h"                     // BANISHED_STRESS targets (standalone/)
+#include "showroom.h"                           // BANISHED_SHOWROOM list (src/diag/)
 #include <chrono>
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
 #include "object/TypeInfo.h"   // caller batch CB6: Object::Base::Type()
@@ -111,6 +114,7 @@ extern "C" void MapComponent_ReportDc20Evictions(const char* tag);  // keystone_
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <string>
 #include <vector>
 #include <algorithm>
 #include <functional>
@@ -1068,7 +1072,9 @@ static double StressNowMs() {
 static int StartTown_StressSpawnStructures(Map* game, int cx, int cy) {
     const int target = StressHarness_TargetCitizens();
     const int sets   = StressHarness_Sets();
-    if (target <= 0 && sets <= 0) return 0;
+    // BANISHED_SHOWROOM (src/diag/showroom.h): the listed templates, spaced for the camera.
+    const bool showroom = Showroom_Enabled();
+    if (target <= 0 && sets <= 0 && !showroom) return 0;
     if (!game || !g_stPlaceStructure) {
         fprintf(stderr, "[Stress::place] no map/placeStructure — nothing placed\n");
         return 0;
@@ -1245,10 +1251,14 @@ static int StartTown_StressSpawnStructures(Map* game, int cx, int cy) {
         }
         return false;
     };
+    // Free ring kept around every footprint: the 1-tile walk lane, or a wider one in the
+    // showroom so each building is framed without its neighbours in the shot.
+    const int margin = showroom ? 4 : 1;
     auto fits = [&](int tx, int ty, int w, int h, int doorDx, int doorDy) -> bool {
-        if (tx < 2 || ty < 2 || tx + w > mapW - 2 || ty + h > mapW - 2) return false;
-        for (int yy = ty - 1; yy <= ty + h; ++yy)
-            for (int xx = tx - 1; xx <= tx + w; ++xx)
+        const int edge = margin + 1;
+        if (tx < edge || ty < edge || tx + w > mapW - edge || ty + h > mapW - edge) return false;
+        for (int yy = ty - margin; yy < ty + h + margin; ++yy)
+            for (int xx = tx - margin; xx < tx + w + margin; ++xx)
                 if (occ[(size_t)yy * mapW + xx]) return false;
         for (int yy = 0; yy < h; ++yy)
             for (int xx = 0; xx < w; ++xx)
@@ -1275,6 +1285,8 @@ static int StartTown_StressSpawnStructures(Map* game, int cx, int cy) {
     struct Tally { const char* tag; int n; };
     std::vector<Tally> tally;
     int placed = 0, failed = 0, houses = 0;
+    int lastX = 0, lastY = 0, lastW = 0, lastH = 0;   // the footprint the last place() picked
+    ComponentEntity* lastEnt = nullptr;               // and the entity it placed there
 
     auto place = [&](const StressBuilding& b) -> bool {
         ComponentDescription* tmpl = ResolveTemplateByPath(b.path);
@@ -1309,9 +1321,14 @@ static int StartTown_StressSpawnStructures(Map* game, int cx, int cy) {
                     b.tag, w, h, ringMax);
             ++failed; return false;
         }
+        lastX = bestX;
+        lastY = bestY;
+        lastW = w;
+        lastH = h;
         ComponentEntity* ent = g_stPlaceStructure(tmpl, bestX, bestY, 0, w, h, /*isDemoFoundation=*/false, -1);
         g_stOccupied.push_back({ bestX, bestY, w, h });
         mark(bestX, bestY, w, h);
+        lastEnt = ent;
         if (!ent) { ++failed; return false; }
         ++placed;
         reachCount = floodTown(reach, 0, 0, 0, 0, -1, -1);
@@ -1400,6 +1417,53 @@ static int StartTown_StressSpawnStructures(Map* game, int cx, int cy) {
             placeHouses(perSet);
         }
         placeHouses(wantHouses - housesQueued);
+    }
+
+    // The showroom: each listed template once, in list order, outward from the town.
+    // Only templates with a CreatePlacedDescription (a footprint the placement tool
+    // stamps) are placed; drag areas and non-building templates are reported and skipped.
+    if (showroom) {
+        // Sited a quarter map east of the town, so the founding town and its citizens stay
+        // out of the shots (the spread layout's anchor rule).
+        anchorX = std::max(12, std::min(mapW - 12, cx + mapW / 4));
+        anchorY = cy;
+        const uint32_t tidModel = ModelComponent::TypeId();
+        for (int i = 0; i < Showroom_Count(); ++i) {
+            const char* path = Showroom_Path(i);
+            ComponentDescription* tmpl = ResolveTemplateByPath(path);
+            if (!tmpl) {
+                Showroom_NotePlaced(i, false, 0, 0, 0, 0, mapW, nullptr, "template did not resolve");
+                continue;
+            }
+            const CreatePlacedDescription* cpd = FindDescriptionOnTemplate<CreatePlacedDescription>(tmpl, tidCPD);
+            if (!cpd || cpd->_i44 <= 0 || cpd->_i48 <= 0) {
+                // Say what the template carries instead, so the reason can be read off the log.
+                char cpdText[160] = "none";
+                if (cpd) {
+                    std::snprintf(cpdText, sizeof(cpdText), "category=%u i40=%d i44=%d i48=%d placeArray=%d",
+                                  cpd->_category, cpd->_i40, cpd->_i44, cpd->_i48, cpd->_placeArray._size);
+                }
+                std::string why = std::string("no CreatePlacedDescription footprint (") + cpdText + "); descriptions:";
+                for (int d = 0; d < tmpl->_subDescCount; ++d) {
+                    const Description* desc = tmpl->_subDescs[d];
+                    why += ' ';
+                    why += desc ? desc->TypeName() : "(null)";
+                }
+                Showroom_NotePlaced(i, false, 0, 0, 0, 0, mapW, nullptr, why.c_str());
+                continue;
+            }
+            const StressBuilding b = { path, Showroom_Name(i), 0, 0 };
+            if (!place(b)) {
+                Showroom_NotePlaced(i, false, 0, 0, 0, 0, mapW, nullptr,
+                                    "no free footprint, or placement returned null");
+                continue;
+            }
+            // The model's world bounds frame the camera; Scene::Clean fills them in later
+            // frames, so the showroom keeps the address and reads it at shot time.
+            const ModelComponent* model = FindComponentOnEntity<ModelComponent>(lastEnt, tidModel);
+            const float* bounds = model ? &model->meshInstance._worldBounds.min.x : nullptr;
+            Showroom_NotePlaced(i, true, lastX, lastY, lastW, lastH, mapW, bounds, nullptr);
+        }
     }
 
     // Hostels in the set also carry a ResidenceComponent and therefore also count as
@@ -3153,7 +3217,8 @@ static int StartTown_SpawnStructures(MapGenerator* startConfig, EntityList* enti
     }
 
     // -- BANISHED_STRESS -- the stress town, LAST so it fills around everything above --
-    if (StressHarness_Enabled()) {
+    // (BANISHED_SHOWROOM shares its siting.)
+    if (StressHarness_Enabled() || Showroom_Enabled()) {
         const int cx = (bbX0 + bbX1) / 2, cy = (bbY0 + bbY1) / 2;
         spawned += StartTown_StressSpawnStructures(game, cx, cy);
     }
@@ -4464,6 +4529,14 @@ extern "C" void StartTown_UnmarkResourceCellGrid(Map* game, ComponentEntity* own
                 ComponentEntity* cellOwner = cell->blocker.Get();   // cell+0x00
                 if ((1u << (t & 0x1f) & 0x1e0u) && cellOwner && cellOwner != ownerEntity)
                     t = 2;
+                // FIX terrain_resort (NOT RETAIL, docs/extensions/handins/TERRAINRESORT.md): a lone
+                // occupant (a tree or ore on steep ground, a goods pile) leaves the cell buildable,
+                // as it was placeable while the occupant stood.
+                if (Ext::Fix().terrain_resort) {
+                    const bool zoned = cellOwner != nullptr && cellOwner != ownerEntity;
+                    t = static_cast<uint8_t>(Ext::TerrainResort::ClearedCellType(cell->terrainType, t, zoned));
+                }
+                CellTrace::NoteResort(game, cellIdx, cell->terrainType, t);
                 game->SetTerrainType(cellIdx, t);   // 0x14009f2f0
             }
             cell->occupant = nullptr;        // dee0: null the cell entity-link, ALWAYS
@@ -4769,6 +4842,9 @@ static int StartTown_SpawnResources(MapGenerator* startConfig, GameUpdateLoop* w
 
                 const int idx = dim * y + x;
                 if (cells[idx].occupant) continue;  // occupied
+                // HARNESS, not retail: BANISHED_SHOWROOM keeps its rectangle bare, so the
+                // buildings stand on open ground with nothing in front of the camera.
+                if (Showroom_InArea(x, y)) continue;
                 // ...and skip cells claimed in the ZONE raster (cell+0) even when the
                 // ENTITY raster (cell+8) is free. This pass runs AFTER the structures are
                 // placed (measured: dock at log line 381, scatter at 482), so it can drop

@@ -55,6 +55,7 @@
 #include "Game/PlayerToolManager.h"
 #include "Game/WorkScheduler.h"   // WorkScheduler::Insert (0x1400f88a0)
 #include "Action/PathAvl.h"
+#include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
 
 namespace {
 
@@ -109,7 +110,12 @@ bool PendingRoad(const Map* map, int cellIdx) {
 // (count +0x218) with a parallel int array at +0x220 (count +0x228); both grow to
 // `index+1` and the new int slots are zeroed.
 // ============================================================================
+void (*WorldGeometry::_extMaterialTaken)(const Graphics::MaterialInstance* material) = nullptr;
+
 void WorldGeometry::StoreBatchMaterial(int index, Graphics::MaterialInstance* decal) {
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/CREATEONDEMAND.md): the batch material's textures
+    // are queued for their first-use creates (WorldGeometry.h has the contract).
+    if (_extMaterialTaken != nullptr) _extMaterialTaken(decal);
     RawArray<Graphics::MaterialInstance*>& refs = _batchMaterials;   // +0x210
     Collection::Array<int32_t>& ints = _batchCounters;     // +0x220
     int oldCount = refs.size;   // +0x218
@@ -164,7 +170,10 @@ void Map::PlaceRoadCell(uint32_t cellIdx,
         if ((terrainFlag & 2) == 0 && (terrainFlag & 1) == 0 &&
             static_cast<int8_t>(tb->field_0x2A) == -1) {
             bool pending = PendingRoad(this, (int)cellIdx);
-            if (!pending) cell->footprintCount = static_cast<uint8_t>(cell->footprintCount + 1);
+            if (!pending) {
+                CellTrace::NoteCount(this, cell, cell->footprintCount, 1, "PlaceRoadCell");
+                cell->footprintCount = static_cast<uint8_t>(cell->footprintCount + 1);
+            }
         }
     }
 

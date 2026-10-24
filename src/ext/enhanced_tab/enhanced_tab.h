@@ -8,6 +8,7 @@
 //   better_trees/enhanced_entry.cpp        combo "Better trees"
 //   max_shadow_res/enhanced_entry.cpp      combo "Max shadow resolution"
 //   seamless_loops/enhanced_entry.cpp      combo "Seamless ambient loops"
+//   derived_cache/enhanced_entry.cpp       the cache's size + button "Clear cache" (COMPRESSAO)
 // A contribution keeps its own element pointers (found by name in the new page); this file holds
 // only the dialog key, never OptionsDialog fields (its sizeof 0x1C0 is retail's, asserted). One
 // Options dialog is open at a time (it is modal), so the side state is one slot.
@@ -17,6 +18,7 @@
 //   OnApply   Apply(this)              every contribution's apply (retail's ApplyVideoSettings
 //                                      does not know the tab); OK calls Apply too
 //   OnClosed  Close(this)              every contribution forgets its pointers
+//   OnElementEvent  OnButton(this, id) a click on an id the dialog does not own (a row's button)
 // Cancel needs no arm: nothing is written before Apply, and the next Open re-reads the values.
 #pragma once
 
@@ -38,6 +40,9 @@ struct Contribution {
     void (*open)(UI::Element* page);     // find the elements by name, fill them from the live values
     void (*apply)();                     // read the elements, write the values (the caller flushes)
     void (*close)();                     // forget the element pointers
+    // A button of the row was clicked (its element id, set by `open`): true when it was the row's.
+    // Null for a row without buttons. Acts at once (Cancel does not undo it).
+    bool (*button)(int32_t elementId);
 };
 
 // The contributions (defined beside their extensions).
@@ -45,6 +50,7 @@ const Contribution& AmbientOcclusionEntry();
 const Contribution& BetterTreesEntry();
 const Contribution& MaxShadowResEntry();
 const Contribution& SeamlessLoopsEntry();
+const Contribution& DerivedCacheEntry();   // src/ext/derived_cache/enhanced_entry.cpp: size + "Clear cache"
 
 // Whether this build offers the tab: always, except under the gate (`/profile:faithful` from the
 // command line), whose menus stay exactly retail's (Ext::GateProfileForced). Deliberately NOT a
@@ -62,6 +68,10 @@ void Apply(const void* dialog);
 
 // Forgets the element pointers (the dialog is closing). No-op for any other dialog.
 void Close(const void* dialog);
+
+// A button click the dialog does not own (OptionsDialog::OnElementEvent, event 0x12): true when a
+// contribution's button took it. False for any other dialog.
+bool OnButton(const void* dialog, int32_t elementId);
 
 }  // namespace EnhancedTab
 }  // namespace Ext

@@ -34,7 +34,7 @@ public:
 
     ~InnerLoaderLoop() override;                                 // [0] 0x140001150
     // [1] retail: LoaderLoop::Startup (Loader::Load(_nextLoop)). Overridden
-    // for the standalone's two loader options only — STANDALONE DIVERGENCE,
+    // for the standalone's skip-loader option only — STANDALONE DIVERGENCE,
     // see loader_loop_stubs.cpp.
     void Startup() override;
     void Load() override;                                        // [6] 0x140001120

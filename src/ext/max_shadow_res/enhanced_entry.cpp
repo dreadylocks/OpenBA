@@ -46,7 +46,7 @@ void Close() { g_combo = nullptr; }
 }  // namespace
 
 const Contribution& MaxShadowResEntry() {
-    static const Contribution c = { "max_shadow_res", Open, Apply, Close };
+    static const Contribution c = { "max_shadow_res", Open, Apply, Close, nullptr };
     return c;
 }
 

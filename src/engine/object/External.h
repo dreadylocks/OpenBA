@@ -435,7 +435,7 @@ namespace rt { namespace io { struct Serializer; } }
 // (external_class_doors.cpp) includes Stream.h itself. `IO::Serializer` is
 // forward-declared for the same reason: the serialize entry points below take
 // it by reference only.
-namespace IO { class Stream; class Serializer; }
+namespace IO { class Stream; class Serializer; class CompressedFileStream; }
 
 namespace Object {
 
@@ -918,6 +918,18 @@ public:
     // same eight bytes. Written by the ctor door (engine/singleton_ctors.cpp).
     // PUBLIC while foreign readers still reach the cell through the doors.
     static ExternalFactory* _singleton;
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md, DESIGN.md hook rule 5):
+    // ext.stream_cache. Null by default and under the faithful profile. External::Load, with the
+    // packed entry's FileStream open and before CompressedStream::Open, asks `_extLoadBegin` for
+    // another stream to serialize the object from (the resource's cached record); null = retail's
+    // compressed stream, which the extension then watches through CompressedStream::_extReadTap.
+    // `_extLoadEnd` closes the pair after the load, with its result. Which resource loads, and
+    // when, is unchanged either way.
+    using ExtLoadBeginFn = IO::Stream* (*)(IO::CompressedFileStream& cfs);
+    using ExtLoadEndFn   = void (*)(IO::CompressedFileStream& cfs, IO::Stream* alt, const External* result);
+    static ExtLoadBeginFn _extLoadBegin;   // defined in external_load.cpp
+    static ExtLoadEndFn   _extLoadEnd;     // defined in external_load.cpp
 
     // ---- the read-only half (ported bodies, src/engine/object/external.cpp)
     const External* Find(const System::Filename& path) const;      // 0x1800bdeb0

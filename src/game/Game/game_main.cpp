@@ -90,6 +90,7 @@ extern "C" void BootState_MarkQuitting();
 // non-rendering, so the synchronous A1 cost is invisible.
 #include "chunked_scene_loader.h"
 #include "ext/registry.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): Ext::InitFromSettings
+#include "ext/load_progress/load_progress.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/LOADPROGRESS.md): BootBegin
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 
 // ============================================================
@@ -611,6 +612,11 @@ int RunGameMain(void* platformHandle, const char* cmdLine) {
                         }
 
                         StallDebug::Mark("splash .rsc preloads (ShiningRock + Loading)");
+
+                        // EXT SEAM (NOT RETAIL, docs/extensions/handins/LOADPROGRESS.md): ext.load_progress
+                        // shows the Loading screen on the outer loader loops' frames while mods load.
+                        if (loadingLoop)
+                            Ext::LoadProgress::BootBegin(loadingLoop->_dialogExternal);
 
                         // ARM MenuDLT's scene load; do NOT run it here.
                         //

@@ -255,11 +255,19 @@ extern "C" ::Object::External* RtObject_External_Load(const System::Filename* pa
     // crash (src/engine/io/FileStream.h states the trap in full).
     // B3X W0: `IO::FileStream::Open`, slot 7, by name on the embedded
     // BinaryFileStream (+0x68) the real constructor above built.
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md): ext.stream_cache -- with the
+    // packed entry open, another stream to serialize from (the resource's cached record), or null:
+    // retail's compressed stream, opened and read exactly as below.
+    ::IO::Stream* altStream = nullptr;
     if (!static_cast<::IO::FileStream&>(cfsObj->_file).Open(*path)) {
         ++g_lc.openFileFailed;
-    } else if (!cfsObj->IO::CompressedStream::Open(cfsObj->_file, 1)) {   // 0x1800aa560
+    } else if ((altStream = ::Object::ExternalFactory::_extLoadBegin != nullptr
+                                ? ::Object::ExternalFactory::_extLoadBegin(*cfsObj)
+                                : nullptr) == nullptr &&
+               !cfsObj->IO::CompressedStream::Open(cfsObj->_file, 1)) {   // 0x1800aa560
         ++g_lc.openCompFailed;
     } else {
+        ::IO::Stream& loadStream = altStream != nullptr ? *altStream : static_cast<::IO::Stream&>(*cfsObj);
         // ---- 1800bc69b..1800bc6ca ---------------------------------------
         // Build the Serializer facade and ask the Encoding for the half it
         // does not have. READING takes +0x18, WRITING takes +0x20 -- and this
@@ -268,7 +276,7 @@ extern "C" ::Object::External* RtObject_External_Load(const System::Filename* pa
         // (0x1800b9960) inlined with version 0: `_stream`, a null
         // `_readerWriter`, the Encoding's CreateReader (+0x18, direction 0)
         // or CreateWriter (+0x20), the result at +0x08.
-        ::IO::Serializer ser(*cfsObj, 0);
+        ::IO::Serializer ser(loadStream, 0);
         ::IO::ReaderWriter* const rw = ser._readerWriter;
 
         bool bad = false;
@@ -369,7 +377,7 @@ extern "C" ::Object::External* RtObject_External_Load(const System::Filename* pa
                 // The object reads (or writes) ITSELF, through the same slot
                 // ExternalFactory::Add and External::SaveText drive.
                 ++g_lc.serialized;
-                obj->Serialize(*cfsObj);   // slot 5 +0x28
+                obj->Serialize(loadStream);   // slot 5 +0x28
             }
         }
 
@@ -400,6 +408,8 @@ extern "C" ::Object::External* RtObject_External_Load(const System::Filename* pa
     }
     ::Object::External* result = keep ? obj : nullptr;                             // 1800bc888
     if (result == nullptr) ++g_lc.returnedNull;
+    // EXT SEAM (NOT RETAIL, STREAMCACHE.md): the pair opened above closes, with the result.
+    if (::Object::ExternalFactory::_extLoadEnd != nullptr) ::Object::ExternalFactory::_extLoadEnd(*cfsObj, altStream, result);
 
     // ---- 1800bc88b..1800bc921 -------------------------------------------
     // The inlined ~CompressedFileStream chain. The Commit/CloseFile pair
@@ -416,6 +426,14 @@ extern "C" ::Object::External* RtObject_External_Load(const System::Filename* pa
 
     return result;                                                         // 1800bc921
 }
+
+}  // namespace RtObject
+
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/STREAMCACHE.md): ext.stream_cache (External.h).
+Object::ExternalFactory::ExtLoadBeginFn Object::ExternalFactory::_extLoadBegin = nullptr;
+Object::ExternalFactory::ExtLoadEndFn   Object::ExternalFactory::_extLoadEnd   = nullptr;
+
+namespace RtObject {
 
 void DumpLoadCounters() {
     printf("[ExtLoad] calls=%llu openFileFail=%llu openCompFail=%llu nullSer=%llu "
@@ -448,8 +466,10 @@ void DumpLoadCounters() {
 namespace RtObject {
 void DumpAddCounters();
 void DumpSaveTextCounters();
+void DumpVisitCounters();   // block VISITPASS, external_visit.cpp
 }
 void RtObjectExternalLoadInstallCounters() {
+    std::atexit(&RtObject::DumpVisitCounters);
     std::atexit(&RtObject::DumpSaveTextCounters);
     std::atexit(&RtObject::DumpAddCounters);
     std::atexit(&RtObject::DumpLoadCounters);

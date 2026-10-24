@@ -42,7 +42,7 @@ void Close() { g_combo = nullptr; }
 }  // namespace
 
 const Contribution& SeamlessLoopsEntry() {
-    static const Contribution c = { "seamless_loops", Open, Apply, Close };
+    static const Contribution c = { "seamless_loops", Open, Apply, Close, nullptr };
     return c;
 }
 

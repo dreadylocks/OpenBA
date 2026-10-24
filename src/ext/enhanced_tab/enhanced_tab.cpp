@@ -38,6 +38,7 @@ UI::ElementDescription* LoadDescription(const char* path) {
 const Contribution* const* Contributions(int* n) {
     static const Contribution* const list[] = {
         &AmbientOcclusionEntry(), &BetterTreesEntry(), &MaxShadowResEntry(), &SeamlessLoopsEntry(),
+        &DerivedCacheEntry(),
     };
     *n = static_cast<int>(sizeof(list) / sizeof(list[0]));
     return list;
@@ -73,6 +74,16 @@ void Apply(const void* dialog) {
     int n = 0;
     const Contribution* const* list = Contributions(&n);
     for (int i = 0; i < n; ++i) list[i]->apply();
+}
+
+bool OnButton(const void* dialog, int32_t elementId) {
+    if (dialog == nullptr || dialog != g_dialog) return false;
+    int n = 0;
+    const Contribution* const* list = Contributions(&n);
+    for (int i = 0; i < n; ++i) {
+        if (list[i]->button != nullptr && list[i]->button(elementId)) return true;
+    }
+    return false;
 }
 
 void Close(const void* dialog) {

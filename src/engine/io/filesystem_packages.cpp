@@ -307,7 +307,7 @@
 #include "collection/Collection.h"
 #include "system/string_internal.h"
 #include "collection/avl_trees.h"   // rtavl::FilenameSetInsert
-#include "io/packfile_generation.h"   // block SAVELOAD: the index change counter
+#include "io/packfile_fold_index.h"   // block PATHINDEX: the hash index beside _packfileIndex
 
 #include <new>        // placement new into the retail hidden return slot
 #include <utility>    // std::move -- the pointer steal out of a POD out-param
@@ -591,6 +591,7 @@ void FileSystem::ClosePackages() {
     _packfiles._size    = 0;
     _packfiles._capacity = 0;
 
+    ::IO::PackIndexClear(&_packfileIndex);   // NOT RETAIL (block PATHINDEX): the nodes go next
     RtIO::PackfileIndexNode* const root = _packfileIndex.root;
     if (root != nullptr) {
         // ENDGAME B.3.2 step 2 — FUN_180008340, the recursive subtree free, IS
@@ -613,7 +614,10 @@ void FileSystem::ClosePackages() {
     // Zeroed unconditionally, even when root was already null.
     _packfileIndex.count = 0;
     _packfileIndex.root  = nullptr;
-    ::IO::BumpPackfileIndexGeneration();   // NOT RETAIL (block SAVELOAD): the tree changed
+    // NOT RETAIL (fix.large_packages, docs/extensions/handins/LARGEPKM.md): the packages are gone,
+    // so are their 64-bit offsets. The next LoadPackages rebuilds them.
+    _extWidePackages = nullptr;
+    _extWideCount    = 0;
 
 }
 
@@ -729,8 +733,12 @@ void FileSystem::LoadPackages() {
     }
 
     // ---- LOOP 3: the path -> {packIndex, fileIndex} index ------------------
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/PKGCACHE.md): ext.package_cache may build the
+    // identical tree from the derived cache; the loop then runs over no package.
+    const bool restored = _extIndexRestore != nullptr && _extIndexRestore(*this);
+    const int32_t indexedPacks = restored ? 0 : _packfiles._size;
     int64_t inserted = 0, overridden = 0, kept = 0;
-    for (int32_t pi = 0; pi < _packfiles._size; ++pi) {
+    for (int32_t pi = 0; pi < indexedPacks; ++pi) {
         PackageFile* pkg = _packfiles[pi];
         const int32_t entries = pkg->_entries._size;      // MOV EAX,[RCX+0xb8]
         for (int32_t fi = 0; fi < entries; ++fi) {
@@ -742,8 +750,14 @@ void FileSystem::LoadPackages() {
             // place, and the one release is ~key at the bottom of the iteration.
             System::Filename key(owner->IO::PackageFile::GetFileName(fi));
 
-            RtIO::PackfileIndexNode* node =
-                RtIO::IndexFind(_packfileIndex.root, key._data);
+            // NOT RETAIL (block PATHINDEX): the hash index answers when it can.
+            RtIO::PackfileIndexNode* node = nullptr;
+            const bool answered = ::IO::PackIndexFind(&_packfileIndex, key._data, &node);
+            if (!answered || OPENBA_PATHINDEX_CHECK) {
+                RtIO::PackfileIndexNode* const indexed = node;
+                node = RtIO::IndexFind(_packfileIndex.root, key._data);
+                ::IO::PackIndexCheck(answered, key._data, indexed, node);
+            }
             if (node != nullptr) {
                 // The incumbent's OWN +0xAC decides, not the newcomer's: retail
                 // indexes packfiles[] with the FOUND NODE's packIndex
@@ -754,7 +768,6 @@ void FileSystem::LoadPackages() {
                     node->element.value = RtIO::PackfileIndexValue{
                         static_cast<uint32_t>(pi), static_cast<uint32_t>(fi) };
                     ++overridden;
-                    ::IO::BumpPackfileIndexGeneration();   // NOT RETAIL (block SAVELOAD): conservative, the key set is unchanged
                 } else {
                     ++kept;
                 }
@@ -790,13 +803,17 @@ void FileSystem::LoadPackages() {
                                                       static_cast<uint32_t>(fi) };
                 RtIO::PackfileIndexNode* out = nullptr;
                 rtavl::FilenameSetInsert(&_packfileIndex, &out, &key, &value);
-                ::IO::BumpPackfileIndexGeneration();   // NOT RETAIL (block SAVELOAD): the tree changed
+                ::IO::PackIndexInsert(&_packfileIndex, out);   // NOT RETAIL (block PATHINDEX)
                 ++inserted;
             }
 
             // ~key is retail's release at the bottom of the iteration.
         }
     }
+
+    // EXT SEAM (NOT RETAIL, PKGCACHE.md): the tree the loop built, for the derived cache.
+    if (!restored && _extIndexBuilt != nullptr)
+        _extIndexBuilt(*this);
 
     // ---- teardown of the temporary Filename array -------------------------
     // Retail releases each element with the inlined String idiom and then frees
@@ -811,7 +828,9 @@ void FileSystem::LoadPackages() {
     found.data  = nullptr;
     found.size = 0;
 
-
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/LARGEPKM.md): fix.large_packages builds the
+    // 64-bit entry offsets of any mounted package past 2 GiB, now that the pack indices are final.
+    if (_extPackagesMounted != nullptr) _extPackagesMounted(*this);
 }
 
 // ============================================================================

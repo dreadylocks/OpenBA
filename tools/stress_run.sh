@@ -236,7 +236,7 @@ fi
 # which pauses the sim for the rest of the run. 2026-10-12: two stress runs at 0.00 sim iterations
 # per frame because the window came up unfocused (the user was typing elsewhere). As
 # tools/linux_run.sh does: switch it off for the run and restore the file at exit.
-CFG="${USERPROFILE:-$HOME}/Documents/Banished/settings.cfg"; CFG_SAVED=""
+CFG="${BANISHED_USER_DIR:-${USERPROFILE:-$HOME}/Documents/Banished}/settings.cfg"; CFG_SAVED=""   # tools/game_dirs.sh
 if [ -f "$CFG" ] && { grep -q '^GameAutoPause=' "$CFG" || [ -n "${STRESS_EXT:-}" ] || [ -n "${STRESS_CPU_LIMIT:-}" ]; }; then
     CFG_SAVED="$(mktemp)"; cp -f "$CFG" "$CFG_SAVED"
     sed -i 's/^GameAutoPause=.*/GameAutoPause=false/' "$CFG"

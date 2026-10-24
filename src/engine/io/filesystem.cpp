@@ -49,6 +49,7 @@
 #include "io/FileSystem.h"
 #include "io/Modification.h"
 #include "io/PackageFile.h"   // the packfile array's element
+#include "io/packfile_fold_index.h"   // block PATHINDEX: the hash index beside _packfileIndex
 #include "system/Error.h"
 #include "system/String.h"
 #include "system/string_internal.h"
@@ -260,8 +261,15 @@ uint32_t FileSystem::GetPackfileId(const System::Filename& path) const {
         System::Filename relPath(pathData + dataDirLen);
 
         const char* str1 = relPath._data;
+        // NOT RETAIL (block PATHINDEX): the hash index answers when it can.
+        RtIO::PackfileIndexNode* indexed = nullptr;
+        const bool answered = ::IO::PackIndexFind(&_packfileIndex, str1, &indexed);
         RtIO::PackfileIndexNode* node = _packfileIndex.root;
         RtIO::PackfileIndexNode* found = nullptr;
+        if (answered && !OPENBA_PATHINDEX_CHECK) {
+            found = indexed;
+            node = nullptr;
+        }
         while (node) {
             const char* key = node->element.key._data;
             bool condA;
@@ -282,6 +290,7 @@ uint32_t FileSystem::GetPackfileId(const System::Filename& path) const {
             }
         }
 
+        ::IO::PackIndexCheck(answered, str1, indexed, found);
         if (found)
             ours = _packfiles[found->element.value.packIndex]->_crc;          // +0xA8, the packfile id
 
@@ -347,6 +356,15 @@ int Modification::Find(const System::Filename& path) const {
 // that is a fact about retail, not a gap. Every call allocates a FRESH buffer
 // (unlike GetDataDirectory / GetSourceDirectory, which AddRef a shared one).
 System::Filename FileSystem::GetSaveDirectory() const {
+    // NOT RETAIL: BANISHED_USER_DIR (harness, tools/game_dirs.sh) replaces the
+    // "<Documents>\Banished" folder as a whole, so the override takes the place of
+    // the Format below -- the folder plus retail's trailing separator. Unset, the
+    // retail arm runs unchanged.
+    if (const char* user = Platform::UserDirOverride()) {
+        System::String formatted = System::String::Format("%s\\", user);
+        return System::Filename(formatted);
+    }
+
     System::String docs;
     if (!Platform::DocumentsDir(docs)) {
         System::Error::SetText(

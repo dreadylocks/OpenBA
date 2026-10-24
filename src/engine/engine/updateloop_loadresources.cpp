@@ -197,10 +197,24 @@ void Engine::UpdateLoop::LoadResources() {
         IO::Modification* mods = IO::Modification::_singleton;
         const int32_t count = mods->_mods._size;
         RtIO::Mod* base = mods->_mods._data;
+        // EXT SEAM (NOT RETAIL, docs/extensions/handins/LOADPROGRESS.md): ext.load_progress's
+        // count of the mod lists this walk loads.
+        ExtLoadProgress* const progress = _extLoadProgress;
+        int32_t enabledOrdinal = 0;
+        if (progress != nullptr) {
+            int32_t enabled = 0;
+            for (int32_t i = 0; i < count; ++i) {
+                if (base[i].enabled != 0)
+                    ++enabled;
+            }
+            progress->mods.store(enabled, std::memory_order_relaxed);
+        }
         for (int32_t i = 0; i < count; ++i) {
             RtIO::Mod& mod = base[i];
             if (mod.enabled == 0) continue;
             ++g_modsSeen;
+            if (progress != nullptr)
+                progress->mod.store(++enabledOrdinal, std::memory_order_relaxed);
 
             // Filename::GetPathFilename(&mod->file, &ret, /*keepSlash*/true).
             System::String dir;
@@ -255,7 +269,16 @@ void Engine::UpdateLoop::LoadResources() {
         System::Filename name(value);
         FindAndCheck(name, false);
     }
+
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/LOADPROGRESS.md): this call is done.
+    if (ExtLoadProgress* const progress = _extLoadProgress) {
+        progress->mod.store(0, std::memory_order_relaxed);
+        progress->lists.fetch_add(1, std::memory_order_relaxed);
+    }
 }
+
+// EXT SEAM (NOT RETAIL, docs/extensions/handins/LOADPROGRESS.md): null by default.
+Engine::UpdateLoop::ExtLoadProgress* Engine::UpdateLoop::_extLoadProgress = nullptr;
 
 extern "C" void RtEngineLoadResourcesSummary() {
     printf("[RtPort]   Engine::UpdateLoop::LoadResources: calls=%u ownList=%u "

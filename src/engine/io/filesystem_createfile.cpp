@@ -95,7 +95,7 @@
 #include "system/WideString.h"
 #include "io/Modification.h"   // RtColl_ArrayFilenameDtor_1800098d0
 #include "collection/avl_trees.h"      // rtavl::SubtreeFree
-#include "io/packfile_generation.h"   // block SAVELOAD: the index change counter
+#include "io/packfile_fold_index.h"   // block PATHINDEX: the hash index beside _packfileIndex
 
 #include <new>        // placement new into the retail hidden return slot
 #include <utility>    // std::move -- the pointer steal out of a POD out-param
@@ -412,6 +412,7 @@ void FileSystem::PlatformCloseFile(RtIO::FileInfo& infoRef) {
 
     if (info->winHandle == Platform::kInvalidFileHandle) return;               // 1800ae03d/41
 
+    PackedMapRelease(info->winHandle);   // MAPREAD (NOT RETAIL): unmap first (FileSystem.h)
     Platform::FileClose(info->winHandle);                    // 1800ae047 CloseHandle
     info->winHandle = Platform::kInvalidFileHandle;                            // 1800ae04d
 
@@ -516,11 +517,11 @@ FileSystem::~FileSystem() {
 
     // Step 1. The tree object is (root, count) at +0x40/+0x48; retail passes
     // its ADDRESS as `this` and the root as the node.
+    ::IO::PackIndexClear(&_packfileIndex);   // NOT RETAIL (block PATHINDEX): the nodes go next
     rtavl::SubtreeFree(&_packfileIndex, _packfileIndex.root);   // 1800ac6ff
 
     _packfileIndex.root  = nullptr;                    // 1800ac706
     _packfileIndex.count = 0;                          // 1800ac709
-    ::IO::BumpPackfileIndexGeneration();               // NOT RETAIL (block SAVELOAD): the tree changed
 
     // Step 3 — Array<Filename>, ported by modification.cpp and registered.
     RtIO::RtColl_ArrayFilenameDtor_1800098d0(&_userPackFilenames);   // 1800ac710
