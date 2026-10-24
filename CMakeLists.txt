@@ -375,6 +375,11 @@ if(RENDER_BACKEND_READY)
     target_link_libraries(OpenBA PRIVATE "-framework Network")
   else()
     target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+    # OpenSSL, the system's shared libssl / libcrypto (libssl-dev): wss:// for the WebSocket seam
+    # (src/platform/posix/websocket_posix.cpp) for ext.neighbour. Linux only: Windows and macOS
+    # use the OS's own client (WinHTTP, Network.framework).
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(OpenBA PRIVATE OpenSSL::SSL OpenSSL::Crypto)
   endif()
   # The backend's own link libraries (metal: the Metal and QuartzCore frameworks; dx11: none).
   target_link_libraries(OpenBA PRIVATE ${RENDER_BACKEND_LINK_LIBRARIES})

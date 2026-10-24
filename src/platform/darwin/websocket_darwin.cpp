@@ -2,7 +2,7 @@
 // src/platform/darwin/websocket_darwin.cpp -- NOT RETAIL. The WebSocket seam on macOS
 // ============================================================================
 // platform_websocket.h, for ext.neighbour (docs/fork/NEIGHBOUR_TOWNS.md). Replaces
-// posix/websocket_posix.cpp (the stub) on Apple (src/platform/darwin/README.md). The OS's own
+// posix/websocket_posix.cpp (the Linux client) on Apple (src/platform/darwin/README.md). The OS's own
 // client, Network.framework (nw_connection + its WebSocket protocol), so ws:// and wss:// both
 // work with TLS from the OS and no third-party library, as WinHTTP does on Windows.
 //
