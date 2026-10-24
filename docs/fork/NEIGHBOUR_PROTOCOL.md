@@ -45,6 +45,7 @@ for that game and says why in the event log (or the lobby).
 | `token` | string, optional | the seat token from this town's first `welcome` (16..64 lowercase hex) |
 | `lastSeq` | int | the last chat number this town has shown (newer lines are replayed) |
 | `join` | bool, optional | true from the lobby's Join: refused if the room was not created in the lobby |
+| `fresh` | bool, optional | true on a new game's hellos until its first `welcome` (never a loaded save, never a reconnect): the relay drops what this seat's earlier game left -- its buildings, roads, land and the resource changes still queued for the neighbour -- and tells an online neighbour (`unbuild`, `road` `off`, `released`) |
 | `engine` | string | `openba` |
 | `engineVer` | string | OpenBA's version, e.g. `1.0.0` |
 | `simBuild` | string | 16 hex: xxHash64 of version, git commit, compiler and target; `""` = unknown |

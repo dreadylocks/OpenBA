@@ -595,6 +595,15 @@ UNIT_TEST(ext_neighbour_seat_store) {
     CHECK_EQ(many.size(), Neighbour::kMaxSeats);
     CHECK(Neighbour::FindSeat(many, "ws://h", "room0", "T").empty());
     CHECK(!Neighbour::FindSeat(many, "ws://h", "room204", "T").empty());
+    // The lobby's "your room": the newest seat in a room, whatever the town's name.
+    std::vector<Neighbour::SeatKey> mine;
+    CHECK(Neighbour::PutSeat(mine, {"wss://r.dev", "local-test", "testingville", "6666666666666666"}));
+    CHECK(Neighbour::PutSeat(mine, {"wss://r.dev", "other", "Elmstead", "7777777777777777"}));
+    const Neighbour::SeatKey own = Neighbour::FindSeatInRoom(mine, "wss://r.dev/", "local-test");
+    CHECK_STREQ(own.town.c_str(), "testingville");
+    CHECK_STREQ(own.token.c_str(), "6666666666666666");
+    CHECK(Neighbour::FindSeatInRoom(mine, "wss://r.dev", "nobody-here").token.empty());
+    CHECK(Neighbour::FindSeatInRoom(mine, "wss://elsewhere.dev", "local-test").token.empty());
 }
 
 // world_maths.h: a lobby room's shared map is built with the engine's ported MSVC powf / sinf / cosf so

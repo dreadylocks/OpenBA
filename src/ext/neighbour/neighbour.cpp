@@ -77,6 +77,9 @@ LobbyStart            s_lobby;
 bool                  s_restoreRequested = false;
 bool                  s_restoreTo = false;
 std::string           s_worldHashNew;     // NoteWorldHash during this Load (a new game's map)
+// A new game (not a save) that the relay has not yet welcomed: its hellos say `fresh`, so the relay
+// drops what an earlier game left in this town's seat. The first welcome ends it.
+bool                  s_freshGame = false;
 uint64_t              s_parcelCounter = 0;
 constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
 
@@ -135,6 +138,7 @@ Message Hello() {
      .Set("name", s_config.name)
      .SetInt("lastSeq", lastSeq);
     if (!token.empty()) m.Set("token", token);   // our seat (the relay never seats a town by name)
+    if (s_freshGame && !s_loadedFromSave) m.SetBool("fresh", true);
     AddHandshake(m, LocalInfoNow());
     return m;
 }
@@ -321,6 +325,10 @@ void OnMessage(const Message& m) {
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
+        if (s_freshGame) {   // told once: a reconnect must not drop this game's own buildings
+            s_freshGame = false;
+            if (s_link) s_link->SetHello(Hello());
+        }
         ResendOutbox();
         SharedMap::OnJoined(s_link.get());
         std::string hash;
@@ -443,6 +451,12 @@ std::string LoadSeatToken(const std::string& server, const std::string& room, co
     return FindSeat(DecodeSeats(text), server, room, town);
 }
 
+std::vector<SeatKey> LoadSeats() {
+    std::string path, text;
+    if (!SeatFilePath(path) || !Platform::ReadWholeFile(path.c_str(), text)) return {};
+    return DecodeSeats(text);
+}
+
 void RememberSeat(const std::string& server, const std::string& room, const std::string& town,
                   const std::string& token) {
     std::string path;
@@ -474,6 +488,7 @@ void ResetForGame(const void* owner) {
     // A lobby game is a shared map from its first structure on (the start town is built during
     // this Load, before SelectForGame).
     SharedMap::Begin(s_lobbyGame);
+    s_freshGame = true;   // until the save (if this Load is one) says otherwise
     std::lock_guard<std::mutex> lock(s_savedMu);
     s_saved = SavedState();
     s_loadedFromSave = false;

@@ -10,7 +10,7 @@
 //
 // Controller: src/ext/neighbour/lobby_panel.cpp. It looks up, by name: textConnection, buttonRelay,
 // rowRelay, editRelay, buttonConnect, editSearch, buttonRefresh, roomTable, textListNote, textPanelTitle,
-// textPanelNote, fieldRoom, editRoom, fieldPass, editPass, fieldTown, editTown, buttonPrimary,
+// textPanelNote, fieldRoom, editRoom, fieldPass, editPass, fieldTown, editTown, buttonLoad, buttonPrimary,
 // captionPrimary, textStatus, buttonNew, buttonBack; in each row (template 0 = roomRow) roomName,
 // roomSeats, roomDetails.
 
@@ -125,7 +125,7 @@ TextDescription roomDetails : "muted" { int _minWidth = 386; }
 RibbonDescription rightColumn
 {
 	bool _vertical = true; int _cellPad = 6; int _minWidth = 290; Alignment _alignment = TopLeft;
-	ElementDescription _elements [ "textPanelTitle" "textPanelNote" "fieldRoom" "fieldPass" "fieldTown" "buttonPrimary" "textStatus" ]
+	ElementDescription _elements [ "textPanelTitle" "textPanelNote" "fieldRoom" "fieldPass" "fieldTown" "buttonLoad" "buttonPrimary" "textStatus" ]
 }
 TextDescription textPanelTitle : "ExtensionsNeighbour.rsc:value" { int _minWidth = 290; }
 TextDescription textPanelNote : "muted" { int _minWidth = 290; }
@@ -141,6 +141,8 @@ EditDescription editPass : "field" { bool _password = true; }
 EditDescription editTown : "field" { int _maxLength = 24; }
 
 TextDescription captionPrimary : "ExtensionsNeighbour.rsc:caption" { }
+TextDescription captionLoad : "ExtensionsNeighbour.rsc:caption" { String _text = "LobbyLoad"; }
+ButtonDescription buttonLoad : "ExtensionsNeighbour.rsc:button" { ElementDescription _content = "captionLoad"; int _minWidth = 150; }
 ButtonDescription buttonPrimary : "ExtensionsNeighbour.rsc:button" { ElementDescription _content = "captionPrimary"; int _minWidth = 150; }
 TextDescription textStatus : "small" { int _minWidth = 290; }
 

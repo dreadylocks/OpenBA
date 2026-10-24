@@ -37,10 +37,15 @@ bool PutSeat(std::vector<SeatKey>& seats, const SeatKey& seat);
 // The token for (server, room, town); "" when none.
 std::string FindSeat(const std::vector<SeatKey>& seats, const std::string& server, const std::string& room,
                      const std::string& town);
+// The newest seat for (server, room) whatever the town's name (the lobby: "this is your room, as
+// <town>"); a SeatKey with an empty token when none.
+SeatKey FindSeatInRoom(const std::vector<SeatKey>& seats, const std::string& server, const std::string& room);
 
 // The file itself (neighbour.cpp, game side; main thread). LoadSeatToken: "" when there is none or the
 // file cannot be read. RememberSeat re-reads the file, puts the seat and replaces the file in one write.
 std::string LoadSeatToken(const std::string& server, const std::string& room, const std::string& town);
+// Every seat in the file; empty when there is none or it cannot be read.
+std::vector<SeatKey> LoadSeats();
 void        RememberSeat(const std::string& server, const std::string& room, const std::string& town,
                          const std::string& token);
 

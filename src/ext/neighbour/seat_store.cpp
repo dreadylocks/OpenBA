@@ -101,4 +101,12 @@ std::string FindSeat(const std::vector<SeatKey>& seats, const std::string& serve
     return std::string();
 }
 
+SeatKey FindSeatInRoom(const std::vector<SeatKey>& seats, const std::string& server, const std::string& room) {
+    const std::string s = Server(server);
+    const std::string r = Field(room);
+    for (size_t i = seats.size(); i-- > 0;)
+        if (seats[i].server == s && seats[i].room == r) return seats[i];
+    return SeatKey();
+}
+
 }  // namespace Neighbour

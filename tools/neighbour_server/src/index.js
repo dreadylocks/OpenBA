@@ -509,6 +509,34 @@ export class Room {
     if (q.length > 0) await this.ctx.storage.delete(key);
   }
 
+  // A town starting a new game in its seat (hello `fresh`): what its earlier game left goes -- its
+  // buildings, roads and land, and the resource changes still waiting for the neighbour -- and an
+  // online neighbour is told, so nothing of the old town stays on the neighbour's map. (A town that
+  // later loads an older save sends its buildings and land again on joining.)
+  async resetSeat(seat) {
+    const peers = this.socketsFor(1 - seat);
+    const mine = String(seat);
+    const mirror = (await this.ctx.storage.get(`mirror:${seat}`)) || {};
+    for (const id of Object.keys(mirror)) for (const p of peers) this.send(p, { t: "unbuild", id });
+    const roads = (await this.ctx.storage.get(`roads:${seat}`)) || {};
+    for (const cell of Object.keys(roads)) for (const p of peers) this.send(p, { t: "road", cell: Number(cell), off: true });
+    const blocks = await this.ctx.storage.list({ prefix: "claims:" });
+    let batch = {};
+    for (const [key, v] of blocks) {
+      if (!v.includes(mine)) continue;
+      batch[key] = v.split(mine).join(".");
+      const [, bx, by] = key.split(":");
+      const rects = `${Number(bx) * kClaimBlock},${Number(by) * kClaimBlock},${kClaimBlock},${kClaimBlock}`;
+      for (const p of peers) this.send(p, { t: "released", seat, rects });
+      if (Object.keys(batch).length === 100) {   // storage.put takes at most 128 keys at once
+        await this.ctx.storage.put(batch);
+        batch = {};
+      }
+    }
+    if (Object.keys(batch).length > 0) await this.ctx.storage.put(batch);
+    await this.ctx.storage.delete([`mirror:${seat}`, `roads:${seat}`, `natq:${1 - seat}`]);
+  }
+
   async sendMirror(ws, seat) {
     const all = (await this.ctx.storage.get(`mirror:${1 - seat}`)) || {};
     for (const rec of Object.values(all)) this.send(ws, { t: "build", ...rec });
@@ -589,6 +617,7 @@ export class Room {
     a.seat = seat;
     a.name = name;
     ws.serializeAttachment(a);
+    if (msg.fresh === true) await this.resetSeat(seat);   // a new game in this seat: the old town goes
 
     const peerName = meta.seats[other] || "";
     const peerOnline = this.socketsFor(other).length > 0;

@@ -275,6 +275,33 @@ check(el && el.fatal === true && /same land/.test(el.why), "a town that built ot
 check(!!(await tryWait(hsA.wait((m) => m.t === "hashCheck" && m.same === false))), "and the neighbour is told the lands differ");
 for (const x of [tokenless, v1, hsA, hsData, hsB]) x.ws.close();
 
+// Starting over: a town back in its seat with a new game (hello `fresh`) takes its old buildings,
+// roads and land with it, and the neighbour is told.
+const freshRoom = `freshtest-${Date.now()}`;
+const fa = opener(freshRoom, { t: "create", pass: "pw4", name: "Firstly", ...settings });
+await tryWait(fa.wait((m) => m.t === "welcome"));
+const fb = opener(freshRoom, { t: "hello", pass: "pw4", name: "Secondly", join: true });
+await tryWait(fb.wait((m) => m.t === "welcome"));
+fa.ws.send(JSON.stringify({ t: "claim", id: "fc1", rects: "5,5,2,2" }));
+await tryWait(fa.wait((m) => m.t === "claimed" && m.id === "fc1"));
+fa.ws.send(JSON.stringify({ t: "build", id: "fb1", tmpl: "Template\\WoodHouse.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 5, ty: 5, tw: 2, th: 2, built: 100 }));
+fa.ws.send(JSON.stringify({ t: "road", cell: 1234, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+await tryWait(fb.wait((m) => m.t === "road" && m.cell === 1234 && !m.off));
+fa.ws.close(1000, "bye");
+await fa.closed;
+const fa2 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", fresh: true });
+const fw = await tryWait(fa2.wait((m) => m.t === "welcome"));
+const gone = await tryWait(fb.wait((m) => m.t === "unbuild" && m.id === "fb1"));
+const unpaved = await tryWait(fb.wait((m) => m.t === "road" && m.cell === 1234 && m.off === true));
+const freed = await tryWait(fb.wait((m) => m.t === "released" && m.seat === 0 && m.rects === "0,0,32,32"));
+check(fw && fw.seat === 0 && !!gone && !!unpaved && !!freed, "a town starting over in its seat takes its old buildings, roads and land");
+fb.ws.close(1000, "bye");
+await fb.closed;
+const fb2 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Secondly", join: true });
+const fend = await tryWait(fb2.wait((m) => m.t === "mirrorEnd"));
+check(fend && fend.count === 0 && !fb2.inbox.some((m) => m.t === "claimBlock"), "and a neighbour joining later sees none of them");
+for (const x of [fa2, fb2]) x.ws.close();
+
 // The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
 const upgradeStatus = await new Promise((resolve) => {
   const u = new URL(`${server}/lobby`.replace(/^ws/, "http"));

@@ -622,4 +622,13 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   settings keys (`neighbour.server`), the extension id and save codec, file names, the protocol, the
   `[Neighbour]` log prefix, and the relay's seat and password hashing.
 - **Mac trackpad**: tap to click (and the two-finger tap) now reach the game (`mac_keymap.h`).
+- **Found and fixed: the lobby did not know your own rooms** (the user, 2026-10-24: back in the room
+  they had made, the screen offered to join it as the neighbor). The screen now reads the seat file
+  (`seat_store.h` `FindSeatInRoom`) at each Refresh: rooms this machine holds a seat in are listed
+  first and tagged "yours", and picking one shows "Your room" as that town with **Load saved game**
+  (the game's Load screen: a save carries its room and seat) and **Start over as <town>**. Starting
+  over is a new game in the same seat; its first hello says `fresh`, and the relay drops what the old
+  game left in that seat (buildings, roads, land, queued resource changes) and tells the neighbour
+  (`NEIGHBOUR_PROTOCOL.md` hello; selftest 50 checks). A town that later loads an older save sends its
+  buildings and land again on joining, so nothing is lost for good.
 - **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.

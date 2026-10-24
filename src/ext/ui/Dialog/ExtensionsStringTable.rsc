@@ -76,6 +76,7 @@ StringTable resource
 		{ String _name = "LobbyRefresh";		String _text = "Refresh"; }
 		{ String _name = "LobbyNewRoom";		String _text = "New room"; }
 		{ String _name = "LobbyBack";			String _text = "Back"; }
+		{ String _name = "LobbyLoad";			String _text = "Load saved game"; }
 		{ String _name = "LobbyFooter";			String _text = "Or start your own room: you pick its map next."; }
 
 		// ext.load_progress's line on the boot loading screen (src/ext/load_progress/): @0 / @1 the mod numbers

@@ -49,7 +49,7 @@ constexpr const char* kLobbyRsc  = "Dialog/ExtensionsLobby.rsc";
 constexpr const char* kButtonRsc = "Dialog/ExtensionsLobby.rsc:buttonMultiplayer";
 constexpr int kMaxRows = 200;   // rows shown at most; the search narrows the rest
 
-enum : int32_t { kIdBack = 100, kIdRow0 = 3000, kIdRefresh = 4001, kIdPrimary, kIdNew, kIdRelay, kIdConnect };
+enum : int32_t { kIdBack = 100, kIdRow0 = 3000, kIdRefresh = 4001, kIdPrimary, kIdNew, kIdRelay, kIdConnect, kIdLoad };
 constexpr int32_t kMsgClick = 0x12;
 
 // Text colours (ARGB): ordinary, dimmed details, a full room, the picked room, a good and a bad state.
@@ -126,6 +126,7 @@ public:
         if (UI::Element* e = Find(this, "buttonNew")) e->SetElementId(kIdNew);
         if (UI::Element* e = Find(this, "buttonRelay")) e->SetElementId(kIdRelay);
         if (UI::Element* e = Find(this, "buttonConnect")) e->SetElementId(kIdConnect);
+        if (UI::Element* e = Find(this, "buttonLoad")) e->SetElementId(kIdLoad);
         _table = FindElement(System::String("roomTable"));
         // The relay: what was typed earlier this session, else settings.cfg's.
         const std::string relay = s_typedRelay.empty() ? SettingsServer() : s_typedRelay;
@@ -169,6 +170,12 @@ public:
             if (id == kIdRefresh || id == kIdConnect) Refresh();
             else if (id == kIdRelay) ShowRelayRow(!_relayShown);
             else if (id == kIdNew) ShowCreate();
+            else if (id == kIdLoad) {
+                MainMenuDialog* menu = _menu;
+                Close();
+                menu->OpenLoad();   // a saved town carries its room and seat with it
+                return;
+            }
             else if (id == kIdPrimary) {
                 if (_mode == Mode::Create && Create()) return;
                 if (_mode == Mode::Join && Join()) return;
@@ -225,12 +232,14 @@ private:
         }
         std::string why;
         std::vector<RoomInfo> rooms;
+        _mySeats = LoadSeats();
+        _server = server;
         if (ListRooms(&MakePlatformTransport, server, rooms, why)) {
-            // Open rooms first, then full ones; the most recently used first in each.
-            std::stable_sort(rooms.begin(), rooms.end(), [](const RoomInfo& a, const RoomInfo& b) {
-                const bool fullA = a.seats >= 2;
-                const bool fullB = b.seats >= 2;
-                if (fullA != fullB) return !fullA;
+            // Rooms this machine holds a seat in first, then open rooms, then full ones; the most
+            // recently used first in each.
+            auto rank = [this](const RoomInfo& r) { return Yours(r) ? 0 : (r.seats >= 2 ? 2 : 1); };
+            std::stable_sort(rooms.begin(), rooms.end(), [&rank](const RoomInfo& a, const RoomInfo& b) {
+                if (rank(a) != rank(b)) return rank(a) < rank(b);
                 return a.lastActive > b.lastActive;
             });
             _rooms = rooms;
@@ -250,6 +259,10 @@ private:
         if (_mode == Mode::Join && FindRoom(_selected) == nullptr) ShowPick();
         Rebuild();
     }
+
+    // Our seat in a room (seat_store.h), as of the last Refresh; an empty token when none.
+    SeatKey MySeat(const RoomInfo& r) const { return FindSeatInRoom(_mySeats, _server, r.name); }
+    bool Yours(const RoomInfo& r) const { return !MySeat(r).token.empty(); }
 
     const RoomInfo* FindRoom(const std::string& name) const {
         for (const RoomInfo& r : _rooms)
@@ -296,9 +309,10 @@ private:
             }
             row->Hide(false);
             const RoomInfo& r = _rooms[_visible[slot]];
-            const bool full = r.seats >= 2;
+            const bool yours = Yours(r);
+            const bool full = r.seats >= 2 && !yours;   // a full room of ours is not closed to us
             const bool picked = _mode == Mode::Join && r.name == _selected;
-            const std::string seats = full ? "full" : (r.seats == 1 ? "1 of 2" : "empty");
+            const std::string seats = yours ? "yours" : (full ? "full" : (r.seats == 1 ? "1 of 2" : "empty"));
             const std::string by = r.creator.empty() ? std::string() : "by " + r.creator + " - ";
             Paint(row->FindElement(System::String("roomName")).Get(), Sanitize(r.name, 64),
                   full ? kColourDim : (picked ? kColourPicked : kColourText));
@@ -318,6 +332,12 @@ private:
             for (size_t i : _visible)
                 if (_rooms[i].seats < 2) ++open;
             foot = std::to_string(matches) + (matches == 1 ? " room, " : " rooms, ") + std::to_string(open) + " open";
+            if (!_mySeats.empty()) {
+                size_t yours = 0;
+                for (size_t i : _visible)
+                    if (Yours(_rooms[i])) ++yours;
+                if (yours > 0) foot += ", " + std::to_string(yours) + " yours";
+            }
         }
         SetText(Find(this, "textListNote"), foot);
     }
@@ -330,10 +350,12 @@ private:
     void ShowPick() {
         _mode = Mode::Pick;
         _selected.clear();
+        _ownTown.clear();
         Panel("Pick a room", "Choose one on the left, or start a new one.");
         Show("fieldRoom", false);
         Show("fieldPass", false);
         Show("fieldTown", false);
+        Show("buttonLoad", false);
         Show("buttonPrimary", false);
     }
 
@@ -342,26 +364,40 @@ private:
         const RoomInfo& r = _rooms[i];
         _mode = Mode::Join;
         _selected = r.name;
-        const std::string who = r.creator.empty() ? std::string("A town") : r.creator;
-        Panel("Join " + Sanitize(r.name, 40),
-              r.seats >= 2 ? "Full: only its own two towns can come back."
-                           : (r.seats == 1 ? who + " is waiting for a neighbor." : "No town is in this room yet."));
+        // A room this machine holds a seat in (seat_store.h): yours, as that town, never a second seat.
+        const SeatKey seat = MySeat(r);
+        _ownTown = seat.token.empty() ? std::string() : seat.town;
         Show("fieldRoom", false);
         Show("fieldPass", true);
-        Show("fieldTown", true);
         Show("buttonPrimary", true);
-        SetText(Find(this, "captionPrimary"), "Join room");
-        Status("");
+        if (!_ownTown.empty()) {
+            Panel("Your room: " + Sanitize(r.name, 36), "You play here as " + Sanitize(_ownTown, kMaxNameChars) + ".");
+            Show("fieldTown", false);
+            Show("buttonLoad", true);
+            SetText(Find(this, "captionPrimary"), "Start over as " + Sanitize(_ownTown, kMaxNameChars));
+            Status("Starting over clears your old town here.", kColourMuted);
+        } else {
+            const std::string who = r.creator.empty() ? std::string("A town") : r.creator;
+            Panel("Join " + Sanitize(r.name, 40),
+                  r.seats >= 2 ? "Full: only its own two towns can come back."
+                               : (r.seats == 1 ? who + " is waiting for a neighbor." : "No town is in this room yet."));
+            Show("fieldTown", true);
+            Show("buttonLoad", false);
+            SetText(Find(this, "captionPrimary"), "Join room");
+            Status("");
+        }
         Rebuild();
     }
 
     void ShowCreate() {
         _mode = Mode::Create;
         _selected.clear();
+        _ownTown.clear();
         Panel("New room", "Name it and set a password. The map comes next.");
         Show("fieldRoom", true);
         Show("fieldPass", true);
         Show("fieldTown", true);
+        Show("buttonLoad", false);
         Show("buttonPrimary", true);
         SetText(Find(this, "captionPrimary"), "Create room");
         Status("");
@@ -370,7 +406,7 @@ private:
 
     bool Fields(const std::string& room, std::string& pass, std::string& town) {
         pass = EditText(Find(this, "editPass"));
-        town = Sanitize(EditText(Find(this, "editTown")), kMaxNameChars);
+        town = _ownTown.empty() ? Sanitize(EditText(Find(this, "editTown")), kMaxNameChars) : _ownTown;
         if (room.empty()) {
             Problem("Type a name for the room.");
             return false;
@@ -466,6 +502,9 @@ private:
     std::vector<RoomInfo>                         _rooms;
     std::string                                   _search;
     std::string                                   _selected;   // the room picked to join
+    std::string                                   _ownTown;    // our town in it, when this machine holds a seat
+    std::vector<SeatKey>                          _mySeats;    // the seat file, read at each Refresh
+    std::string                                   _server;     // the relay the list came from
     Mode                                          _mode = Mode::Pick;
     bool                                          _listed = false;
     bool                                          _relayShown = false;
