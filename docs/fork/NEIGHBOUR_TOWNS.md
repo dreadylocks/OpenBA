@@ -698,7 +698,9 @@ large one), with nomads landing on the coast.
   deep water edge to edge, the middle of the sea never land, each start on its own land and not the
   other, each land 15-40% of the map); the coast profile; nomads coming ashore on a made-up map
   (over a river, round a coastal mountain, none from the open sea, a retail rim is not "ringed");
-  `ext_neighbour_continents_same_bits_everywhere`, digest `fc32ec476b6efe5c` on an arm64 Mac.
+  `ext_neighbour_continents_same_bits_everywhere`, digest `fc32ec476b6efe5c` on an arm64 Mac. CI on
+  the fork (run 40107857180, 2026-10-24, all four checks green) printed the same digest on Windows
+  (MSYS2 UCRT64 GCC) and Linux: a PC builds a Continents room's land exactly as the Mac does.
 - **Two Mac games, one Continents room** (unattended, a local relay from `wrangler dev`, room
   `continents-test-1`, seed 4242, `build/cont-run-a` creating with `neighbour.map=continents`,
   `build/cont-run-b` joining): both said the sea runs east-west (town 1's land north), built
@@ -715,5 +717,5 @@ large one), with nomads landing on the coast.
   `f904233e641d5efa`, and prints no Continents line. `tools/acceptance/acceptance.sh`: 0 off target.
 - **Not checked yet**: nomads coming ashore in a running game (they need a Town Hall and empty
   houses; the walk is unit tested); a trader boat on this map (the route code is unchanged and the
-  sea joins every coast); the Mac against the PC on a Continents map (the digest on CI says the
+  sea joins every coast); the Mac against the PC on a Continents map in a real game (CI says the
   maths agree); picking One land / Continents by hand; whether a bridge can span the sea.
