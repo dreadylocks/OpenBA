@@ -7,7 +7,7 @@
 //   node fake_neighbour.mjs [--server ws://127.0.0.1:8787] [--room neighbours]
 //                           [--pass secret] [--name "Fake Town"]
 //                           [--say "hello"]... [--every 30 "a line repeated every 30 s"]
-//                           [--quit-after 10] [--send-goods "path:count"] [--send-family "30/1/0;28/0/0;6/0/1"]
+//                           [--quit-after 10] [--send-goods "path:count"] [--send-family "3.5/1/0;3.2/0/0;0.8/1/1"]
 //                           [--token <seat token>] [--data-hash <16 hex>] [--mods "name|size|;..."]
 //
 // Protocol 2 (docs/fork/NEIGHBOUR_PROTOCOL.md): the relay seats a town by its token, not its name.

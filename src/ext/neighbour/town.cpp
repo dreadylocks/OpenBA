@@ -8,6 +8,8 @@
 #include "ext/neighbour/town.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <map>
 #include <new>
 
@@ -232,6 +234,28 @@ std::vector<Member> SendFamily() {
     return members;
 }
 
+// An arriving townsperson's age, kept below the shortest lifespan this game can roll.
+// CitizenComponent::Initialize sets the age first and only then rolls the lifespan,
+// maxAge = RandFloatTol * desc+0x3c + desc+0x38 (its step 12), and a citizen whose age is at or past
+// maxAge dies of old age on its next update. A neighbour's citizen can be older than that (another
+// game's data, a long life over there, or a made-up parcel), so it would arrive and die at once. Capped
+// at kArrivalAgeShare of the shortest roll, every newcomer has some years left; a younger one keeps
+// its age.
+constexpr float kArrivalAgeShare = 0.9f;
+
+static float ArrivalAge(const CitizenDescription* desc, float age) {
+    if (!(age >= 0.0f)) age = 0.0f;   // also NaN
+    if (desc == nullptr) return age;
+    const float shortest = desc->_f38 - std::fabs(desc->_f3c);
+    const float cap = shortest * kArrivalAgeShare;
+    if (cap > 0.0f && age > cap) {
+        fprintf(stderr, "[Neighbour] an arriving townsperson aged %.2f is past this game's shortest lifespan "
+                "(%.2f, adult at %.2f): arrives aged %.2f\n", age, shortest, desc->adultAge, cap);
+        return cap;
+    }
+    return age;
+}
+
 int ReceiveFamily(const std::vector<Member>& members) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     CitizenBehavior* tm = TownMgr();
@@ -263,7 +287,8 @@ int ReceiveFamily(const std::vector<Member>& members) {
         CitizenComponent* cit = ent->FindComponent<CitizenComponent>();
         if (cit == nullptr) break;   // never for a citizen's template
         CitizenComponent* parent = m.child ? (secondAdult != nullptr ? secondAdult : firstAdult) : nullptr;
-        cit->Initialize(&pos, static_cast<uint32_t>(m.gender), m.child ? '\x01' : '\0', m.age, '\0', parent, prof);
+        const float age = ArrivalAge(cit->description, m.age);
+        cit->Initialize(&pos, static_cast<uint32_t>(m.gender), m.child ? '\x01' : '\0', age, '\0', parent, prof);
         Object::InternalPtr<ComponentEntity> reg = ent;
         g->m_entityList->RegisterEntity(&reg, tmpl->_category);
         if (!m.child) {

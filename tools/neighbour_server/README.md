@@ -63,11 +63,14 @@ minute. Parcels:
 
 ```bash
 node fake_neighbour.mjs --room pc-test --pass test --send-goods "Template\RawMaterialPotato.rsc:resource:30"
-node fake_neighbour.mjs --room pc-test --pass test --send-family "31.0/1/0;29.5/0/0;7.0/1/1"
+node fake_neighbour.mjs --room pc-test --pass test --send-family "3.5/1/0;3.2/0/0;0.8/1/1"
 ```
 
 or type `/goods <path> <count>` / `/family <members>` while it runs. A family is
-`age/gender/child` per person, separated by `;`, adults first.
+`age/gender/child` per person, separated by `;`, adults first. Ages are in the game's own unit, not
+years: on the stock data a citizen is an adult at 2.0 and lives at least 12, so 3.5 is a young adult and
+0.8 a child. An age past the receiving game's shortest lifespan is lowered on arrival (to 90% of it),
+so nobody arrives only to die of old age.
 
 ## Point the game at it
 

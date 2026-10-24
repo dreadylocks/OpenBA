@@ -561,10 +561,13 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   to compare: data hash `72222e615f7910e3` (no mods enabled); seed 12345, Easy / Valleys / small /
   Fair (the autostart defaults): `[WorldHash] height f32=627a733aa4109739`,
   `tiles=f904233e641d5efa`.
-- **Found**: a received family member older than the receiving citizen's rolled `maxAge` dies of old
-  age on arrival (the fake town's example ages 31 / 29.5 are far past the game's ~13). Two real games
-  send real ages, but a very old migrant would still die at once. Proposed: clamp a received age below
-  the new citizen's `maxAge` (or give it a short grace), and fix the script's example ages. Not done.
+- **Found and fixed**: a received family member older than the receiving citizen's rolled `maxAge`
+  died of old age on arrival (the fake town's example ages 31 / 29.5 are far past this data's shortest
+  lifespan, 12; adult at 2.0). `town.cpp` `ArrivalAge` now lowers an arriving age to 90% of the
+  shortest lifespan the game can roll (`desc+0x38 - |desc+0x3c|`, the range `Initialize` rolls
+  `maxAge` from), before `CitizenComponent::Initialize`, which stays untouched; the script's example
+  ages are now 3.5 / 3.2 / 0.8. Re-run on the Mac: the two adults arrived at 10.8 and the town kept
+  all 18 citizens through frame 900 (it fell to 16 before).
 - **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. A cheaper
   check first, with no relay: start a new game on the PC with `BANISHED_SEED=12345`, mods off and the
   same defaults, and compare its `[WorldHash] height f32=` line with the Mac's above. Worldgen

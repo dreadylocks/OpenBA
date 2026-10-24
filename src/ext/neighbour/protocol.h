@@ -73,7 +73,9 @@ std::string RoomUrl(const std::string& server, const std::string& room);
 
 // A parcel's contents on the wire. Goods: "path:count,path:count" (a path has no ',' and its
 // count is the text after the LAST ':'; 1..kMaxParcelCount each, at most kMaxParcelLines lines).
-// A family: "age/gender/child;..." (age in years, gender 0|1, child 0|1; 1..kMaxFamily members).
+// A family: "age/gender/child;..." (age in the game's own unit, CitizenComponent +0x3C: on the stock
+// data adult at 2.0, lifespan at least 12; gender 0|1, child 0|1; 1..kMaxFamily members). The receiver keeps
+// an arriving age below its shortest lifespan (town.cpp ArrivalAge).
 constexpr int kMaxParcelCount = 100000;
 constexpr int kMaxParcelLines = 16;
 constexpr int kMaxFamily      = 12;
