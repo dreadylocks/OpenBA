@@ -568,6 +568,13 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   `maxAge` from), before `CitizenComponent::Initialize`, which stays untouched; the script's example
   ages are now 3.5 / 3.2 / 0.8. Re-run on the Mac: the two adults arrived at 10.8 and the town kept
   all 18 citizens through frame 900 (it fell to 16 before).
+- **Found and fixed: a lost seat.** With seats by token, a town that joined and quit (or crashed)
+  before saving lost its token, and the room then refused it for good (the old name matching had
+  hidden this). Every token is now also written, as it arrives, to
+  `<Documents>/Banished/neighbour_seats.txt` (`seat_store.{h,cpp}`, unit tested; the file I/O is
+  `LoadSeatToken` / `RememberSeat` in `neighbour.cpp`, through `Platform::WriteFileAtomic`), and a
+  hello without a token in the save, or the lobby's Join, sends the stored one. Checked on the Mac:
+  join, quit without saving, start a new game: the same seat came back.
 - **Open, the first Mac-vs-PC game decides**: whether a Mac and a PC build the same land. A cheaper
   check first, with no relay: start a new game on the PC with `BANISHED_SEED=12345`, mods off and the
   same defaults, and compare its `[WorldHash] height f32=` line with the Mac's above. Worldgen

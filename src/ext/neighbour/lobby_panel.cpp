@@ -32,6 +32,7 @@
 #include "ext/neighbour/lobby.h"
 #include "ext/neighbour/neighbour.h"
 #include "ext/neighbour/protocol.h"
+#include "ext/neighbour/seat_store.h"   // LoadSeatToken / RememberSeat
 
 #include <cstdio>
 #include <new>
@@ -251,7 +252,8 @@ private:
         Status("Joining \"" + room + "\"...");
         RoomJoin j;
         std::string why;
-        if (!JoinRoom(&MakePlatformTransport, server, room, pass, town, LocalInfoNow(), j, why)) {
+        const std::string kept = LoadSeatToken(server, room, town);   // a town coming back to its seat
+        if (!JoinRoom(&MakePlatformTransport, server, room, pass, town, kept, LocalInfoNow(), j, why)) {
             Status("Could not join \"" + room + "\": " + why);
             return false;
         }
@@ -270,7 +272,8 @@ private:
         s.pass = pass;
         s.town = town;
         s.seat = j.seat;
-        s.token = j.token;
+        s.token = j.token.empty() ? kept : j.token;
+        if (!j.token.empty()) RememberSeat(server, room, town, j.token);   // before the game can crash
         s.settings = j.settings;
         SetLobbyStart(s);
         fprintf(stderr, "[Neighbour] lobby: joining room \"%s\" as \"%s\" (seat %d, seed %lld, %s)\n", room.c_str(),

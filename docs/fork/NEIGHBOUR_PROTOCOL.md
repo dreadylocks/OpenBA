@@ -118,7 +118,10 @@ a random 128-bit `token`; the room keeps only a SHA-256 of it. Every later `hell
 and gets the same seat, whatever its `name`. A town with no token, or one the room does not know, takes
 a free seat or is refused (`already has two towns`). A room made before tokens existed knows its towns
 by name only; each such seat is handed its token once, to the town with that name. The game keeps its
-token in its save (neighbour save payload v4, `protocol.h` `SavedState`).
+token in its save (neighbour save payload v4, `protocol.h` `SavedState`) and, the moment it arrives,
+in `<Documents>/Banished/neighbour_seats.txt` beside `settings.cfg` (one line per relay, room and town;
+`seat_store.h`), so a town that quits or crashes before saving keeps its seat. A hello with no token in
+the save, and the lobby's Join, send the one from that file. The file never leaves the machine.
 
 ## Lobby (`/lobby`)
 

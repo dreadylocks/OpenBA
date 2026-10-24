@@ -19,10 +19,13 @@
 #include "ext/neighbour/shared_map.h"
 #include "ext/registry.h"   // Ext::Ext().neighbour
 #include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
+#include "ext/neighbour/seat_store.h"   // seat tokens kept beside settings.cfg
 
 #include "Game/EventLog.h"         // EventLogEntry
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
 #include "io/Persistence.h"        // the settings map (neighbour.* keys)
+#include "io/settings_store.h"      // SettingsStore::DefaultPath: where settings.cfg (and the seat file) live
+#include "platform/common/platform_settings.h"   // ReadWholeFile / WriteFileAtomic
 #include "system/String.h"
 #include "system/Value.h"      // System::Random
 #include "system/Filename.h"
@@ -310,6 +313,8 @@ void OnMessage(const Message& m) {
                 changed = s_saved.token != token;
                 s_saved.token = token;
             }
+            // And at once beside settings.cfg: a town that quits before saving keeps its seat.
+            RememberSeat(s_config.server, s_config.room, s_config.name, token);
             if (changed && s_link) s_link->SetHello(Hello());
         }
         s_joined = true;
@@ -415,6 +420,43 @@ void HangUp() {
 }
 }  // namespace
 
+// --- seat tokens beside settings.cfg (seat_store.h) -------------------------
+
+namespace {
+
+// `<Documents>/Banished/neighbour_seats.txt`: settings.cfg's folder (IO::SettingsStore::DefaultPath).
+bool SeatFilePath(std::string& out) {
+    std::string settings;
+    if (!IO::SettingsStore::DefaultPath(settings)) return false;
+    const size_t cut = settings.find_last_of("/\\");
+    if (cut == std::string::npos) return false;
+    out = settings.substr(0, cut + 1) + "neighbour_seats.txt";
+    return true;
+}
+
+}  // namespace
+
+std::string LoadSeatToken(const std::string& server, const std::string& room, const std::string& town) {
+    std::string path, text;
+    if (!SeatFilePath(path) || !Platform::ReadWholeFile(path.c_str(), text)) return std::string();
+    return FindSeat(DecodeSeats(text), server, room, town);
+}
+
+void RememberSeat(const std::string& server, const std::string& room, const std::string& town,
+                  const std::string& token) {
+    std::string path;
+    if (token.empty() || !SeatFilePath(path)) return;
+    std::string text;
+    Platform::ReadWholeFile(path.c_str(), text);   // absent the first time
+    std::vector<SeatKey> seats = DecodeSeats(text);
+    if (!PutSeat(seats, SeatKey{server, room, town, token})) return;
+    const std::string out = EncodeSeats(seats);
+    if (!Platform::WriteFileAtomic(path.c_str(), out.data(), out.size()))
+        fprintf(stderr, "[Neighbour] could not write the seat file %s\n", path.c_str());
+    else
+        fprintf(stderr, "[Neighbour] seat for room \"%s\" kept in %s\n", room.c_str(), path.c_str());
+}
+
 void ResetForGame(const void* owner) {
     HangUp();
     s_owner = owner;
@@ -477,6 +519,7 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
     s_pending.seat = j.seat;
     s_pending.token = j.token;
     s_pending.settings = rs;
+    RememberSeat(s_pending.server, s_pending.room, s_pending.town, j.token);   // before the game can crash
     fprintf(stderr, "[Neighbour] room \"%s\" created (seed %u, %s)\n", s_pending.room.c_str(), seed,
             DescribeSettings(rs).c_str());
     return true;
@@ -629,6 +672,9 @@ void SelectForGame() {
         s_saved.pass = s_lobbyGame || !s_saved.pass.empty() ? s_config.password : std::string();
         s_saved.server = s_config.server;
     }
+    // No token in the save (a town that quit before saving, or a settings.cfg town on this machine
+    // before): the one kept beside settings.cfg for this relay, room and town. Read before the lock.
+    const std::string keptSeat = LoadSeatToken(s_config.server, s_config.room, s_config.name);
     {
         std::lock_guard<std::mutex> lock(s_savedMu);
         // A loaded town keeps its room unless settings.cfg names another one now.
@@ -641,6 +687,7 @@ void SelectForGame() {
             s_saved.token.clear();   // and its seat token is the old room's
         }
         s_saved.room = s_config.room;
+        if (s_saved.token.empty()) s_saved.token = keptSeat;
     }
     s_active = true;
     s_announcedOffline = false;

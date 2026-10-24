@@ -71,6 +71,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/protocol.cpp              # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/save_state.cpp            #   its class C codec (state_codecs.cpp)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/handshake.cpp             #   the layer-1 hello fields, xxHash64
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/seat_store.cpp            #   the seat-token file format
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/link.cpp                  # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/lobby.cpp                 # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS M2)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/dxbc.cpp            # ext_better_trees_test.cpp (block FAA-CORE)

@@ -159,11 +159,12 @@ bool CreateRoom(TransportFactory factory, const std::string& server, const std::
 }
 
 bool JoinRoom(TransportFactory factory, const std::string& server, const std::string& room,
-              const std::string& pass, const std::string& town, const LocalInfo& info, RoomJoin& out,
-              std::string& why, uint32_t timeoutMs) {
+              const std::string& pass, const std::string& town, const std::string& token,
+              const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs) {
     Message hello("hello");
     hello.SetInt("v", kProtocolVersion).Set("room", room).Set("pass", pass).Set("name", town)
          .SetInt("lastSeq", 0).SetBool("join", true);
+    if (!token.empty()) hello.Set("token", token);
     AddHandshake(hello, info);
     RoomJoin j;
     bool bad = false;

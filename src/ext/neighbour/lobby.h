@@ -56,9 +56,10 @@ bool ListRooms(TransportFactory factory, const std::string& server, std::vector<
 bool CreateRoom(TransportFactory factory, const std::string& server, const std::string& room,
                 const std::string& pass, const std::string& town, const RoomSettings& settings,
                 const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs = 8000);
+// `token`: this town's seat token for the room when it has one (a town coming back), else "".
 bool JoinRoom(TransportFactory factory, const std::string& server, const std::string& room,
-              const std::string& pass, const std::string& town, const LocalInfo& info, RoomJoin& out,
-              std::string& why, uint32_t timeoutMs = 8000);
+              const std::string& pass, const std::string& town, const std::string& token,
+              const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs = 8000);
 
 std::string LobbyUrl(const std::string& server);
 // The settings read back from a welcome or a room line; false when they are missing or bad.

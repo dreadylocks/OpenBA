@@ -11,6 +11,7 @@
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/save_state.h"
+#include "ext/neighbour/seat_store.h"
 #include "ext/savetail.h"
 
 #include <chrono>
@@ -415,7 +416,7 @@ UNIT_TEST(ext_neighbour_lobby_list_and_join) {
     info.simBuild = "00000000000000aa";
     info.dataHash = "00000000000000bb";
     info.mods.push_back({"Fields.pkm", 1234, true, 0xc0ffee});
-    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
+    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", "", info, j, why, 3000));
     CHECK_EQ(j.seat, 1);
     CHECK(j.token.empty());   // this relay gave none
     CHECK_EQ(j.settings.seed, 77);
@@ -433,18 +434,18 @@ UNIT_TEST(ext_neighbour_lobby_list_and_join) {
     // A welcome with a seat token: kept; a malformed one refuses the answer.
     net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"token\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\",\"created\":true,"
                             "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
-    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
+    CHECK(Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", "", info, j, why, 3000));
     CHECK_STREQ(j.token.c_str(), "a1b2c3d4e5f60718293a4b5c6d7e8f90");
     net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":1,\"token\":\"NOT-HEX\",\"created\":true,"
                             "\"seed\":77,\"size\":0,\"disasters\":1,\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
-    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", info, j, why, 3000));
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "pw", "Bob", "", info, j, why, 3000));
 
     // A refusal ends the conversation with the relay's reason; a room without settings is refused too.
     net.toReceive.push_back("{\"t\":\"error\",\"why\":\"wrong room password\"}");
-    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "bad", "Bob", info, j, why, 3000));
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "river", "bad", "Bob", "", info, j, why, 3000));
     CHECK_STREQ(why.c_str(), "wrong room password");
     net.toReceive.push_back("{\"t\":\"welcome\",\"seat\":0,\"peer\":\"\",\"online\":false,\"created\":false}");
-    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "old", "pw", "Bob", info, j, why, 3000));
+    CHECK(!Neighbour::JoinRoom(&MakeFake, "ws://fake", "old", "pw", "Bob", "", info, j, why, 3000));
     CHECK(why.find("lobby") != std::string::npos);
 
     // No answer: a timeout, not a hang.
@@ -558,4 +559,37 @@ UNIT_TEST(ext_neighbour_save_codec) {
     std::vector<uint8_t> cut(payload.begin(), payload.end() - 1);
     CHECK(!c.decode(cut.data(), cut.size(), Neighbour::kPayloadFormat));
     c.reset();
+}
+
+// seat_store.h: this machine's seat tokens, kept beside settings.cfg so a town that quits before
+// saving keeps its seat. Keyed by relay (trailing '/' ignored), room and town; the newest wins.
+UNIT_TEST(ext_neighbour_seat_store) {
+    std::vector<Neighbour::SeatKey> seats;
+    CHECK(Neighbour::PutSeat(seats, {"ws://h:8791/", "river", "Ashford", "0123456789abcdef"}));
+    CHECK(Neighbour::PutSeat(seats, {"ws://h:8791", "river", "Brook", "1111111111111111"}));
+    CHECK(!Neighbour::PutSeat(seats, {"ws://h:8791", "river", "Bad", "NOT-A-TOKEN"}));
+    CHECK(!Neighbour::PutSeat(seats, {"", "river", "Ashford", "0123456789abcdef"}));
+    CHECK_STREQ(Neighbour::FindSeat(seats, "ws://h:8791", "river", "Ashford").c_str(), "0123456789abcdef");
+    CHECK(Neighbour::FindSeat(seats, "ws://h:8791", "River", "Ashford").empty());   // rooms are case-sensitive
+    // Replacing a seat keeps one entry, now the newest.
+    CHECK(Neighbour::PutSeat(seats, {"ws://h:8791", "river", "Ashford", "2222222222222222"}));
+    CHECK_EQ(static_cast<int>(seats.size()), 2);
+    CHECK_STREQ(seats.back().token.c_str(), "2222222222222222");
+    // The file round-trips; bad lines are skipped; a tab inside a field cannot split it.
+    const std::string text = Neighbour::EncodeSeats(seats) + "garbage line\n\t\t\t\n" +
+                             "3333333333333333\twss://x.dev\ta\troom\tTown\n";
+    const std::vector<Neighbour::SeatKey> back = Neighbour::DecodeSeats(text);
+    CHECK_EQ(static_cast<int>(back.size()), 2);
+    CHECK_STREQ(Neighbour::FindSeat(back, "ws://h:8791/", "river", "Brook").c_str(), "1111111111111111");
+    std::vector<Neighbour::SeatKey> tabbed;
+    CHECK(Neighbour::PutSeat(tabbed, {"ws://h", "ri\tver", "To\nwn", "4444444444444444"}));
+    CHECK_STREQ(Neighbour::FindSeat(Neighbour::DecodeSeats(Neighbour::EncodeSeats(tabbed)), "ws://h", "river", "Town")
+                    .c_str(), "4444444444444444");
+    // The newest kMaxSeats are kept.
+    std::vector<Neighbour::SeatKey> many;
+    for (size_t i = 0; i < Neighbour::kMaxSeats + 5; ++i)
+        Neighbour::PutSeat(many, {"ws://h", "room" + std::to_string(i), "T", "5555555555555555"});
+    CHECK_EQ(many.size(), Neighbour::kMaxSeats);
+    CHECK(Neighbour::FindSeat(many, "ws://h", "room0", "T").empty());
+    CHECK(!Neighbour::FindSeat(many, "ws://h", "room204", "T").empty());
 }
