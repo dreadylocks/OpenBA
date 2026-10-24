@@ -33,6 +33,7 @@
 #include "ext/neighbour/neighbour.h"
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/seat_store.h"   // LoadSeatToken / RememberSeat
+#include "ext/neighbour/continents.h"   // the Continents map type (§12)
 
 #include <algorithm>
 #include <cctype>
@@ -49,7 +50,18 @@ constexpr const char* kLobbyRsc  = "Dialog/ExtensionsLobby.rsc";
 constexpr const char* kButtonRsc = "Dialog/ExtensionsLobby.rsc:buttonMultiplayer";
 constexpr int kMaxRows = 200;   // rows shown at most; the search narrows the rest
 
-enum : int32_t { kIdBack = 100, kIdRow0 = 3000, kIdRefresh = 4001, kIdPrimary, kIdNew, kIdRelay, kIdConnect, kIdLoad };
+enum : int32_t {
+    kIdBack = 100,
+    kIdRow0 = 3000,
+    kIdRefresh = 4001,
+    kIdPrimary,
+    kIdNew,
+    kIdRelay,
+    kIdConnect,
+    kIdLoad,
+    kIdMapOne,
+    kIdMapContinents
+};
 constexpr int32_t kMsgClick = 0x12;
 
 // Text colours (ARGB): ordinary, dimmed details, a full room, the picked room, a good and a bad state.
@@ -127,6 +139,8 @@ public:
         if (UI::Element* e = Find(this, "buttonRelay")) e->SetElementId(kIdRelay);
         if (UI::Element* e = Find(this, "buttonConnect")) e->SetElementId(kIdConnect);
         if (UI::Element* e = Find(this, "buttonLoad")) e->SetElementId(kIdLoad);
+        if (UI::Element* e = Find(this, "buttonMapOne")) e->SetElementId(kIdMapOne);
+        if (UI::Element* e = Find(this, "buttonMapContinents")) e->SetElementId(kIdMapContinents);
         _table = FindElement(System::String("roomTable"));
         // The relay: what was typed earlier this session, else settings.cfg's.
         const std::string relay = s_typedRelay.empty() ? SettingsServer() : s_typedRelay;
@@ -143,10 +157,12 @@ public:
         ShowPick();
         Refresh();
         // TEST AID (settings.cfg neighbour.lobbyview=join|new): open on the first room's Join panel, or
-        // on New room, so an unattended run can show each state (the menu driver clicks only the menu).
+        // on New room (with neighbour.map=continents picked), so an unattended run can show each state
+        // (the menu driver clicks only the menu).
         const std::string view = Setting("neighbour.lobbyview");
         if (view == "join" && !_visible.empty()) Pick(_visible[0]);
         if (view == "new") ShowCreate();
+        if (view == "new" && Setting("neighbour.map") == Continents::kMapContinents) PickMap(Continents::kMapContinents);
     }
 
     // The search box has no change event (an edit box reports only when it loses focus), so it is
@@ -170,6 +186,8 @@ public:
             if (id == kIdRefresh || id == kIdConnect) Refresh();
             else if (id == kIdRelay) ShowRelayRow(!_relayShown);
             else if (id == kIdNew) ShowCreate();
+            else if (id == kIdMapOne) PickMap("");
+            else if (id == kIdMapContinents) PickMap(Continents::kMapContinents);
             else if (id == kIdLoad) {
                 MainMenuDialog* menu = _menu;
                 Close();
@@ -355,6 +373,7 @@ private:
         Show("fieldRoom", false);
         Show("fieldPass", false);
         Show("fieldTown", false);
+        Show("fieldMap", false);
         Show("buttonLoad", false);
         Show("buttonPrimary", false);
     }
@@ -369,6 +388,7 @@ private:
         _ownTown = seat.token.empty() ? std::string() : seat.town;
         Show("fieldRoom", false);
         Show("fieldPass", true);
+        Show("fieldMap", false);
         Show("buttonPrimary", true);
         if (!_ownTown.empty()) {
             Panel("Your room: " + Sanitize(r.name, 36), "You play here as " + Sanitize(_ownTown, kMaxNameChars) + ".");
@@ -397,11 +417,23 @@ private:
         Show("fieldRoom", true);
         Show("fieldPass", true);
         Show("fieldTown", true);
+        Show("fieldMap", true);
         Show("buttonLoad", false);
         Show("buttonPrimary", true);
         SetText(Find(this, "captionPrimary"), "Create room");
+        PickMap(_map);
         Status("");
         Rebuild();
+    }
+
+    // New room's map: one land the two towns share, or Continents, a land each with sea between.
+    void PickMap(const std::string& map) {
+        _map = map;
+        const bool continents = _map == Continents::kMapContinents;
+        if (UI::Element* c = Find(this, "captionMapOne")) c->SetColor(continents ? kColourMuted : kColourPicked);
+        if (UI::Element* c = Find(this, "captionMapContinents")) c->SetColor(continents ? kColourPicked : kColourMuted);
+        SetText(Find(this, "textMapNote"), continents ? "Each town gets its own land, with sea between."
+                                                      : "Both towns build on one land.");
     }
 
     bool Fields(const std::string& room, std::string& pass, std::string& town) {
@@ -443,8 +475,10 @@ private:
         s.room = room;
         s.pass = pass;
         s.town = town;
+        s.settings.map = _map;   // the rest of the map comes from New Game
         SetLobbyStart(s);
-        fprintf(stderr, "[Neighbour] lobby: creating room \"%s\" as \"%s\" -> New Game\n", room.c_str(), town.c_str());
+        fprintf(stderr, "[Neighbour] lobby: creating room \"%s\" as \"%s\" (%s) -> New Game\n", room.c_str(),
+                town.c_str(), _map.empty() ? "one land" : _map.c_str());
         MainMenuDialog* menu = _menu;
         Close();
         menu->OpenNewGame();
@@ -505,6 +539,7 @@ private:
     std::string                                   _ownTown;    // our town in it, when this machine holds a seat
     std::vector<SeatKey>                          _mySeats;    // the seat file, read at each Refresh
     std::string                                   _server;     // the relay the list came from
+    std::string                                   _map;        // New room's map type ("" = one land)
     Mode                                          _mode = Mode::Pick;
     bool                                          _listed = false;
     bool                                          _relayShown = false;
@@ -538,7 +573,8 @@ std::string Setting(const char* key) {
 }
 
 // TEST AID (NOT RETAIL; settings.cfg neighbour.autolobby=create|join, with BANISHED_AUTOSTART): a game
-// creates or joins the settings' lobby room by itself (neighbour.server / room / password / name), so a
+// creates or joins the settings' lobby room by itself (neighbour.server / room / password / name; a
+// create takes neighbour.map=continents for a Continents room), so a
 // shared-map game between two games -- two on one machine, or a Mac and a PC -- runs unattended.
 // create: the autostarted New Game makes the room (BeforeNewGame), exactly as the lobby's Create.
 // join: the room is joined here, on the menu, as the lobby's Join; StartNewGame then takes the room's
@@ -564,9 +600,10 @@ void AutoLobby() {
     s.town = town;
     if (mode == "create") {
         s.create = true;
+        if (Setting("neighbour.map") == Continents::kMapContinents) s.settings.map = Continents::kMapContinents;
         SetLobbyStart(s);
-        fprintf(stderr, "[Neighbour] autolobby: the next new game creates room \"%s\" as \"%s\"\n", room.c_str(),
-                town.c_str());
+        fprintf(stderr, "[Neighbour] autolobby: the next new game creates room \"%s\" as \"%s\" (%s)\n", room.c_str(),
+                town.c_str(), s.settings.map.empty() ? "one land" : s.settings.map.c_str());
         return;
     }
     const std::string kept = LoadSeatToken(server, room, town);

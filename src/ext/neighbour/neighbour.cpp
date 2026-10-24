@@ -21,6 +21,7 @@
 #include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
 #include "ext/neighbour/seat_store.h"   // seat tokens kept beside settings.cfg
 #include "ext/neighbour/world_maths.h"  // SetPortableWorldMaths: a shared map is built with the ported maths
+#include "ext/neighbour/continents_world.h"   // a Continents room's map (§12)
 
 #include "Game/EventLog.h"         // EventLogEntry
 #include "Game/GameUpdateLoop.h"   // GameUpdateLoop::_singleton->m_eventNotifier
@@ -485,6 +486,8 @@ void ResetForGame(const void* owner) {
         s_restoreTo = s_pendingPrevRequested;
     }
     SetPortableWorldMaths(s_lobbyGame);   // before this Load generates the world (world_maths.h)
+    Continents::SetForGame(s_lobbyGame && s_lobby.settings.map == Continents::kMapContinents,
+                           static_cast<uint32_t>(s_lobby.settings.seed));
     // A lobby game is a shared map from its first structure on (the start town is built during
     // this Load, before SelectForGame).
     SharedMap::Begin(s_lobbyGame);
@@ -532,6 +535,7 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
     rs.start = path(mapGen);
     rs.terrain = path(terrainGen);
     rs.climate = path(climateGen);
+    rs.map = s_pending.settings.map;   // the lobby's New room: one land or Continents
     RoomJoin j;
     if (!CreateRoom(&MakePlatformTransport, s_pending.server, s_pending.room, s_pending.pass, s_pending.town, rs,
                     LocalInfoNow(), j, why)) {
@@ -550,10 +554,22 @@ bool BeforeNewGame(uint32_t seed, uint32_t terrainSize, bool disastersOff, const
 
 bool StartCentre(int dim, int* cx, int* cy) {
     if (!s_lobbyGame || s_lobby.seat < 0 || dim <= 0) return false;
+    // On a Continents room's map, each town in the middle of its own land.
+    const Continents::Layout* land = Continents::ThisLayout();
+    if (land != nullptr && land->mapSize == dim) {
+        Continents::StartCentre(*land, s_lobby.seat, cx, cy);
+        return true;
+    }
     // The two towns start a quarter of the map apart, either side of the centre.
     *cx = s_lobby.seat == 0 ? (dim * 3) / 8 : (dim * 5) / 8;
     *cy = dim / 2;
     return true;
+}
+
+bool StartTileAllowed(int dim, int tx, int ty) {
+    const Continents::Layout* land = Continents::ThisLayout();
+    if (!s_lobbyGame || s_lobby.seat < 0 || land == nullptr || land->mapSize != dim) return true;
+    return Continents::OnOwnLand(*land, s_lobby.seat, tx, ty);
 }
 
 namespace {
@@ -592,6 +608,12 @@ void NoteSpawnTiles(int ownX, int ownY, int townSize, const std::function<void(i
     s_haveSpawns = true;
     fprintf(stderr, "[Neighbour] start sites: town 1 at %d,%d, town 2 at %d,%d (this town: %d)\n", s_spawnX[0],
             s_spawnY[0], s_spawnX[1], s_spawnY[1], seat + 1);
+    if (const Continents::Layout* land = Continents::ThisLayout()) {
+        const bool own0 = Continents::OnOwnLand(*land, 0, s_spawnX[0], s_spawnY[0]);
+        const bool own1 = Continents::OnOwnLand(*land, 1, s_spawnX[1], s_spawnY[1]);
+        fprintf(stderr, "[Neighbour] continents: town 1 starts on its own land: %s, town 2 on its own: %s\n",
+                own0 ? "yes" : "NO", own1 ? "yes" : "NO");
+    }
 }
 
 void ScatterBegin(GameUpdateLoop* world) {

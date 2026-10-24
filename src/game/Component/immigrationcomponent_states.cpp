@@ -82,6 +82,7 @@
 #include "Player/exe_bodies.h"            // ToolTile_SetTransformFromYaw_3870
 #include "Entity/ComponentEntity.h"   // ComponentEntity(ComponentDescription*) (0x1400c3720)
 #include "Entity/EntityList.h"        // EntityList::RegisterEntity (0x1400c48a0)
+#include "ext/neighbour/continents_world.h"   // EXT SEAM: Neighbour::Continents::NomadLanding (NOT RETAIL)
 #include "Object/factory_registration.h"
 #include "Component/controller_state_table.h"
 #include <cstdint>
@@ -302,6 +303,9 @@ void ImmigrationComponent::Spawn() {
         if (cy < 0) cy = 0;
         if (cy >= W) cy = W - 1;
         hallCell = cy * W + cx;
+        // EXT SEAM (NOT RETAIL, ext.neighbour Continents, docs/fork/NEIGHBOUR_TOWNS.md §12): on a map
+        // ringed by sea the edge is water, so the group comes ashore on the town's own coast instead.
+        Neighbour::Continents::NomadLanding(grid, hallCell, rng, &x, &y);
         cell = FindSpawnCell(x, y, hallCell);
         if (cell >= 0) break;
     }

@@ -52,8 +52,9 @@ Mac. That one does open a port to your home network while it runs.)
 1. **Mac**: open OpenBA (it's in Applications), then **Multiplayer**. The top right should say
    *Connected to your relay*; if not, press **Change relay**, type
    `wss://openba-neighbour.spellpress.workers.dev` and press **Connect**. Press **New room**, type a
-   room name, a password and your town's name, then press **Create room**. Choose the map in New Game
-   and press Ok.
+   room name, a password and your town's name, and under **Map** pick **One land** (both towns on one
+   shared land) or **Continents** (a land each, with sea between and all round). Press **Create room**,
+   choose the rest of the map in New Game and press Ok.
 2. **PC**: start OpenBA (normally, not with `tools/build.sh run`, which switches extensions off), then
    **Multiplayer**. Set the same relay the same way if it isn't connected. Pick the room on the left
    (type in **Search** to find it), type its password and your town's name, then press **Join room**.
@@ -83,6 +84,7 @@ Logs to send if something goes wrong (the lines that matter start with `[Neighbo
 
 With `BANISHED_AUTOSTART=1`, a game can create or join the room on its own: in its `settings.cfg` put
 `neighbour.autolobby=create` (or `join`) with `neighbour.server`, `neighbour.room`,
-`neighbour.password` and `neighbour.name`. A joining game takes the room's seed and settings itself.
+`neighbour.password` and `neighbour.name` (and `neighbour.map=continents` for a creating game to make a
+Continents room). A joining game takes the room's seed and settings, the map type too, itself.
 This is how the two-Mac test ran (`docs/fork/NEIGHBOUR_TOWNS.md` §11). The gate's faithful run
 (`tools/build.sh run`) switches every extension off, so test with a plain autostart instead.

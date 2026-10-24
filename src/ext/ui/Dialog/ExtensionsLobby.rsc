@@ -10,7 +10,8 @@
 //
 // Controller: src/ext/neighbour/lobby_panel.cpp. It looks up, by name: textConnection, buttonRelay,
 // rowRelay, editRelay, buttonConnect, editSearch, buttonRefresh, roomTable, textListNote, textPanelTitle,
-// textPanelNote, fieldRoom, editRoom, fieldPass, editPass, fieldTown, editTown, buttonLoad, buttonPrimary,
+// textPanelNote, fieldRoom, editRoom, fieldPass, editPass, fieldTown, editTown, fieldMap, buttonMapOne,
+// captionMapOne, buttonMapContinents, captionMapContinents, textMapNote, buttonLoad, buttonPrimary,
 // captionPrimary, textStatus, buttonNew, buttonBack; in each row (template 0 = roomRow) roomName,
 // roomSeats, roomDetails.
 
@@ -125,7 +126,7 @@ TextDescription roomDetails : "muted" { int _minWidth = 386; }
 RibbonDescription rightColumn
 {
 	bool _vertical = true; int _cellPad = 6; int _minWidth = 290; Alignment _alignment = TopLeft;
-	ElementDescription _elements [ "textPanelTitle" "textPanelNote" "fieldRoom" "fieldPass" "fieldTown" "buttonLoad" "buttonPrimary" "textStatus" ]
+	ElementDescription _elements [ "textPanelTitle" "textPanelNote" "fieldRoom" "fieldPass" "fieldTown" "fieldMap" "buttonLoad" "buttonPrimary" "textStatus" ]
 }
 TextDescription textPanelTitle : "ExtensionsNeighbour.rsc:value" { int _minWidth = 290; }
 TextDescription textPanelNote : "muted" { int _minWidth = 290; }
@@ -139,6 +140,16 @@ TextDescription labelTown : "label" { String _text = "LobbyTown"; }
 EditDescription editRoom : "field" { }
 EditDescription editPass : "field" { bool _password = true; }
 EditDescription editTown : "field" { int _maxLength = 24; }
+
+// New room's map: one land, or Continents (a land each, sea between); the picked one's caption is gold.
+RibbonDescription fieldMap { bool _vertical = true; int _cellPad = 2; ElementDescription _elements [ "labelMap" "rowMap" "textMapNote" ] }
+TextDescription labelMap : "label" { String _text = "LobbyMap"; }
+RibbonDescription rowMap { int _cellPad = 6; ElementDescription _elements [ "buttonMapOne" "buttonMapContinents" ] }
+TextDescription captionMapOne : "ExtensionsNeighbour.rsc:caption" { String _text = "LobbyMapOneLand"; }
+TextDescription captionMapContinents : "ExtensionsNeighbour.rsc:caption" { String _text = "LobbyMapContinents"; }
+ButtonDescription buttonMapOne : "ExtensionsNeighbour.rsc:button" { ElementDescription _content = "captionMapOne"; int _minWidth = 132; }
+ButtonDescription buttonMapContinents : "ExtensionsNeighbour.rsc:button" { ElementDescription _content = "captionMapContinents"; int _minWidth = 132; }
+TextDescription textMapNote : "muted" { int _minWidth = 290; }
 
 TextDescription captionPrimary : "ExtensionsNeighbour.rsc:caption" { }
 TextDescription captionLoad : "ExtensionsNeighbour.rsc:caption" { String _text = "LobbyLoad"; }
