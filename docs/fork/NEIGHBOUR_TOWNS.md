@@ -594,11 +594,18 @@ From the interop working group (fran-cap/Banished-Interop-Spec: kickoff issue #1
   counted 224 solid tiles from the joiner's buildings, the joiner 112 from the creator's (the counter
   may count a re-sent building twice); worth a look.
 - **Upstream 1.0.1 merged** (`ce433466d`, 122 more commits; 4 small conflicts, see its message).
-- **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`). The relay must be started by the user on the
-  home network (`npx wrangler dev --ip 0.0.0.0 --port 8791`); this session's tooling may not open a
-  port to the network itself. Worldgen
-  calls the platform's `powf` (`worldgen_cells.cpp:56`, `worldgen_f390_erosion.cpp:84`,
-  `worldgen_f390_rivers.cpp:95`): Apple's libm and the PC's may differ in the last bit for some inputs,
-  and then the land hashes differ and the relay refuses the join. If so, the fix is a portable `powf`
-  for lobby games only (e.g. the ported MSVC one, `src/engine/crt/msvc_libm.h` `MsvcLibm::Powf`),
-  behind the extension so the faithful game is untouched. Ask the user before doing it.
+- **The relay deployed** (2026-10-23): this branch's relay (protocol 2) now runs on the user's
+  Cloudflare Worker, `wss://openba-neighbour.spellpress.workers.dev` (a project-local permission rule
+  allows `npx wrangler deploy` in `tools/neighbour_server`). Both machines use it; no port is opened.
+- **Found and fixed: the relay turned every Mac away.** It accepted a WebSocket only when the
+  `Upgrade` header was exactly `websocket`; macOS's Network.framework sends `WebSocket` (the value is
+  case-insensitive, RFC 6455 4.2.1), so Cloudflare answered 426 and the game said "cannot reach the
+  relay: Software caused connection abort". Earlier Mac runs used a local `ws://` relay, where it never
+  showed. `index.js` now compares case-insensitively (`isWebSocketUpgrade`); the selftest (48 checks)
+  sends `Upgrade: WebSocket` and wants a 101.
+- **Two Mac games through Cloudflare** (2026-10-23, unattended, room `claude-test-live`, seed 4242):
+  both connected over `wss://`, joined with tokens, built `[WorldHash] height f32=e4d1a072d1722c84`
+  (the same as the local-relay run), said "the same land", drew each other's buildings and the
+  creator's felled trees left the joiner's copy; 60 s each, empty crash logs. The room stays in the
+  relay's public list until it has been idle 60 days.
+- **Open: the first Mac-vs-PC game** (`MAC_VS_PC.md`), through the Cloudflare relay.

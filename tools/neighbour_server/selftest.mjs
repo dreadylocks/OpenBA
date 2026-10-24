@@ -8,6 +8,9 @@
 //   npm run dev            (in one terminal: the local relay on 127.0.0.1:8787)
 //   node selftest.mjs ws://127.0.0.1:8787
 
+import http from "node:http";
+import https from "node:https";
+
 const server = (process.argv[2] || "ws://127.0.0.1:8787").replace(/\/+$/, "");
 const room = `selftest-${Date.now()}`;
 let failures = 0;
@@ -271,6 +274,19 @@ const el = await tryWait(hsB.wait((m) => m.t === "error"));
 check(el && el.fatal === true && /same land/.test(el.why), "a town that built other land is refused");
 check(!!(await tryWait(hsA.wait((m) => m.t === "hashCheck" && m.same === false))), "and the neighbour is told the lands differ");
 for (const x of [tokenless, v1, hsA, hsData, hsB]) x.ws.close();
+
+// The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
+const upgradeStatus = await new Promise((resolve) => {
+  const u = new URL(`${server}/lobby`.replace(/^ws/, "http"));
+  const req = (u.protocol === "https:" ? https : http).request(u, { headers: {
+    Connection: "Upgrade", Upgrade: "WebSocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==" } });
+  req.on("upgrade", (res, sock) => { sock.destroy(); resolve(res.statusCode); });
+  req.on("response", (res) => { res.resume(); resolve(res.statusCode); });
+  req.on("error", () => resolve(0));
+  req.setTimeout(5000, () => { req.destroy(); resolve(0); });
+  req.end();
+});
+check(upgradeStatus === 101, `a Mac's "Upgrade: WebSocket" is accepted (got ${upgradeStatus})`);
 
 const bad = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
 await new Promise((r) => bad.addEventListener("open", r));

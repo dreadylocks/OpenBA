@@ -42,10 +42,11 @@ The relay is then at `ws://127.0.0.1:8787` (this PC only). In another terminal:
 node selftest.mjs ws://127.0.0.1:8787
 ```
 
-The self-test (47 checks) covers chat and missed lines, passwords and full rooms, parcels,
+The self-test (48 checks) covers chat and missed lines, passwords and full rooms, parcels,
 lobby rooms and their list, the world-hash check, land claims, mirrored buildings, shared roads and
 resource changes, and protocol 2: seat tokens, a protocol 1 game refused, other retail data or land
-refused, another build or other mods warned. If port 8787 is taken, run
+refused, another build or other mods warned; and macOS's `Upgrade: WebSocket` header (the value is
+case-insensitive) accepted. If port 8787 is taken, run
 `npx wrangler dev --ip 127.0.0.1 --port 8791` and pass `ws://127.0.0.1:8791` instead.
 
 ## Pretend to be the neighbour

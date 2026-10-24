@@ -4,10 +4,10 @@ Two towns, one map: one on the Mac, one on the PC, talking through a small relay
 No Steam account or login is involved.
 
 What is already proven (on the Mac, 2026-10-23): the Mac game boots and plays; it trades chat, goods
-and families with a pretend town; and two Mac games on one shared map build the same land, see each
-other's buildings and share felled trees. A shared map is built with the same maths code on Windows
-and Mac, and GitHub's Windows, Linux and Mac test runs all compute it to the same bits, so the PC
-should build the same land too. The first real Mac-against-PC game is what is left to test.
+and families with a pretend town; and two Mac games on one shared map, also through your Cloudflare
+relay, build the same land, see each other's buildings and share felled trees. A shared map is built
+with the same maths code on Windows and Mac, and GitHub's Windows, Linux and Mac test runs all compute
+it to the same bits, so the PC should build the same land too. The first real Mac-against-PC game is what is left to test.
 
 Your machines (home network): Mac `192.168.0.168`, PC `DESKTOP-3I0OFRD` = `192.168.0.177`.
 
@@ -30,18 +30,18 @@ that changes the terrain would make the two maps differ.
 
 ## 3. The relay: your Cloudflare Worker (no port to open)
 
-Your relay already runs on Cloudflare at `wss://openba-neighbour.spellpress.workers.dev` (account
-"Samanthatwoelevens@gmail.com's Account", deployed 2026-10-20). It still runs the previous protocol,
-so it refuses these new builds ("this relay speaks protocol 1") until it gets this branch's relay. On
-the Mac, which is already logged in to that account, run once:
+Your relay runs on Cloudflare at `wss://openba-neighbour.spellpress.workers.dev` (account
+"Samanthatwoelevens@gmail.com's Account"), with this branch's relay (protocol 2, deployed
+2026-10-23). Both machines use that address: secure, reachable from anywhere, nothing to open on
+either machine. Rooms made under the old relay keep working; their towns get seat keys on the next
+join.
+
+After a change to `tools/neighbour_server/src/index.js`, redeploy it from the Mac (already logged in
+to that account):
 
 ```bash
 cd /Volumes/DevSSD/dev/repos/OpenBA/.claude/worktrees/neighbour-towns-0cd35d/tools/neighbour_server && npx wrangler deploy
 ```
-
-Both machines then use `wss://openba-neighbour.spellpress.workers.dev`: secure, reachable from
-anywhere, nothing to open on either machine. Rooms made under the old relay keep working; their towns
-get seat keys on the next join.
 
 (Fallback without Cloudflare: a relay on your home network, `npx wrangler dev --ip 0.0.0.0 --port 8791`
 in the same folder, reached at `ws://192.168.0.168:8791` from the PC and `ws://127.0.0.1:8791` on the

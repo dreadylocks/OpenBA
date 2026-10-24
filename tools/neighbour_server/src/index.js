@@ -90,7 +90,7 @@ export default {
       try { room = decodeURIComponent(m[1]); } catch { return new Response("bad room name", { status: 400 }); }
       room = room.trim();
       if (room.length === 0 || room.length > kMaxRoomChars) return new Response("bad room name", { status: 400 });
-      if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
+      if (!isWebSocketUpgrade(request)) return new Response("expected a WebSocket", { status: 426 });
       const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
       const fwd = new Request(request);
       fwd.headers.set("X-Neighbour-Room", room);
@@ -98,13 +98,19 @@ export default {
       return stub.fetch(fwd);
     }
     if (url.pathname === "/lobby" || url.pathname === "/lobby/") {
-      if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
+      if (!isWebSocketUpgrade(request)) return new Response("expected a WebSocket", { status: 426 });
       return env.DIRECTORY.get(env.DIRECTORY.idFromName("directory")).fetch(request);
     }
     if (url.pathname === "/") return new Response("OpenBA neighbour relay: connect to /room/<name>\n");
     return new Response("not found", { status: 404 });
   },
 };
+
+// RFC 6455 4.2.1: the Upgrade value is case-insensitive. macOS's Network.framework sends "WebSocket"
+// (WinHTTP and node send "websocket"); an exact match turned every Mac away with a 426.
+function isWebSocketUpgrade(request) {
+  return (request.headers.get("Upgrade") || "").toLowerCase() === "websocket";
+}
 
 function clean(text, max) {
   if (typeof text !== "string") return "";
@@ -739,7 +745,7 @@ export class Directory {
       await this.ctx.storage.put(key, recent);
       return new Response("ok");
     }
-    if (request.headers.get("Upgrade") !== "websocket") return new Response("not found", { status: 404 });
+    if (!isWebSocketUpgrade(request)) return new Response("not found", { status: 404 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
