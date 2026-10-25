@@ -240,10 +240,19 @@ std::string Scrub(const std::string& text) {
         if (word == 0) continue;
         out.append(text, i, word + 1);   // "Users/" as written
         i += word + 1;
+        // The name runs to the next separator (a Windows name can hold spaces: "Anne Smith"); with none
+        // close by on the line, to the first space.
         size_t name = i;
-        while (name < text.size() && !IsSep(text[name]) && text[name] != ' ' && text[name] != '\n' &&
-               text[name] != '\r' && text[name] != '"' && text[name] != '\'' && text[name] != ')' && text[name] != ':')
+        while (name < text.size() && !IsSep(text[name]) && text[name] != '\n' && text[name] != '\r' &&
+               text[name] != '"' && text[name] != '\'' && text[name] != ')' && text[name] != ':')
             ++name;
+        if (name >= text.size() || !IsSep(text[name]) || name - i > 64) {
+            name = i;
+            while (name < text.size() && !IsSep(text[name]) && text[name] != ' ' && text[name] != '\n' &&
+                   text[name] != '\r' && text[name] != '"' && text[name] != '\'' && text[name] != ')' &&
+                   text[name] != ':')
+                ++name;
+        }
         if (name > i) {
             out += "<user>";
             i = name;

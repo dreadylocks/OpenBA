@@ -46,7 +46,7 @@ struct Summary {
 Summary Summarize(const std::string& crashLog);
 
 // The user's name out of paths: "/Users/<name>", "\Users\<name>" and "/home/<name>" become
-// ".../<user>" (any case of "Users" / "home").
+// ".../<user>" (any case of "Users" / "home"); a name with spaces too, when a separator follows it.
 std::string Scrub(const std::string& text);
 
 // A log's start and end joined: `head` cut back to its last line break, `tail` cut after its first,

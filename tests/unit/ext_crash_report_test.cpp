@@ -101,7 +101,8 @@ UNIT_TEST(crash_report_summarizes_a_windows_crash_log) {
 UNIT_TEST(crash_report_scrubs_user_names) {
     CHECK_STREQ(CR::Scrub("/Users/sgstephans/Documents\\Banished\\settings.cfg").c_str(),
                 "/Users/<user>/Documents\\Banished\\settings.cfg");
-    CHECK_STREQ(CR::Scrub("C:\\Users\\Anne Smith\\Documents\\x").c_str(), "C:\\Users\\<user> Smith\\Documents\\x");
+    CHECK_STREQ(CR::Scrub("C:\\Users\\Anne Smith\\Documents\\x").c_str(), "C:\\Users\\<user>\\Documents\\x");
+    CHECK_STREQ(CR::Scrub("home is /home/bob and more words").c_str(), "home is /home/<user> and more words");
     CHECK_STREQ(CR::Scrub("opened C:\\users\\anne\\OneDrive and /home/bob/.local").c_str(),
                 "opened C:\\users\\<user>\\OneDrive and /home/<user>/.local");
     CHECK_STREQ(CR::Scrub("no paths here, /usr/lib, Users/x").c_str(), "no paths here, /usr/lib, Users/x");
