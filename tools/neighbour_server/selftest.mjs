@@ -217,9 +217,10 @@ const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"
 check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
 
 // M3: solid tiles, shared roads and resource changes.
-creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 50, ty: 50, tw: 2, th: 2, built: 100, bm: "1101" }));
+creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 50, ty: 50, tw: 2, th: 2, built: 100, bm: "1101", dec: "50,50,2,2,90,0" }));
 const bb2 = await tryWait(rejoin.wait((m) => m.t === "build" && m.id === "b2"));
 check(bb2 && bb2.bm === "1101", "a building's solid tiles are passed on");
+check(bb2 && bb2.dec === "50,50,2,2,90,0", "and its ground (footprint, rotation, decal state)");
 creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
 const rd = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70000));
 check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\RoadDirt.rsc", "a finished road tile is passed on");
@@ -286,6 +287,11 @@ const paused = await tryWait(pb.wait((m) => m.t === "pause" && m.on === true));
 pa.ws.send(JSON.stringify({ t: "pause", on: false }));
 const resumed = await tryWait(pb.wait((m) => m.t === "pause" && m.on === false));
 check(paused && paused.from === "Pauser" && !!resumed, "a pause and its end reach the neighbour, with the town's name");
+pa.ws.send(JSON.stringify({ t: "speed", x: 5 }));
+const sped = await tryWait(pb.wait((m) => m.t === "speed"));
+pa.ws.send(JSON.stringify({ t: "speed", x: 0 }));
+const badSpeed = await tryWait(pa.wait((m) => m.t === "error" && /speed/.test(m.why)));
+check(sped && sped.x === 5 && sped.from === "Pauser" && !!badSpeed, "a speed change reaches the neighbour; a bad one is refused");
 pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,100,-200,300,450,1,0,100,3;2,0,0,0,0,0,1,66,5" }));
 const walkers = await tryWait(pb.wait((m) => m.t === "walkers"));
 pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,a,b" }));
@@ -318,7 +324,21 @@ await fb.closed;
 const fb2 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Secondly", join: true });
 const fend = await tryWait(fb2.wait((m) => m.t === "mirrorEnd"));
 check(fend && fend.count === 0 && !fb2.inbox.some((m) => m.t === "claimBlock"), "and a neighbour joining later sees none of them");
-for (const x of [fa2, fb2]) x.ws.close();
+// A loaded save (hello `reload`): the seat's buildings and roads go the same way (the town sends what
+// its save holds again), but the neighbour's resource changes waiting for it stay.
+fa2.ws.send(JSON.stringify({ t: "build", id: "rb1", tmpl: "Template\\WoodHouse.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 8, ty: 8, tw: 2, th: 2, built: 100 }));
+fa2.ws.send(JSON.stringify({ t: "road", cell: 4321, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && !m.off));
+fa2.ws.close(1000, "bye");
+await fa2.closed;
+fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 777, tmpl: "Template\\Tree.rsc" }));
+await new Promise((r) => setTimeout(r, 300));
+const fa3 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
+const rgone = await tryWait(fb2.wait((m) => m.t === "unbuild" && m.id === "rb1"));
+const runpaved = await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && m.off === true));
+const kept = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 777));
+check(!!rgone && !!runpaved && !!kept, "a town loading a save drops what its seat held, but keeps the changes waiting for it");
+for (const x of [fa3, fb2]) x.ws.close();
 
 // The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
 const upgradeStatus = await new Promise((resolve) => {

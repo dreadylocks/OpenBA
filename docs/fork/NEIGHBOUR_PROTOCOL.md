@@ -46,6 +46,7 @@ for that game and says why in the event log (or the lobby).
 | `lastSeq` | int | the last chat number this town has shown (newer lines are replayed) |
 | `join` | bool, optional | true from the lobby's Join: refused if the room was not created in the lobby |
 | `fresh` | bool, optional | true on a new game's hellos until its first `welcome` (never a loaded save, never a reconnect): the relay drops what this seat's earlier game left -- its buildings, roads, land and the resource changes still queued for the neighbour -- and tells an online neighbour (`unbuild`, `road` `off`, `released`) |
+| `reload` | bool, optional | true on a loaded save's first hello: the same as `fresh` except that the resource changes queued for this town stay. The save may be older than what the seat holds, so the town then sends everything again: its buildings and claims on `welcome`, its road tiles (claims, and the finished ones as `road`) once the neighbour's land is in (`mirrorEnd`) |
 | `engine` | string | `openba` |
 | `engineVer` | string | OpenBA's version, e.g. `1.0.0` |
 | `simBuild` | string | 16 hex: xxHash64 of version, git commit, compiler and target; `""` = unknown |
@@ -90,7 +91,7 @@ The sender resends it on every join until it gets `stored`.
 |---|---|---|
 | `claim` | `id`, `rects` = `"x,y,w,h;..."` (at most 64 rects, 4096 tiles) | claim land; answered `claimed` |
 | `release` | `rects` | give land back |
-| `build` | `id` (`[0-9a-z_-]{1,40}`), `tmpl` (path), `x`, `y`, `z`, `rot`, `tx`, `ty`, `tw`, `th`, `built` (ints), `grp` (int 0..63), `bm` (`0`/`1` per footprint tile, row by row, optional) | a structure, its place and construction stage |
+| `build` | `id` (`[0-9a-z_-]{1,40}`), `tmpl` (path), `x`, `y`, `z`, `rot`, `tx`, `ty`, `tw`, `th`, `built` (ints), `grp` (int 0..63), `bm` (`0`/`1` per footprint tile, row by row, optional), `dec` (`"x,y,w,h,rot,state"`, optional: the structure's ground decal over the footprint as its MapComponent holds it, its rotation and decal state) | a structure, its place and construction stage; the neighbour draws its model see-through and paints its ground (a stockpile's yard, a field's soil, a foundation) |
 | `unbuild` | `id` | it is gone |
 | `road` | `cell`, `type`, `tt` (ints), `tmpl` (path); or `cell`, `off: true` | a finished road tile, or one taken up |
 | `nat` | `op` (`rm` \| `add`), `cell` (int), `tmpl` (path) | a natural resource felled / mined out, or a sapling planted |
@@ -99,6 +100,11 @@ The sender resends it on every join until it gets `stored`.
 `on` (bool): this town paused (`true`) or carried on (`false`): the toolbar's pause / play or the pause
 key. The relay passes it to the neighbour, whose game does the same (shared pause: either town pausing
 pauses both). Sent again on arriving or joining while paused. Nothing is kept.
+
+### `speed`
+`x` (int 1..100): this town changed the game speed (the toolbar's speed buttons, or a disaster slowing the
+game to 1x). The relay passes it to the neighbour, whose game takes the same speed. A town arriving is sent
+the speed of the one already there. Nothing is kept.
 
 ### `walkers`
 This town's villagers, once a second while the neighbour is online (`walkers.h`): `tmpl` (the citizen
@@ -124,6 +130,7 @@ Every 25 s of silence; answered `pong` (without waking the room).
 | `hashCheck` | `same` (bool), `mine`, `theirs` | the two towns' land compared |
 | `compat` | `warn` (a sentence for the event log) | a difference that only warns (another build, other mods) |
 | `pause` | `on`, `from` | the neighbour paused (`true`) or carried on (`false`): do the same |
+| `speed` | `x`, `from` | the neighbour changed the game speed: take the same |
 | `walkers` | `tmpl`, `list` | the neighbour's villagers, as above |
 | `claimed` | `id`, `ok` (bool), `why` | the answer to a `claim` |
 | `claims` / `released` | `seat`, `rects` | the neighbour claimed / released land |

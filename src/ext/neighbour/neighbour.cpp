@@ -80,9 +80,13 @@ LobbyStart            s_lobby;
 bool                  s_restoreRequested = false;
 bool                  s_restoreTo = false;
 std::string           s_worldHashNew;     // NoteWorldHash during this Load (a new game's map)
-// A new game (not a save) that the relay has not yet welcomed: its hellos say `fresh`, so the relay
-// drops what an earlier game left in this town's seat. The first welcome ends it.
+// A game the relay has not yet welcomed. A new game's hellos say `fresh`, so the relay drops what an
+// earlier game left in this town's seat; a loaded game's say `reload`, so the relay forgets what this
+// seat held (the save may be older) and the town sends it all again. The first welcome ends it.
 bool                  s_freshGame = false;
+// TEST AID (settings.cfg neighbour.testreload=1): every join is taken as a loaded game's first join
+// (hello `reload`, the roads again), so a reconnect tests the reload path without a save.
+bool                  s_testReload = false;
 uint64_t              s_parcelCounter = 0;
 constexpr uint64_t    kRetryWaitingFrames = 600;   // ~10 s at 60 fps: try waiting parcels again
 // The shared map's changes waiting for the relay are copied into the saved state when they change, at
@@ -145,7 +149,7 @@ Message Hello() {
      .Set("name", s_config.name)
      .SetInt("lastSeq", lastSeq);
     if (!token.empty()) m.Set("token", token);   // our seat (the relay never seats a town by name)
-    if (s_freshGame && !s_loadedFromSave) m.SetBool("fresh", true);
+    if (s_freshGame || s_testReload) m.SetBool(s_loadedFromSave || s_testReload ? "reload" : "fresh", true);
     AddHandshake(m, LocalInfoNow());
     return m;
 }
@@ -154,13 +158,16 @@ Message Hello() {
 
 std::string PeerLabel() { return s_peerName.empty() ? std::string("your neighbor") : s_peerName; }
 
-// --- the shared pause -----------------------------------------------------
+// --- the shared pause and speed -------------------------------------------
 // Either town pausing pauses both, and either carrying on resumes both (the user's call). The toolbar's
 // pause / play buttons and the TogglePause key all write PlayerToolManager::paused; the frame reads it,
 // and a change the player made here goes to the neighbour. One the neighbour made is applied here and
-// is not sent back.
+// is not sent back. The game speed (PlayerToolManager +0x34: the toolbar's speed buttons, and a disaster
+// slowing the game to 1x) is shared the same way; a town arriving takes the speed of the one already there.
 bool s_pauseSeen = false;    // PlayerToolManager::paused at the last look
 bool s_pauseKnown = false;   // s_pauseSeen is this game's (a game's first frame reads it)
+int32_t s_speedSeen = 1;     // the game speed at the last look
+constexpr int64_t kMaxSpeed = 100;
 
 PlayerToolManager* ToolManager() {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
@@ -180,6 +187,7 @@ void PollPause() {
     const bool now = t->paused;
     if (!s_pauseKnown) {
         s_pauseSeen = now;
+        s_speedSeen = t->field_0x34;
         s_pauseKnown = true;
         return;
     }
@@ -199,6 +207,7 @@ void ApplyPause(const Message& m) {
         Post((from.empty() ? PeerLabel() : from) + (on ? " paused the game." : " carried on."), kColourStatus);
     }
     s_pauseSeen = on;   // the neighbour's change: not news to send back
+    if (!s_pauseKnown) s_speedSeen = t->field_0x34;
     s_pauseKnown = true;
 }
 
@@ -206,6 +215,41 @@ void ApplyPause(const Message& m) {
 void ShareCurrentPause() {
     PlayerToolManager* t = ToolManager();
     if (t != nullptr && t->paused) SendPause(true);
+}
+
+void SendSpeed(int32_t speed) {
+    if (!s_link || !s_joined) return;
+    Message m("speed");
+    m.SetInt("x", speed);
+    s_link->Send(m);
+}
+
+// Read with the pause (s_pauseKnown covers both: a game's first frame reads them).
+void PollSpeed() {
+    PlayerToolManager* t = ToolManager();
+    if (t == nullptr || !s_pauseKnown) return;
+    if (t->field_0x34 == s_speedSeen) return;
+    s_speedSeen = t->field_0x34;
+    SendSpeed(s_speedSeen);
+}
+
+void ApplySpeed(const Message& m) {
+    int64_t x = 0;
+    if (!m.GetInt("x", x) || x < 1 || x > kMaxSpeed) return;
+    PlayerToolManager* t = ToolManager();
+    if (t == nullptr) return;
+    const std::string from = Sanitize(m.GetOr("from", ""), kMaxNameChars);
+    if (t->field_0x34 != x) {
+        t->field_0x34 = static_cast<int32_t>(x);
+        Post((from.empty() ? PeerLabel() : from) + " set the speed to " + std::to_string(x) + "x.", kColourStatus);
+    }
+    s_speedSeen = static_cast<int32_t>(x);   // the neighbour's change: not news to send back
+}
+
+// A neighbour arriving: it takes this town's speed.
+void ShareCurrentSpeed() {
+    PlayerToolManager* t = ToolManager();
+    if (t != nullptr) SendSpeed(t->field_0x34);
 }
 
 // A fresh parcel id: this town's clock and a counter, in base 36 (ValidParcelId's alphabet).
@@ -387,6 +431,8 @@ void OnMessage(const Message& m) {
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
+        // A loaded game's first join: its roads again, once the neighbour's land is in.
+        if ((s_freshGame && s_loadedFromSave) || s_testReload) SharedMap::ExpectReload();
         if (s_freshGame) {   // told once: a reconnect must not drop this game's own buildings
             s_freshGame = false;
             if (s_link) s_link->SetHello(Hello());
@@ -416,10 +462,16 @@ void OnMessage(const Message& m) {
         s_peerName = peer;
         s_peerOnline = online;
         Post(peer + (online ? " has arrived." : " has left."), kColourStatus);
-        if (online) ShareCurrentPause();
-        else Walkers::Clear();
+        if (online) {
+            ShareCurrentPause();
+            ShareCurrentSpeed();
+        } else {
+            Walkers::Clear();
+        }
     } else if (m.type == "pause") {
         ApplyPause(m);
+    } else if (m.type == "speed") {
+        ApplySpeed(m);
     } else if (m.type == "parcel") {
         OnParcel(m);
     } else if (m.type == "hashCheck") {
@@ -765,6 +817,7 @@ void SelectForGame() {
         s_restoreRequested = false;
     }
     s_config = ReadConfig();
+    s_testReload = Setting("neighbour.testreload") == "1";
     {
         std::lock_guard<std::mutex> lock(s_savedMu);
         if (s_lobbyGame) {   // a new game from the lobby: its room, its password, its name
@@ -857,6 +910,7 @@ void BeginFrame() {
     s_link->Poll(got);
     for (Incoming& in : got) OnIncoming(in);
     PollPause();
+    PollSpeed();
 }
 
 void EndGame(const void* owner) {

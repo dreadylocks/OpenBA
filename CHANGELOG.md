@@ -4,6 +4,20 @@ One section per release, newest first. The section of the version being tagged i
 release's notes (`.github/workflows/release.yml` reads it with `tools/release/changelog_section.py`).
 Headings are `## vX.Y.Z (YYYY-MM-DD)`; the version is the CMake `VERSION` in `CMakeLists.txt`.
 
+## v1.1.1 (2026-10-24)
+
+Fixes from the second neighbor towns game.
+
+**Neighbor towns**
+- You now see the ground under your neighbor's buildings: stockpile yards, field soil, orchards,
+  pastures and foundations. Stockpiles, which have no building on them, showed nothing before.
+- Changing the game speed changes it for both of you, like pausing.
+- Loading an older save no longer leaves your neighbor seeing buildings you no longer have: the
+  relay forgets what your town held and your game sends it all again.
+- Roads finished after loading a save always say which road they are.
+- The relay needs updating for these (`tools/neighbour_server`, `npx wrangler deploy`); older games
+  still work with it.
+
 ## v1.1.0 (2026-10-24)
 
 This fork's first release (dreadylocks/OpenBA): **neighbor towns**, a two-player mode where each of

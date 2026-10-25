@@ -26,6 +26,7 @@
 #include "Component/ModelDescription.h"
 #include "Component/NaturalResourceComponent.h"
 #include "Component/CitizenComponent.h"
+#include "Component/DecalComponent.h"
 #include "Component/DecalDescription.h"
 #include "Component/GrowthComponent.h"
 #include "Component/MapDescription.h"
@@ -51,6 +52,7 @@ namespace {
 
 constexpr uint64_t kCheckFrames = 300;      // ~5 s: look for structures that are gone
 constexpr float    kMirrorOpacity = 0.55f;  // see-through: "the neighbour's", not ours
+constexpr float    kMirrorGround = 0.75f;   // the alpha of a mirror's ground (its decal)
 constexpr int      kBlockedType = 31;       // a terrain type no walk mask has (0xe1f, 0x1e0)
 constexpr size_t   kMaxPending = 20000;     // road / resource messages waiting for the relay
 // Pacing: the relay drops a town that floods it (600 messages in 10 s), so the shared map sends
@@ -100,6 +102,7 @@ struct Mirror {
     Graphics::MeshInstance* mesh = nullptr;
     uint32_t                sceneId = 0;
     bool                    inScene = false;
+    int                     decalId = -1;   // its ground: a WorldGeometry decal slot
     std::vector<uint32_t>   solid;   // the cells marked solid for the path worker
 };
 std::map<std::string, Mirror> s_mirrors;
@@ -109,12 +112,16 @@ std::vector<uint8_t> s_solidRef;            // per cell: how many mirrors hold i
 bool s_live = false;                        // the world is built (the first Tick): changes are news
 bool s_applying = false;                    // applying the neighbour's change: not news
 std::string s_roadTmpl[2];                  // the road tool's template per road type
+// The game's own road tools, per road type (CreateRoadDescription's bool: 0 stone, 1 dirt): sent when
+// this game has not used the road tool since it was loaded.
+const char* const kRoadTmplDefault[2] = {"Template\\StoneRoad.rsc:resource", "Template\\DirtRoad.rsc:resource"};
+bool s_rescanRoads = false;                 // a loaded game's first join: its roads again at mirrorEnd
 std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: not news
 std::vector<Message> s_pending;             // road / resource messages for the relay
 uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
 // What the neighbour's changes did here (logged when it changes): roads laid / taken up,
-// resources removed / planted, tiles marked solid.
-struct Applied { int roads = 0, unroads = 0, removed = 0, planted = 0, solid = 0, refused = 0; } s_applied, s_appliedLogged;
+// resources removed / planted, tiles marked solid, grounds painted under its structures.
+struct Applied { int roads = 0, unroads = 0, removed = 0, planted = 0, solid = 0, refused = 0, grounds = 0; } s_applied, s_appliedLogged;
 // Why the last change was not applied (logged with the counts).
 const char* s_lastRefusal = "";
 
@@ -175,6 +182,11 @@ void FreeMirror(Mirror& m, bool sceneAlive) {
     if (sceneAlive)
         for (uint32_t c : m.solid) MarkSolid(c, false);
     m.solid.clear();
+    if (m.decalId >= 0 && sceneAlive) {
+        GameUpdateLoop* g = GameUpdateLoop::_singleton;
+        if (g != nullptr && g->m_worldGeometry != nullptr) g->m_worldGeometry->RemoveDecal(m.decalId);
+    }
+    m.decalId = -1;
     if (m.inScene && sceneAlive) {
         GameUpdateLoop* g = GameUpdateLoop::_singleton;
         if (g != nullptr && g->m_graphicsScene != nullptr) g->m_graphicsScene->RemoveObject(m.sceneId);
@@ -211,7 +223,49 @@ void ClearNatureUnder(const TileRect& r) {
     }
 }
 
-// Draw one of the neighbour's structures: its template's finished mesh, see-through.
+// The mesh a mirror shows: `built` percent of the model group's stages (foundation first, finished
+// last). Null for a structure without a model (a stockpile is only its ground).
+Graphics::GraphicsMesh* MirrorMesh(const ComponentDescription* desc, int64_t grp, int64_t built) {
+    const ModelDescription* model = desc->FindDescription<ModelDescription>();
+    if (model == nullptr || model->_meshGroups == nullptr || model->_meshGroupCount <= 0) return nullptr;
+    const int group = (grp >= 0 && grp < model->_meshGroupCount) ? static_cast<int>(grp) : 0;
+    const ModelMeshGroup& mg = model->_meshGroups[group];
+    if (mg.meshes == nullptr || mg.meshCount <= 0) return nullptr;
+    int stage = static_cast<int>((built * mg.meshCount + 99) / 100) - 1;
+    if (stage < 0) stage = 0;
+    if (stage >= mg.meshCount) stage = mg.meshCount - 1;
+    return mg.meshes[stage];
+}
+
+// A mirror's ground, as DecalComponent::OnAdded paints the structure's: its DecalDescription's material
+// for the decal state, over the footprint as MapComponent holds it ("dec": x, y, w, h, rotation, state),
+// with the variant's UV rect; a little see-through. The decal slot, or -1.
+int AddMirrorDecal(const ComponentDescription* desc, const Message& m, int64_t grp) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    const DecalDescription* decal = desc->FindDescription<DecalDescription>();
+    std::string dec;
+    if (g == nullptr || g->m_worldGeometry == nullptr || decal == nullptr || decal->_materials == nullptr ||
+        !m.Get("dec", dec))
+        return -1;
+    long long v[6] = {0, 0, 0, 0, 0, 0};
+    if (std::sscanf(dec.c_str(), "%lld,%lld,%lld,%lld,%lld,%lld", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6)
+        return -1;
+    const long long dim = TheMap() != nullptr ? TheMap()->size : 0;
+    if (v[0] < 0 || v[1] < 0 || v[2] <= 0 || v[3] <= 0 || v[0] + v[2] > dim || v[1] + v[3] > dim || v[5] < 0 ||
+        v[5] >= decal->_materialCount)
+        return -1;
+    Graphics::MaterialInstance* material = decal->_materials[v[5]];
+    if (material == nullptr) return -1;
+    DecalUVRect uv = {0.0f, 0.0f, 1.0f, 1.0f};
+    if (grp >= 0 && grp < decal->_uvRectCount && decal->_uvRects != nullptr) uv = decal->_uvRects[grp];
+    const int x = static_cast<int>(v[0]), y = static_cast<int>(v[1]);
+    return g->m_worldGeometry->AddDecal(x, y, static_cast<int>(v[2]) - 1 + x, static_cast<int>(v[3]) - 1 + y,
+                                        static_cast<uint8_t>(kMirrorGround * 255.0f), static_cast<uint32_t>(v[4]),
+                                        material, decal->_tiled, decal->_sizeB, uv.u0, uv.v0, uv.u1, uv.v1, '\0', 0,
+                                        0, decal->_flagB);
+}
+
+// Draw one of the neighbour's structures: its template's mesh, see-through, and its ground.
 void AddMirror(const Message& m) {
     std::string id, tmpl;
     int64_t x = 0, y = 0, z = 0, rot = 0, grp = 0;
@@ -224,35 +278,29 @@ void AddMirror(const Message& m) {
     if (g == nullptr || g->m_graphicsScene == nullptr || f == nullptr) return;
     ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(tmpl.c_str()));
     if (!::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())) return;
-    const ModelDescription* model = desc->FindDescription<ModelDescription>();
-    if (model == nullptr || model->_meshGroups == nullptr || model->_meshGroupCount <= 0) return;
-    const int group = (grp >= 0 && grp < model->_meshGroupCount) ? static_cast<int>(grp) : 0;
-    const ModelMeshGroup& mg = model->_meshGroups[group];
-    if (mg.meshes == nullptr || mg.meshCount <= 0) return;
-    // The stage: `built` percent of the group's meshes (foundation first, finished last).
     int64_t built = 100;
     m.GetInt("built", built);
-    int stage = static_cast<int>((built * mg.meshCount + 99) / 100) - 1;
-    if (stage < 0) stage = 0;
-    if (stage >= mg.meshCount) stage = mg.meshCount - 1;
-    Graphics::GraphicsMesh* gm = mg.meshes[stage];
-    if (gm == nullptr) return;
+    Graphics::GraphicsMesh* gm = MirrorMesh(desc, grp, built);
 
     auto it = s_mirrors.find(id);
     if (it != s_mirrors.end()) FreeMirror(it->second, true);   // an update: draw it afresh
     Mirror mir;
-    void* mem = System::MemoryAllocator::MemAlloc(0x120, 8);
-    if (mem == nullptr) return;
-    mir.mesh = ::new (mem) Graphics::MeshInstance();
-    mir.mesh->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(gm));
-    const Math::Vector3 pos(static_cast<float>(x) / 100.0f, static_cast<float>(y) / 100.0f, static_cast<float>(z) / 100.0f);
-    const float yaw = static_cast<float>(rot) / 100.0f, pitch = 0.0f;
-    mir.mesh->SetTransform(Math::Transform::FromYawPitchOffset(yaw, pitch, pos));
-    mir.mesh->UpdateHierarchy();
-    mir.mesh->_opacity = kMirrorOpacity;
-    mir.mesh->_opacityPrev = kMirrorOpacity;
-    mir.sceneId = g->m_graphicsScene->AddObject(mir.mesh);
-    mir.inScene = true;
+    if (gm != nullptr) {
+        void* mem = System::MemoryAllocator::MemAlloc(0x120, 8);
+        if (mem == nullptr) return;
+        mir.mesh = ::new (mem) Graphics::MeshInstance();
+        mir.mesh->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(gm));
+        const Math::Vector3 pos(static_cast<float>(x) / 100.0f, static_cast<float>(y) / 100.0f, static_cast<float>(z) / 100.0f);
+        const float yaw = static_cast<float>(rot) / 100.0f, pitch = 0.0f;
+        mir.mesh->SetTransform(Math::Transform::FromYawPitchOffset(yaw, pitch, pos));
+        mir.mesh->UpdateHierarchy();
+        mir.mesh->_opacity = kMirrorOpacity;
+        mir.mesh->_opacityPrev = kMirrorOpacity;
+        mir.sceneId = g->m_graphicsScene->AddObject(mir.mesh);
+        mir.inScene = true;
+    }
+    mir.decalId = AddMirrorDecal(desc, m, grp);
+    if (mir.decalId >= 0) ++s_applied.grounds;
     s_mirrors[id] = mir;
 
     // Its footprint is the neighbour's land (the claim normally said so already), and what grows
@@ -291,6 +339,49 @@ void Queue(const Message& m) {
 }
 
 // ---- M3: roads ----------------------------------------------------------------------------------
+
+// The template sent with a road of this type: the road tool's, or the game's own road of that type.
+std::string RoadTemplate(uint8_t type) {
+    if (type > 1) return std::string();
+    return s_roadTmpl[type].empty() ? std::string(kRoadTmplDefault[type]) : s_roadTmpl[type];
+}
+
+// A loaded game's roads, sent again (ExpectReload): every road tile of this town's -- a road here on land
+// the neighbour does not hold -- is claimed (a row's run of them in one rectangle), and a finished one is
+// sent as a road. One being built goes when it is finished.
+void ScanRoads() {
+    Map* map = TheMap();
+    if (!s_on || map == nullptr || !EnsureGrid()) return;
+    const MapCell* cells = map->cells.GetData();
+    int claimed = 0, sent = 0;
+    for (int y = 0; y < s_dim; ++y) {
+        int runStart = -1;
+        for (int x = 0; x <= s_dim; ++x) {
+            const size_t i = static_cast<size_t>(y) * s_dim + static_cast<size_t>(x);
+            const bool road = x < s_dim && cells[i].field_0x2A != 0xFF && s_peer[i] == 0;
+            if (road) {
+                if (runStart < 0) runStart = x;
+                ++claimed;
+                const MapCell& c = cells[i];
+                if (c.field_0x2B != 0x80 && c.field_0x2A <= 1) {
+                    Message r("road");
+                    r.SetInt("cell", static_cast<int64_t>(i))
+                     .SetInt("type", c.field_0x2A)
+                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f))
+                     .Set("tmpl", RoadTemplate(c.field_0x2A));
+                    Queue(r);
+                    ++sent;
+                }
+            } else if (runStart >= 0) {
+                s_claimQueue.push_back(TileRect{runStart, y, x - runStart, 1});
+                runStart = -1;
+            }
+        }
+    }
+    ++s_waitingAdds;
+    fprintf(stderr, "[Neighbour] shared map: the loaded town's roads again: %d tile(s) claimed, %d finished sent\n",
+            claimed, sent);
+}
 
 Graphics::MaterialInstance* RoadDecal(const std::string& tmpl) {
     ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
@@ -503,6 +594,7 @@ void End() {
     s_pending.clear();
     s_roadTmpl[0].clear();
     s_roadTmpl[1].clear();
+    s_rescanRoads = false;
     s_applied = Applied();
     s_appliedLogged = Applied();
     s_tokens = kSendBurst;
@@ -556,6 +648,13 @@ void NoteStructure(ComponentEntity* entity) {
      .SetInt("tx", r.x).SetInt("ty", r.y).SetInt("tw", r.w).SetInt("th", r.h);
     const int built = BuiltPercent(entity);
     b.SetInt("built", built);
+    // Its ground, as DecalComponent::OnAdded paints it: MapComponent's footprint as it holds it, its
+    // rotation, the decal state.
+    if (DecalComponent* decal = entity->FindComponent<DecalComponent>()) {
+        b.Set("dec", std::to_string(mc->tileX0) + "," + std::to_string(mc->tileY0) + "," + std::to_string(mc->tileX1) +
+                         "," + std::to_string(mc->tileY1) + "," + std::to_string(mc->extraField) + "," +
+                         std::to_string(decal->decalState));
+    }
     // Which footprint tiles are solid (the structure blocks them in this map: Map::cells' blocker).
     if (Map* map = TheMap()) {
         std::string bm;
@@ -622,7 +721,7 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
         r.SetBool("off", true);
     } else {
         if (c.field_0x2A > 1) return;   // not a road type this side knows
-        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f)).Set("tmpl", s_roadTmpl[c.field_0x2A]);
+        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f)).Set("tmpl", RoadTemplate(c.field_0x2A));
     }
     Queue(r);
 }
@@ -674,10 +773,10 @@ void Tick(Link* link, uint64_t frame) {
         const Applied& a = s_applied;
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
-            a.solid != l.solid || a.refused != l.refused) {
+            a.solid != l.solid || a.refused != l.refused || a.grounds != l.grounds) {
             fprintf(stderr, "[Neighbour] shared map: from the neighbor so far: %d road tile(s) laid, %d taken up, "
-                            "%d resource(s) gone, %d planted, %d tile(s) solid; %d not applied%s%s\n",
-                    a.roads, a.unroads, a.removed, a.planted, a.solid, a.refused, a.refused > 0 ? " (last: " : "",
+                            "%d resource(s) gone, %d planted, %d tile(s) solid, %d ground(s) painted; %d not applied%s%s\n",
+                    a.roads, a.unroads, a.removed, a.planted, a.solid, a.grounds, a.refused, a.refused > 0 ? " (last: " : "",
                     a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
             s_appliedLogged = s_applied;
         }
@@ -730,6 +829,10 @@ void OnJoined(Link* link) {
         s_buildQueue.push_back(kv.first);
     }
     ++s_waitingAdds;
+}
+
+void ExpectReload() {
+    if (s_on) s_rescanRoads = true;
 }
 
 uint64_t WaitingGeneration() {
@@ -795,7 +898,13 @@ bool OnMessage(const Message& m, std::string* notice) {
     }
     if (m.type == "build") { AddMirror(m); return true; }
     if (m.type == "unbuild") { RemoveMirror(m.GetOr("id", "")); return true; }
-    if (m.type == "mirrorEnd") return true;
+    if (m.type == "mirrorEnd") {   // the neighbour's land is in: a loaded game's roads can go again
+        if (s_rescanRoads) {
+            s_rescanRoads = false;
+            ScanRoads();
+        }
+        return true;
+    }
     if (m.type == "road") { ApplyRoad(m); return true; }
     if (m.type == "nat") { ApplyNat(m); return true; }
     return false;
