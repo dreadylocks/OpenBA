@@ -11,9 +11,14 @@
 // condition variable; a receive is re-armed from its own completion. WebSocketFree cancels the
 // connection, waits for the final "cancelled" state (after which nothing calls back) and drains
 // the queue before releasing anything.
+//
+// Platform::HttpPost (platform_http.h) lives here too: a TCP (+ TLS) nw_connection carrying one
+// HTTP/1.1 POST (websocket_frames.h writes the request and reads the status), released the same way.
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
+#include "platform/common/platform_http.h"
+#include "platform/common/websocket_frames.h"
 
 #include <Network/Network.h>
 #include <dispatch/dispatch.h>
@@ -112,6 +117,35 @@ void ArmReceive(WebSocketObject* ws) {
             stop = ws->finished;
         }
         if (!stop) ArmReceive(ws);
+    });
+}
+
+// HttpPost's answer: bytes into inbox.front() until the head is in, the line ends or fails.
+void ArmHttpReceive(WebSocketObject* ws) {
+    nw_connection_receive(ws->conn, 1, 65536, ^(dispatch_data_t content, nw_content_context_t /*context*/,
+                                                bool isComplete, nw_error_t error) {
+        bool again = false;
+        {
+            std::lock_guard<std::mutex> lock(ws->mu);
+            if (ws->inbox.empty()) ws->inbox.emplace_back();
+            std::string* got = &ws->inbox.front();   // a pointer: a block copies what it captures
+            if (content != nullptr) {
+                dispatch_data_apply(content, ^bool(dispatch_data_t /*region*/, size_t /*offset*/, const void* buffer,
+                                                   size_t size) {
+                    got->append(static_cast<const char*>(buffer), size);
+                    return true;
+                });
+            }
+            if (error != nullptr && ws->error.empty()) ws->error = Describe(error, "the line to the server failed");
+            if (error != nullptr || isComplete || WebSocketFrames::HeadEnd(*got) != std::string::npos ||
+                got->size() > 65536) {
+                ws->finished = true;
+            } else {
+                again = true;
+            }
+            ws->cv.notify_all();
+        }
+        if (again) ArmHttpReceive(ws);
     });
 }
 
@@ -274,6 +308,74 @@ void WebSocketCancel(WebSocketHandle ws) {
 void WebSocketFree(WebSocketHandle ws) {
     if (ws == nullptr) return;
     ReleaseAll(ws);
+}
+
+int HttpPost(const char* url, const char* contentType, const std::string& body, uint32_t timeoutMs,
+             std::string& error) {
+    error.clear();
+    WebSocketFrames::Url where;
+    if (!WebSocketFrames::ParseHttpUrl(url != nullptr ? url : "", where, error)) return 0;
+    nw_endpoint_t   endpoint = nw_endpoint_create_host(where.host.c_str(), std::to_string(where.port).c_str());
+    nw_parameters_t params = nw_parameters_create_secure_tcp(
+        where.secure ? NW_PARAMETERS_DEFAULT_CONFIGURATION : NW_PARAMETERS_DISABLE_PROTOCOL,
+        NW_PARAMETERS_DEFAULT_CONFIGURATION);
+    WebSocketObject* ws = new WebSocketObject();   // its state, queue and release; no WebSocket on it
+    ws->queue = dispatch_queue_create("openba.http", DISPATCH_QUEUE_SERIAL);
+    ws->conn = nw_connection_create(endpoint, params);
+    nw_release(endpoint);
+    nw_release(params);
+    nw_connection_set_queue(ws->conn, ws->queue);
+    nw_connection_set_state_changed_handler(ws->conn, ^(nw_connection_state_t state, nw_error_t err) {
+        std::lock_guard<std::mutex> lock(ws->mu);
+        switch (state) {
+        case nw_connection_state_ready:
+            ws->ready = true;
+            break;
+        case nw_connection_state_waiting:
+        case nw_connection_state_failed:
+            if (ws->error.empty()) ws->error = Describe(err, "cannot reach the server");
+            ws->finished = true;
+            break;
+        case nw_connection_state_cancelled:
+            ws->finished = true;
+            ws->cancelled = true;
+            break;
+        default:
+            break;
+        }
+        ws->cv.notify_all();
+    });
+    nw_connection_start(ws->conn);
+    {
+        std::unique_lock<std::mutex> lock(ws->mu);
+        ws->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [ws] { return ws->ready || ws->finished; });
+        if (!ws->ready || ws->finished) {
+            error = !ws->error.empty() ? ws->error : std::string("the server did not answer in time");
+            lock.unlock();
+            ReleaseAll(ws);
+            return 0;
+        }
+    }
+    const std::string request = WebSocketFrames::PostRequest(where, contentType, body.size()) + body;
+    dispatch_data_t   data = dispatch_data_create(request.data(), request.size(), nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    nw_connection_send(ws->conn, data, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t sendError) {
+        if (sendError == nullptr) return;
+        std::lock_guard<std::mutex> lock(ws->mu);
+        if (ws->error.empty()) ws->error = Describe(sendError, "sending to the server failed");
+        ws->finished = true;
+        ws->cv.notify_all();
+    });
+    dispatch_release(data);
+    ArmHttpReceive(ws);
+    int status = 0;
+    {
+        std::unique_lock<std::mutex> lock(ws->mu);
+        ws->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [ws] { return ws->finished; });
+        if (!ws->inbox.empty()) status = WebSocketFrames::HttpStatus(ws->inbox.front());
+        if (status == 0) error = !ws->error.empty() ? ws->error : std::string("the server did not answer in time");
+    }
+    ReleaseAll(ws);
+    return status;
 }
 
 }  // namespace Platform

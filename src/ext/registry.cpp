@@ -333,6 +333,16 @@ const Entry kEntries[] = {
       "neighbour.room, neighbour.password and neighbour.name in settings.cfg). Their messages "
       "appear in the event log. Press N in game for the Neighbor panel: chat, send goods, send a family.",
       5, [](State& s) -> bool& { return s.ext.neighbour; } },   // = Neighbour::kPayloadFormat (protocol.h)
+    // CRASH REPORTS (this fork; docs/fork/CRASH_REPORTS.md): after a crash, the next start sends the
+    // crash log and the logs' start and end to a Sentry-compatible address (crashreport.dsn, or the
+    // build's own). Class A: nothing in the game or the save; read at boot. ON by default: nothing
+    // leaves the machine without an address, and a copy of each crash is kept either way.
+    { "crash_reports", Tier::Extension, Class::A, true,
+      "Send crash reports",
+      "After a crash, the next start sends the crash log and the end of the game's logs to the crash "
+      "report address (crashreport.dsn in settings.cfg, or the one this build came with), with your "
+      "user name taken out of file paths. A copy of each crash stays in the crash_reports folder either way.",
+      0, [](State& s) -> bool& { return s.ext.crash_reports; } },
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.

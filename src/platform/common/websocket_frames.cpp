@@ -258,6 +258,46 @@ size_t HeadEnd(const std::string& buffer) {
     return at == std::string::npos ? std::string::npos : at + 4;
 }
 
+bool ParseHttpUrl(const std::string& url, Url& out, std::string& error) {
+    std::string asWs;
+    if (StartsWithNoCase(url, "https://")) {
+        asWs = "wss://" + url.substr(8);
+    } else if (StartsWithNoCase(url, "http://")) {
+        asWs = "ws://" + url.substr(7);
+    } else {
+        out = Url();
+        error = "the address must start with http:// or https://";
+        return false;
+    }
+    if (ParseUrl(asWs, out, error)) return true;
+    error = "the address is not a valid URL";
+    return false;
+}
+
+std::string PostRequest(const Url& url, const char* contentType, size_t contentLength) {
+    std::string r;
+    r += "POST " + url.target + " HTTP/1.1\r\n";
+    r += "Host: " + url.hostHeader + "\r\n";
+    r += std::string("Content-Type: ") + (contentType != nullptr ? contentType : "application/octet-stream") + "\r\n";
+    r += "Content-Length: " + std::to_string(contentLength) + "\r\n";
+    r += "Connection: close\r\n";
+    r += "User-Agent: OpenBA/1\r\n";
+    r += "\r\n";
+    return r;
+}
+
+int HttpStatus(const std::string& head) {
+    if (head.compare(0, 5, "HTTP/") != 0) return 0;
+    const size_t space = head.find(' ');
+    if (space == std::string::npos || space + 4 > head.size()) return 0;
+    int code = 0;
+    for (size_t i = space + 1; i < space + 4; ++i) {
+        if (head[i] < '0' || head[i] > '9') return 0;
+        code = code * 10 + (head[i] - '0');
+    }
+    return code;
+}
+
 bool CheckUpgradeResponse(const std::string& head, const std::string& key, std::string& error) {
     size_t lineEnd = head.find("\r\n");
     if (lineEnd == std::string::npos) lineEnd = head.size();

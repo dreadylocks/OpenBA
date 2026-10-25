@@ -40,4 +40,8 @@ uintptr_t ExecutableImageBase() {
     return reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));   // CAST-OK: ptr_int
 }
 
+const char* OsName() {
+    return "windows";
+}
+
 }  // namespace Platform
