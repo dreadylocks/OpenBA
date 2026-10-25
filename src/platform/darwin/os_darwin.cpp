@@ -64,4 +64,8 @@ void ExitProcess(uint32_t exitCode) {
     _exit(static_cast<int>(exitCode));
 }
 
+const char* OsName() {
+    return "macos";
+}
+
 }  // namespace Platform

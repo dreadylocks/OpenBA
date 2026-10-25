@@ -4,6 +4,16 @@ One section per release, newest first. The section of the version being tagged i
 release's notes (`.github/workflows/release.yml` reads it with `tools/release/changelog_section.py`).
 Headings are `## vX.Y.Z (YYYY-MM-DD)`; the version is the CMake `VERSION` in `CMakeLists.txt`.
 
+## v1.1.2 (2026-10-25)
+
+**Crash reports**
+- After a crash, the next start keeps that run's logs in a `crash_reports` folder beside the logs
+  (before, starting again emptied the crash log).
+- With a crash report address (a Sentry DSN, in `settings.cfg` as `crashreport.dsn`, or the one a
+  release was built with), those logs are sent there in the background, with your user name taken out
+  of file paths. Turn it off with **Send crash reports** in the Extensions dialog. How it works and
+  what is sent: `docs/fork/CRASH_REPORTS.md`.
+
 ## v1.1.1 (2026-10-24)
 
 Fixes from the second neighbor towns game.

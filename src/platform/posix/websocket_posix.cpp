@@ -20,9 +20,12 @@
 //
 // No SIGPIPE: plain sends pass MSG_NOSIGNAL, and TLS writes through the small socket BIO below,
 // which does the same (OpenSSL's own socket BIO calls write()).
+//
+// Platform::HttpPost (platform_http.h) lives here too: the same connect and TLS, one HTTP/1.1 POST.
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
+#include "platform/common/platform_http.h"
 
 #include "platform/common/websocket_frames.h"
 
@@ -668,6 +671,38 @@ void WebSocketFree(WebSocketHandle o) {
         SSL_shutdown(o->ssl);
     }
     delete o;
+}
+
+int HttpPost(const char* url, const char* contentType, const std::string& body, uint32_t timeoutMs,
+             std::string& error) {
+    error.clear();
+    WSF::Url where;
+    if (!WSF::ParseHttpUrl(url != nullptr ? url : "", where, error)) return 0;
+    addrinfo* addresses = nullptr;
+    if (!Resolve(where, timeoutMs, addresses, error)) return 0;
+    std::unique_ptr<WebSocketObject> o(new WebSocketObject());   // its socket and TLS; no WebSocket on it
+    const bool connected = OpenWakePipe(o.get(), error) && ConnectAny(o.get(), addresses, timeoutMs, error);
+    freeaddrinfo(addresses);
+    if (!connected) return 0;
+    const Clock::time_point deadline = After(timeoutMs);
+    if (where.secure && !StartTls(o.get(), where.host, deadline, error)) return 0;
+    const std::string request = WSF::PostRequest(where, contentType, body.size()) + body;
+    bool              started = false;
+    if (WriteAll(o.get(), request.data(), request.size(), deadline, false, started) != Got::Done) {
+        error = "sending to the server failed";
+        return 0;
+    }
+    std::string head;
+    while (WSF::HeadEnd(head) == std::string::npos && head.size() <= kMaxHead) {
+        char      buf[4096];
+        size_t    got = 0;
+        const Got r = ReadSome(o.get(), buf, sizeof(buf), got, deadline);
+        if (r != Got::Done) break;
+        head.append(buf, got);
+    }
+    const int status = WSF::HttpStatus(head);
+    if (status == 0) error = head.empty() ? kTimedOut : "the server did not answer with HTTP";
+    return status;
 }
 
 }  // namespace Platform

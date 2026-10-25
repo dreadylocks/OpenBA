@@ -72,6 +72,7 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_messagebox.h>
 #include "rt_crt.h"   // rtcrt::StrICmp, retail's _stricmp (D.4 Q9)
+#include "ext/crash_report/crash_report.h"   // ext.crash_reports: KeepLastCrash, before the logs reopen
 
 // WAVE 14 LANE SAVEMETA -- src/engine/save/saveload_meta.cpp.
 // ============================================================
@@ -1000,6 +1001,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     // top-level window shifts the CW_USEDEFAULT cascade that places the engine
     // window at creation time, and it sat on top of the game window during the
     // pre-Present part of boot.
+    // NOT RETAIL (ext.crash_reports): a crashed run's logs are kept before they are reopened.
+    CrashReport::KeepLastCrash();
     freopen("standalone_debug.log", "w", stdout);
     freopen("standalone_error.log", "w", stderr);
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -1160,6 +1163,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 // it for Application::PlatformStartup, whose window is SDL's (Phase D.4 SDL W3).
 // ============================================================
 int main(int argc, char** argv) {
+    // NOT RETAIL (ext.crash_reports): a crashed run's logs are kept before they are reopened.
+    CrashReport::KeepLastCrash();
     freopen("standalone_debug.log", "w", stdout);
     freopen("standalone_error.log", "w", stderr);
     setvbuf(stdout, NULL, _IONBF, 0);

@@ -60,6 +60,9 @@ uintptr_t ExecutableImageBase();
 // arm onto this function is a later `refactor:` with its own B11 verdict.
 [[noreturn]] void ExitProcess(uint32_t exitCode);
 
+// NOT RETAIL (ext.crash_reports): which OS this build is for, "windows", "macos" or "linux".
+const char* OsName();
+
 // Phase D.4 SDL step W7: the OS half of Application::LaunchProcess (retail 0x18009f5e0).
 // Bodies: src/platform/sdl/process_sdl.cpp (SDL3).
 namespace Process {

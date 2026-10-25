@@ -56,6 +56,14 @@ std::string AcceptKey(const std::string& key);
 std::string UpgradeRequest(const Url& url, const std::string& key);
 // The offset just past the blank line that ends an HTTP head in `buffer`, or npos.
 size_t HeadEnd(const std::string& buffer);
+
+// Plain HTTP for Platform::HttpPost (platform_http.h), which the twins carry beside their WebSocket
+// clients. ParseHttpUrl: ParseUrl's rules for "http[s]://..." (`secure` for https).
+bool ParseHttpUrl(const std::string& url, Url& out, std::string& error);
+// "POST <target> HTTP/1.1" with Host, Content-Type, Content-Length, Connection: close; the body follows.
+std::string PostRequest(const Url& url, const char* contentType, size_t contentLength);
+// The status code of an HTTP head ("HTTP/1.1 200 OK" -> 200), 0 when it is not one.
+int HttpStatus(const std::string& head);
 // `head`: the status line and headers (HeadEnd's span). True for a 101 whose Upgrade,
 // Connection and Sec-WebSocket-Accept match `key` and that names no extension.
 bool CheckUpgradeResponse(const std::string& head, const std::string& key, std::string& error);

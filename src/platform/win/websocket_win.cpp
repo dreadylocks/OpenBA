@@ -7,9 +7,12 @@
 // OS does TLS and checks the certificate. Cancel closes the WebSocket handle, which is how
 // WinHTTP aborts a synchronous call in flight; a blocked receive then fails and reads as
 // Closed.
+//
+// Platform::HttpPost (platform_http.h) lives here too: the same WinHTTP session, a POST.
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
+#include "platform/common/platform_http.h"
 
 #include <windows.h>
 #include <winhttp.h>
@@ -165,6 +168,69 @@ void WebSocketFree(WebSocketHandle o) {
     WebSocketCancel(o);
     CloseAll(o);
     delete o;
+}
+
+int HttpPost(const char* url, const char* contentType, const std::string& body, uint32_t timeoutMs,
+             std::string& error) {
+    error.clear();
+    const std::wstring wurl = Widen(url != nullptr ? url : "");
+    if (wurl.compare(0, 8, L"https://") != 0 && wurl.compare(0, 7, L"http://") != 0) {
+        error = "the address must start with http:// or https://";
+        return 0;
+    }
+    URL_COMPONENTS uc = {};
+    uc.dwStructSize = sizeof(uc);
+    wchar_t host[256] = {};
+    wchar_t path[2048] = {};
+    wchar_t extra[2048] = {};
+    uc.lpszHostName = host;     uc.dwHostNameLength = 255;
+    uc.lpszUrlPath = path;      uc.dwUrlPathLength = 2047;
+    uc.lpszExtraInfo = extra;   uc.dwExtraInfoLength = 2047;
+    if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &uc)) {
+        error = "the address is not a valid URL";
+        return 0;
+    }
+    std::wstring target = path[0] ? path : L"/";
+    target += extra;
+
+    WebSocketObject handles;   // its session and connect, closed by CloseAll
+    handles.session = WinHttpOpen(L"OpenBA/1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+                                  WINHTTP_NO_PROXY_BYPASS, 0);
+    if (handles.session == nullptr) {
+        error = Why("WinHttpOpen");
+        return 0;
+    }
+    const int t = static_cast<int>(timeoutMs);
+    WinHttpSetTimeouts(handles.session, t, t, t, t);
+    handles.connect = WinHttpConnect(handles.session, host, uc.nPort, 0);
+    if (handles.connect == nullptr) {
+        error = Why("WinHttpConnect");
+        CloseAll(&handles);
+        return 0;
+    }
+    HINTERNET req = WinHttpOpenRequest(handles.connect, L"POST", target.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                       WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                       uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+    if (req == nullptr) {
+        error = Why("WinHttpOpenRequest");
+        CloseAll(&handles);
+        return 0;
+    }
+    const std::wstring headers = L"Content-Type: " + Widen(contentType != nullptr ? contentType : "") + L"\r\n";
+    const DWORD        size = static_cast<DWORD>(body.size());
+    DWORD              status = 0;
+    if (!WinHttpSendRequest(req, headers.c_str(), static_cast<DWORD>(-1L), const_cast<char*>(body.data()), size, size, 0)) {
+        error = Why("sending");
+    } else if (!WinHttpReceiveResponse(req, nullptr)) {
+        error = Why("waiting for the answer");
+    } else {
+        DWORD statusSize = sizeof(status);
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                            &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
+    }
+    WinHttpCloseHandle(req);
+    CloseAll(&handles);
+    return static_cast<int>(status);
 }
 
 }  // namespace Platform

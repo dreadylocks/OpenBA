@@ -42,6 +42,10 @@ env:
   CCACHE_COMPRESS: "true"
   CCACHE_MAXSIZE: 400M
   CCACHE_LAUNCHERS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache
+  # ext.crash_reports (docs/fork/CRASH_REPORTS.md): where a released build sends crash reports when the
+  # player's settings.cfg names no address, a Sentry DSN. The repository variable (Settings > Secrets
+  # and variables > Actions > Variables); unset = released builds send none.
+  CRASH_DSN_ARG: -DOPENBA_CRASH_DSN=${{ vars.OPENBA_CRASH_DSN }}
 jobs:
   version:
     name: Version and notes
@@ -108,7 +112,7 @@ jobs:
           key: ccache-release-windows-${{ github.sha }}
           restore-keys: ccache-release-windows-
       - name: Build OpenBA (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/build.sh build release
       - name: Unit tests (release)
         run: tools/build.sh unit release
       # SignPath's origin verification takes the exe from this run's own artifact, so it must be
@@ -188,7 +192,7 @@ jobs:
       - name: Fetch dxvk-native
         run: tools/fetch_dxvk_native.sh
       - name: Build OpenBA (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/build.sh build release
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/build.sh build release
       - name: Unit tests (release)
         run: tools/build.sh unit release
       - name: Package
@@ -231,7 +235,7 @@ jobs:
             third_party/airconv_build
           key: airconv-${{ hashFiles('tools/macos/setup_deps.sh') }}
       - name: App bundle (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS" tools/macos/make_app.sh dist/OpenBA.app
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/macos/make_app.sh dist/OpenBA.app
       - name: Release zip
         run: |
           tools/macos/make_release_zip.sh dist/OpenBA.app dist

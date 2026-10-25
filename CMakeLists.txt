@@ -24,7 +24,7 @@
 #   cmake --build build/linux -t unit && build/linux/unit
 #   cmake --build build/linux -t OpenBA
 cmake_minimum_required(VERSION 3.20)
-project(banished_reimpl VERSION 1.1.1 LANGUAGES CXX)
+project(banished_reimpl VERSION 1.1.2 LANGUAGES CXX)
 # OpenBA version shown beside the retail version in the main / pause menu's BuildId
 # overlay (src/game/Dialog/mainmenudialog.cpp). Bump here to cut a release (README "Versioning").
 add_compile_definitions(OPENBA_VERSION="${PROJECT_VERSION}")
@@ -119,6 +119,12 @@ file(GLOB_RECURSE ENGINE_SRCS   CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/engine
 # code; built into OpenBA with the game sources (both platforms).
 file(GLOB_RECURSE EXT_SRCS      CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/ext/*.cpp)
 list(APPEND GAME_SRCS ${EXT_SRCS})
+# ext.crash_reports (docs/fork/CRASH_REPORTS.md): the address crash reports go to when settings.cfg
+# names none, a Sentry DSN. Empty (no reports leave the machine) unless set; the release workflow
+# passes its OPENBA_CRASH_DSN repository variable.
+set(OPENBA_CRASH_DSN "" CACHE STRING "Default crash report address (a Sentry DSN), empty for none")
+set_source_files_properties(${CMAKE_SOURCE_DIR}/src/ext/crash_report/crash_report.cpp
+  PROPERTIES COMPILE_DEFINITIONS "OPENBA_CRASH_DSN=\"${OPENBA_CRASH_DSN}\"")
 # The extension UI resources are built from OUR .rsc text inside the exe (docs/extensions/
 # KITFREE.md, block RSCTEXT): tools/ext_rsc_embed.py turns the sources under src/ext/ui/ into
 # one generated header of string literals, <build>/gen/ext_rsc_text.h, read by
