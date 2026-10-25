@@ -52,7 +52,7 @@ const kParcelId = /^[0-9a-z_-]{1,40}$/;
 const kSeats = 2;
 const kRoomIdleDays = 60;
 const kMaxListedRooms = 500;
-const kCreatesPerDay = 5;
+const kCreatesPerDay = 50;   // new lobby rooms a day from one address (a spam guard; friends share a home address)
 const kDayMs = 24 * 60 * 60 * 1000;
 // The new-game settings a room carries, besides the seed: the map size row and the disasters
 // switch as small whole numbers, and the start condition, terrain and climate as the game's
@@ -305,6 +305,7 @@ export class Room {
     if (msg.t === "road") return this.onRoad(ws, a, msg);
     if (msg.t === "nat") return this.onNat(ws, a, msg);
     if (msg.t === "pause") return this.onPause(ws, a, msg);
+    if (msg.t === "speed") return this.onSpeed(ws, a, msg);
     if (msg.t === "walkers") return this.onWalkers(ws, a, msg);
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
@@ -314,6 +315,12 @@ export class Room {
   onPause(ws, a, msg) {
     if (typeof msg.on !== "boolean") return this.fail(ws, "bad pause", false);
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "pause", on: msg.on, from: a.name || "" });
+  }
+
+  // Shared speed: either town changing the game speed changes both. Passed straight on, kept nowhere.
+  onSpeed(ws, a, msg) {
+    if (!Number.isInteger(msg.x) || msg.x < 1 || msg.x > 100) return this.fail(ws, "bad speed", false);
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "speed", x: msg.x, from: a.name || "" });
   }
 
   // The town's villagers, once a second: passed straight to the neighbour if it is online, kept nowhere.
@@ -340,7 +347,7 @@ export class Room {
       settings[k] = msg[k];
     }
     for (const k of kPathSettings) {
-      if (typeof msg[k] !== "string" || msg[k].length < 1 || msg[k].length > kMaxPathChars || /[ -]/.test(msg[k])) {
+      if (typeof msg[k] !== "string" || msg[k].length < 1 || msg[k].length > kMaxPathChars || /[\x00-\x1f]/.test(msg[k])) {
         return this.fail(ws, `bad setting ${k}`, true);
       }
       settings[k] = msg[k];
@@ -457,6 +464,8 @@ export class Room {
     rec.grp = Number.isInteger(msg.grp) && msg.grp >= 0 && msg.grp < 64 ? msg.grp : 0;   // the model variant
     // M3: which footprint tiles are solid (row by row, "1" solid, "0" walkable); citizens walk round them.
     if (typeof msg.bm === "string" && msg.bm.length === rec.tw * rec.th && msg.bm.length <= 4096 && /^[01]*$/.test(msg.bm)) rec.bm = msg.bm;
+    // Its ground (a stockpile's yard, a field's soil): the footprint as the game holds it, rotation, decal state.
+    if (typeof msg.dec === "string" && /^-?\d{1,7}(,-?\d{1,7}){5}$/.test(msg.dec)) rec.dec = msg.dec;
     const key = `mirror:${a.seat}`;
     const all = (await this.ctx.storage.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
@@ -528,9 +537,10 @@ export class Room {
 
   // A town starting a new game in its seat (hello `fresh`): what its earlier game left goes -- its
   // buildings, roads and land, and the resource changes still waiting for the neighbour -- and an
-  // online neighbour is told, so nothing of the old town stays on the neighbour's map. (A town that
-  // later loads an older save sends its buildings and land again on joining.)
-  async resetSeat(seat) {
+  // online neighbour is told, so nothing of the old town stays on the neighbour's map. A town that
+  // loads a save (hello `reload`) is reset the same way except the resource queue (keepNatQueue), and
+  // sends its buildings, roads and land again on joining: the save may be older than the seat.
+  async resetSeat(seat, keepNatQueue = false) {
     const peers = this.socketsFor(1 - seat);
     const mine = String(seat);
     const mirror = (await this.ctx.storage.get(`mirror:${seat}`)) || {};
@@ -551,7 +561,8 @@ export class Room {
       }
     }
     if (Object.keys(batch).length > 0) await this.ctx.storage.put(batch);
-    await this.ctx.storage.delete([`mirror:${seat}`, `roads:${seat}`, `natq:${1 - seat}`]);
+    await this.ctx.storage.delete(keepNatQueue ? [`mirror:${seat}`, `roads:${seat}`]
+                                               : [`mirror:${seat}`, `roads:${seat}`, `natq:${1 - seat}`]);
   }
 
   async sendMirror(ws, seat) {
@@ -635,6 +646,9 @@ export class Room {
     a.name = name;
     ws.serializeAttachment(a);
     if (msg.fresh === true) await this.resetSeat(seat);   // a new game in this seat: the old town goes
+    // A loaded game (perhaps an older save than what the seat holds): the same, but the neighbour's
+    // resource changes waiting for this town stay; the town sends its buildings, roads and land again.
+    else if (msg.reload === true) await this.resetSeat(seat, true);
 
     const peerName = meta.seats[other] || "";
     const peerOnline = this.socketsFor(other).length > 0;

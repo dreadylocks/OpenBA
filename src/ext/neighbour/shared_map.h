@@ -14,7 +14,9 @@
 // MIRRORS. Every structure is also reported (template path, position, rotation, footprint);
 // the neighbour's are drawn here as see-through models: a bare Graphics::MeshInstance in the
 // scene, as PlacementTool draws its preview -- not an entity, so this town's manager never
-// counts them, and nothing here can pick, remove or work on them. Their solid tiles are marked in
+// counts them, and nothing here can pick, remove or work on them. A structure's ground (a
+// stockpile's yard, a field's soil, a foundation: its DecalDescription) is painted as well, as a
+// terrain decal (WorldGeometry::AddDecal, as DecalComponent paints it). Their solid tiles are marked in
 // the path worker's own copy of the terrain (never in Map::cells, so nothing of it is saved):
 // citizens walk round them.
 //
@@ -77,6 +79,10 @@ void NotePlanted(ComponentEntity* entity);
 void Tick(Link* link, uint64_t frame);
 // The relay joined us: send every structure again (the relay keeps the latest per id).
 void OnJoined(Link* link);
+// A loaded game's first join (hello `reload`): the relay forgets what this town's seat held, since the
+// save may be older than it. Once the neighbour's land is in (its `mirrorEnd`), this town's roads go
+// again: a claim for each road tile of its own, a road message for each finished one.
+void ExpectReload();
 // A relay message for the shared map; true when it was one.
 bool OnMessage(const Message& m, std::string* notice);
 

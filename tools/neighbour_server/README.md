@@ -22,7 +22,7 @@ What a room does:
 - It tells each town when the other one **arrives or leaves**.
 - **Lobby rooms** (M2): a room created from the game's Multiplayer lobby keeps its seed and map
   settings and hands them to the town that joins; `/lobby` lists such rooms (never a password;
-  rooms idle 60 days drop off; 5 new rooms a day per address, not counted on the local relay).
+  rooms idle 60 days drop off; 50 new rooms a day per address, not counted on the local relay).
 - **The shared map**: it compares the two towns' world hash, referees land claims (first come
   first served) and keeps each town's buildings so the other town can draw them.
 - **Shared roads and resources** (M3): it keeps each town's finished road tiles for the other town,
@@ -42,7 +42,7 @@ The relay is then at `ws://127.0.0.1:8787` (this PC only). In another terminal:
 node selftest.mjs ws://127.0.0.1:8787
 ```
 
-The self-test (52 checks) covers chat and missed lines, passwords and full rooms, parcels,
+The self-test (55 checks) covers chat and missed lines, passwords and full rooms, parcels,
 lobby rooms and their list, the world-hash check, land claims, mirrored buildings, shared roads and
 resource changes, and protocol 2: seat tokens, a protocol 1 game refused, other retail data or land
 refused, another build or other mods warned; and macOS's `Upgrade: WebSocket` header (the value is

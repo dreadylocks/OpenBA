@@ -771,3 +771,42 @@ large one), with nomads landing on the coast.
 - Lakes are cut off halfway ("weird cut off half lake things"), most likely where `KeepRiversOnLand` /
   `ShapeCoasts` trim water at the new coast.
 The user's call: it needs a lot more work, later. One land stays the map to use until then.
+
+---------------------------------------------------------------------------------------------
+
+## 13. After the second game (2026-10-24)
+The user's list after a Colonial Charter game (Mac against the friend's Windows PC, room `cc-crows`):
+the neighbour's people, stockpiles and roads not seen, the soil under the neighbour's fields not seen,
+pause and speed not shared, and after the friend crashed and loaded an older save the two maps
+disagreed (her old buildings still showed on the Mac).
+- **People and pause**: the PC ran a build from before villagers and the shared pause (the Mac's log
+  had no villager or pause line from her). Both need v1.1.0 or newer.
+- **Fixed: the neighbour's ground was never drawn.** Stockpile yards, crop field soil, orchards,
+  pastures and building foundations are terrain decals (`DecalComponent`, the template's
+  `DecalDescription`), and a mirror drew only the model; a stockpile has none, so it showed nothing at
+  all. `build` now carries `dec` (the footprint as `MapComponent` holds it, its rotation and decal
+  state), and the mirror paints the same decal (`WorldGeometry::AddDecal`, as `DecalComponent::OnAdded`
+  does), a little see-through; it goes with the mirror. Older relays drop `dec`; older games ignore it.
+  Checked on the Mac with a scripted neighbour: 8 grounds painted for 8 start-town buildings ("8
+  ground(s) painted" in the shared-map line). Not yet looked at on screen (the screenshot hook did not
+  fire on the Mac).
+- **Roads**: on an unmodded game a finished road tile is sent (checked: 14 of 14 reached a scripted
+  neighbour; builders are needed, `BANISHED_BUILDERS`). None arrived in the Colonial Charter game, and
+  that is not explained yet: the road type is CreateRoadDescription's bool (0 stone, 1 dirt), so a mod
+  cannot add a third. If that mod's roads are structures (its corduroy and gravel roads have footprint
+  decals), they now draw through their ground. A road finished after a load was sent with no template
+  when the road tool had not been used since; it now falls back to the game's own road of that type.
+- **Shared speed**: `speed` (`x` 1..100), passed on by the relay like `pause`. The frame watches
+  `PlayerToolManager` +0x34 (the toolbar's speed buttons, a disaster slowing the game to 1x) and sends a
+  change; the neighbour's game takes it ("<town> set the speed to 5x."). A town arriving is sent the
+  speed of the one already there. Checked against a scripted neighbour both ways.
+- **Fixed: loading an older save left the neighbour's map out of date.** A loaded game's first hello
+  now says `reload`: the relay drops the seat's buildings, roads and land as for `fresh` (but keeps the
+  resource changes waiting for the town), the town sends its buildings and claims again on `welcome`,
+  and its roads at the neighbour's `mirrorEnd` (`SharedMap::ScanRoads`: a claim per row run of road
+  tiles on land the neighbour does not hold, a `road` per finished one). Test aid
+  `neighbour.testreload=1` takes every join as a reload (an unattended save does not work in a lobby
+  game). Checked on the Mac: a town built 14 road tiles, the relay restarted, the town came back with
+  "the loaded town's roads again: 28 tile(s) claimed, 14 finished sent". selftest 55 checks.
+- **Not done**: "when you lay a road you can't tell" (the planned road not visible after the drag) is
+  not looked into; the friend's crash needs her `standalone_crash.log`.
