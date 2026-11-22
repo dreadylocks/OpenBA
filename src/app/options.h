@@ -56,6 +56,9 @@ struct Options {
     int         autoquitFrames       = 0;      //   value > 1 overrides the settle frames
     bool        autoload             = false;  // tools/resave_gate/resave_gate.sh (BANISHED_AUTOLOAD=Gate)
     const char* autoloadName         = nullptr;//   save name; null when the value was "1" (= the autosave "Auto")
+    const char* devloop              = nullptr;// tools/devloop.sh — BANISHED_DEVLOOP=<dir>: save + quit on <dir>/request
+                                               //   (src/diag/devloop_harness.cpp, docs/extensions/DEVLOOP.md); such a run
+                                               //   is attended (a player is in it), so it never sets unattendedBoot
     bool        autotutorial         = false;  // CLAUDE.md unattended-boot list
     int         autotutorialIndex    = 0;      //   scenario entry index; 0 when the value was "1"
     int         automenuButton       = 0;      // CLAUDE.md / STATUS.md front-end button routes (Mods=7, Load=2, …)

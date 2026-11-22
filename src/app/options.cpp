@@ -146,6 +146,8 @@ void OptionsInit() {
     // ── front end / save-load ────────────────────────────────────────────────
     o.menuScene       = Int("BANISHED_MENU_SCENE", -1);
     o.saveTest        = Raw("BANISHED_SAVE_TEST");
+    o.devloop         = Raw("BANISHED_DEVLOOP");
+    if (o.devloop && !o.devloop[0]) o.devloop = nullptr;
     o.saveTestRepeat  = Int("BANISHED_SAVE_TEST_REPEAT", 0);
     o.userProfile     = Raw("USERPROFILE");
 
@@ -224,8 +226,9 @@ void OptionsInit() {
     // ── boot / engine plumbing ───────────────────────────────────────────────
     // Which flags mean "nobody is watching this run": the set
     // HarnessGuardUnattendedBoot has always used (src/app/main.cpp).
-    o.unattendedBoot = o.autostart || o.autoquit || o.autoload || o.autotutorial ||
-                       On("BANISHED_AUTOMENU_BUTTON") || On("BANISHED_PAUSEMENU_BUTTON");
+    // A dev-loop relaunch (BANISHED_DEVLOOP) autoloads, but a player is in it: attended.
+    o.unattendedBoot = !o.devloop && (o.autostart || o.autoquit || o.autoload || o.autotutorial ||
+                                      On("BANISHED_AUTOMENU_BUTTON") || On("BANISHED_PAUSEMENU_BUTTON"));
     {   const char* v = Raw("BANISHED_DEFER_WINDOW_SHOW");
         o.deferWindowShow = !v || (std::strcmp(v, "0") != 0 && std::strcmp(v, "false") != 0); }
     {   const char* v = Raw("BANISHED_SKIP_ENGINE_LOADER");

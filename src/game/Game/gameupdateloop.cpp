@@ -379,6 +379,7 @@ extern "C" void StartTown_ApplyPendingOccupiedVisuals(int frameNum);   // src/ga
 extern "C" void FoodStockCensus_Tick(int frame);                 // src/diag/food_stock_census.cpp
 extern "C" void CitizenDeathHarness_Tick(int frameNum);   // src/diag/death_harness.cpp
 extern "C" void SaveLoadHarness_Tick(GameUpdateLoop* gul, int frameNum); // src/diag/saveload_harness.cpp
+extern "C" void DevLoopHarness_Tick(GameUpdateLoop* gul);                // src/diag/devloop_harness.cpp
 extern "C" void DisasterHarness_Tick(int frameNum);       // src/diag/disaster_harness.cpp
 extern "C" void PastureFillHarness_Tick(int frameNum);    // src/diag/pasture_harness.cpp
 extern "C" void MarketOverstock_Tick(int frameNum);   // src/diag/market_overstock_harness.cpp
@@ -649,6 +650,11 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     // progress + the resulting .sav. No-op unless BANISHED_SAVE_TEST is set
     // (src/diag/saveload_harness.cpp).
     SaveLoadHarness_Tick(this, s_frameNum);
+
+    // The dev loop's in-game half: on <dir>/request, autosave and quit so the watcher can swap in a
+    // new build and load the save again. No-op unless BANISHED_DEVLOOP is set
+    // (src/diag/devloop_harness.cpp, docs/extensions/DEVLOOP.md).
+    DevLoopHarness_Tick(this);
 
     // Fire / citizen-disease / crop-infestation / tornado on demand. Every disaster
     // rolls its own dice inside its own component tick, and those chances are
