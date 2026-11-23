@@ -5,10 +5,5 @@
     "vscode-debugger",
     "vscode",
     "renderdoc"
-  ],
-  "permissions": {
-    "allow": [
-      "Bash(npx wrangler deploy)"
-    ]
-  }
+  ]
 }
