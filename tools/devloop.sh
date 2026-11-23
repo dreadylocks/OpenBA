@@ -298,6 +298,13 @@ launch_game() { # $1 = 1 to autoload the autosave
   rm -f "$STATE" "$REQ"
   local -a envs=("BANISHED_DEVLOOP=$DL_GAME")
   [ "$autoload" = 1 ] && [ -f "$AUTO" ] && envs+=("BANISHED_AUTOLOAD=1")
+  # The game's command line and environment are re-read from the cfg before every launch, so an
+  # edit there applies at the next restart without restarting the watcher.
+  if [ -f "$CFG" ]; then
+    EXTRA_ENV=""
+    EXTRA_ARGS=""
+    eval "$(grep -E '^(EXTRA_ENV|EXTRA_ARGS)=' "$CFG")"
+  fi
   # shellcheck disable=SC2206
   [ -n "$EXTRA_ENV" ] && envs+=($EXTRA_ENV)
   # shellcheck disable=SC2206
@@ -441,6 +448,8 @@ follow_branch() {
 cmd_watch() {
   [ "$OS" = win ] || [ "$OS" = mac ] || die "devloop runs on Windows (MSYS2 / Git Bash) and macOS"
   take_lock
+  SELF="$ROOT/tools/devloop.sh"
+  SELF_SUM="$(cksum < "$SELF")"
   say "watching $REMOTE/$BRANCH every ${POLL_SECONDS}s; checkout $WT; game $GAME_DIR"
   say "devloop dir $DEVLOOP_DIR; Ctrl+C stops the watcher, not the game"
   # first build, when there is none
@@ -475,6 +484,13 @@ cmd_watch() {
     if [ "$(stamp_commit)@$(stamp_line "$STAMP" 2)" != "$live_seen" ]; then
       restart_into_stamp && dead_reported=0
       cp -f "$STAMP" "$LIVE" 2>/dev/null    # tried once; a failed boot waits for the next build
+    fi
+    # 4. a pull changed this script: bash keeps running the old code, so start the new one.
+    #    It adopts the running game (that game's exit code is then not visible).
+    if [ "$(cksum < "$SELF")" != "$SELF_SUM" ]; then
+      say "tools/devloop.sh changed: restarting the watcher on the new version"
+      rm -f "$LOCK"
+      exec bash "$SELF" watch --cfg "$CFG"
     fi
     sleep "$POLL_SECONDS"
   done

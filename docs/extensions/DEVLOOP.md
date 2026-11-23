@@ -210,6 +210,10 @@ already at that commit because this machine pushed it), builds, writes the stamp
 -> wait for `state` = `running <commit>`. A failed build is reported once and leaves the old game
 running until the next push.
 
+**Changing the loop while it runs.** `EXTRA_ENV` and `EXTRA_ARGS` are re-read from the cfg before
+every launch, so an edit there applies at the next restart. A pull that changes `tools/devloop.sh`
+itself makes the watcher re-exec the new version; it adopts the running game.
+
 **What it does not hide.** A crash (exit 3), a hang, any exit nobody asked for, or a relaunch that
 does not reach `running` is printed with the log's first lines and an OS notification, and is not
 relaunched over. A game that does not answer `request` in 30 s (a menu, a modal, an exe without the
