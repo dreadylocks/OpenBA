@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <set>
 #include <mutex>
 #include <vector>
 
@@ -64,6 +65,7 @@ const void*           s_owner = nullptr;    // the GameUpdateLoop whose game thi
 std::unique_ptr<Link> s_link;
 Config                s_config;
 bool                  s_announcedOffline = false;   // one "cannot reach" line per outage
+std::set<std::string> s_compatSaid;                 // the compat warnings already in this game's log
 bool                  s_everConnected = false;
 bool                  s_refused = false;   // the relay refused this town for good (a "fatal" error)
 bool                  s_joined = false;      // a welcome arrived on the current line
@@ -493,8 +495,10 @@ void OnMessage(const Message& m) {
                 if (out[i].id == id) { out.erase(out.begin() + static_cast<long>(i)); break; }
         }
     } else if (m.type == "compat") {
-        // A difference the separate-town profile only warns about (a different build or mod list).
-        Post(Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars), kColourProblem);
+        // A difference the separate-town profile only warns about (a different build or mod list). The
+        // relay says it on every join and every arrival of the neighbour: once a game is enough.
+        const std::string warn = Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars);
+        if (s_compatSaid.insert(warn).second) Post(warn, kColourProblem);
     } else if (m.type == "error") {
         bool fatal = false;
         m.GetBool("fatal", fatal);
@@ -866,6 +870,7 @@ void SelectForGame() {
     }
     s_active = true;
     s_announcedOffline = false;
+    s_compatSaid.clear();
     s_everConnected = false;
     s_refused = false;
     s_joined = false;
