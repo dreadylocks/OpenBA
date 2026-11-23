@@ -79,7 +79,7 @@ ButtonDescription buttonSendFamily : "button" { ElementDescription _content = "c
 // Chat: the New Game dialog's name box, longer.
 RibbonDescription chatRow
 {
-	int _cellPad = 6; ElementDescription _elements [ "editChat" "buttonSend" ]
+	int _cellPad = 6; ElementDescription _elements [ "buttonSend" "editChat" ]	// Send first: the box widens to the right as it fills, and Send stays put
 }
 EditDescription editChat : "NewGame.rsc:editName"
 {

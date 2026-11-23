@@ -41,7 +41,7 @@ namespace {
 
 constexpr const char* kPanelRsc = "Dialog/ExtensionsNeighbour.rsc";
 constexpr int kKeyN      = 36;   // Input::KeyTables index of 'N' (kIndexToVirtualKey[36] = 0x4E)
-constexpr int kKeyEscape = 60;   // editelement.cpp's
+constexpr int kKeyEnter  = 93;   // editelement.cpp's (the one Enter its focus drop reads)
 constexpr int kRefreshFrames = 30;
 
 enum : int32_t {
@@ -110,9 +110,11 @@ public:
             }
             Refresh();
         } else if (msg == kMsgEditFinished && id == kIdChat) {
-            // Enter or a click elsewhere sends; Esc keeps the text unsent.
+            // Enter sends. A click elsewhere (another button, Cancel)
+            // or Esc only ends the typing and keeps the text: a half-typed line must not go because
+            // the player reached for something else.
             const ::Input::Device* dev = ::Input::Device::_singleton;
-            if (dev == nullptr || !dev->_keyboard[kKeyEscape].pressed) SendTyped();
+            if (dev != nullptr && dev->_keyboard[kKeyEnter].pressed) SendTyped();
         }
         Object::InternalPtr<UI::Element> copy = *element;
         UI::DialogInstance::OnElementEvent(&copy, msg, id, c, d, e, userData);
