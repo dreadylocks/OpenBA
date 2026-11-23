@@ -222,14 +222,14 @@ const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"
 check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
 
 // M3: solid tiles, shared roads and resource changes.
-creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 60, ty: 60, tw: 2, th: 2, built: 100, bm: "1101", dec: "60,60,2,2,90,0" }));
+creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 60, ty: 60, tw: 2, th: 2, built: 100, bm: "1101", dec: "60,60,2,2,90,0" }));
 const bb2 = await tryWait(rejoin.wait((m) => m.t === "build" && m.id === "b2"));
 check(bb2 && bb2.bm === "1101", "a building's solid tiles are passed on");
 check(bb2 && bb2.dec === "60,60,2,2,90,0", "and its ground (footprint, rotation, decal state)");
-creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
 const rd = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70000));
-check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\RoadDirt.rsc", "a finished road tile is passed on");
-creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "Template\RoadStone.rsc" }));
+check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\\RoadDirt.rsc", "a finished road tile is passed on");
+creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "Template\\RoadStone.rsc" }));
 await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001));
 creator.ws.send(JSON.stringify({ t: "road", cell: 70001, off: true }));
 check(!!(await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001 && m.off === true))), "a removed road tile is passed on");
@@ -244,19 +244,19 @@ check(!!(await tryWait(creator.wait((m) => m.t === "error" && /road/.test(m.why)
 creator.ws.send(JSON.stringify({ t: "road", cell: 70100, type: 7, tt: 6, tmpl: "", mat: "CC\\Material\\RoadGravel.rsc" }));
 const modRoad = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70100));
 check(modRoad && modRoad.type === 7 && modRoad.mat === "CC\\Material\\RoadGravel.rsc", "a mod's road type is passed on with its material");
-creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\Tree.rsc" }));
+creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\\Tree.rsc" }));
 const nr = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1234));
 check(nr && nr.op === "rm", "a felled tree is passed on");
 rejoin.ws.close();
 await new Promise((r) => setTimeout(r, 300));
-creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\Tree.rsc" }));
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\\Tree.rsc" }));
 // Roads taken up while the neighbour is away reach it when it comes back (it holds them in its save);
 // one laid again meanwhile does not.
-creator.ws.send(JSON.stringify({ t: "road", cell: 70002, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
-creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70002, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
 creator.ws.send(JSON.stringify({ t: "road", cell: 70002, off: true }));
 creator.ws.send(JSON.stringify({ t: "road", cell: 70003, off: true }));
-creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
 await new Promise((r) => setTimeout(r, 300));
 const rejoin2 = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));

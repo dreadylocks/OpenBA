@@ -78,7 +78,12 @@ struct Mine {
     Message                              build;   // the "build" message
     TileRect                             rect;
     int                                  built = -1;   // the stage last reported (percent)
+    // Placed in this session's play (not a load's scan), and when: only such a site, a few seconds old,
+    // is taken back when the relay refuses it (buildRefused); nothing can have been delivered to it yet.
+    bool                                  placedInPlay = false;
+    std::chrono::steady_clock::time_point placedAt;
 };
+constexpr double kTakeBackSeconds = 30.0;   // a refusal comes back within a round trip; this is generous
 
 // How far along a structure's model is, in percent: its mesh index in the group's stages
 // (foundation first, the finished building last). No model or one stage: 100.
@@ -744,6 +749,13 @@ void NoteStructure(ComponentEntity* entity) {
     auto old = s_mine.find(id);
     if (old != s_mine.end() && old->second.entity.Get() != entity) s_mineIds.erase(old->second.entity.Get());
     const bool placed = old == s_mine.end();
+    if (placed) {
+        mine.placedInPlay = s_live;
+        mine.placedAt = std::chrono::steady_clock::now();
+    } else {
+        mine.placedInPlay = old->second.placedInPlay;
+        mine.placedAt = old->second.placedAt;
+    }
     s_mine[id] = mine;
     s_mineIds[entity] = id;
     s_claimQueue.push_back(r);
@@ -1011,14 +1023,19 @@ bool OnMessage(const Message& m, std::string* notice) {
     }
     if (m.type == "buildRefused") {
         // Both towns placed on the same land at once and the neighbour's claim came first: the relay does
-        // not mirror ours. A site not yet started is taken back (nothing is lost: no material is in it),
-        // so neither map has two buildings in one place; one already rising stays, and the player is told.
+        // not mirror ours. A site this player placed seconds ago, still a site, is taken back (nothing can
+        // have been delivered to it yet), so neither map has two buildings in one place. Anything older (a
+        // half-built house found on the neighbour's land at a rejoin, with materials in it) stays, and the
+        // player is told.
         const std::string id = m.GetOr("id", "");
         auto it = s_mine.find(id);
         ComponentEntity* e = it != s_mine.end() ? it->second.entity.Get() : nullptr;
         GameUpdateLoop* g = GameUpdateLoop::_singleton;
-        const bool fresh = e != nullptr && e->FindComponent<BuildComponent>() != nullptr && BuiltPercent(e) <= it->second.built &&
-                           it->second.built < 100;
+        const double age = it != s_mine.end()
+                               ? std::chrono::duration<double>(std::chrono::steady_clock::now() - it->second.placedAt).count()
+                               : 1e9;
+        const bool fresh = e != nullptr && it->second.placedInPlay && age < kTakeBackSeconds &&
+                           e->FindComponent<BuildComponent>() != nullptr;
         if (fresh && g != nullptr && g->m_entityList != nullptr && !((e->_entityFlags >> 10) & 1)) {
             g->m_entityList->QueueDestroy(&e);
             fprintf(stderr, "[Neighbour] shared map: %s taken back: the neighbor got that land first\n", id.c_str());

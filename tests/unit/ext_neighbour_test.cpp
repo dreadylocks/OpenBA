@@ -236,6 +236,7 @@ struct FakeNet {
     std::deque<std::string>  toReceive;             // frames the next Receives return
     bool                     dropLine = false;      // the current line "breaks"
     bool                     holdSends = false;     // writes wait (a slow line) until cleared
+    int                      failSends = 0;         // this many non-hello writes fail (the line breaks)
     int                      held = 0;              // writes waiting on holdSends now
 };
 FakeNet* g_net = nullptr;
@@ -256,6 +257,12 @@ public:
         g_net->cv.wait(lock, [this] { return closed_ || !g_net->holdSends; });
         --g_net->held;
         if (closed_) return false;
+        if (g_net->failSends > 0 && text.find("\"hello\"") == std::string::npos) {
+            --g_net->failSends;   // the write fails and the line drops: the reader ends too
+            g_net->dropLine = true;
+            g_net->cv.notify_all();
+            return false;
+        }
         g_net->sent.push_back(text);
         g_net->cv.notify_all();
         return true;
@@ -737,7 +744,43 @@ UNIT_TEST(ext_neighbour_link_ephemeral_newest_goes_first) {
     g_net = nullptr;
 }
 
+// A queued message whose write fails is first in line on the next connection, written once.
 UNIT_TEST(ext_neighbour_link_failed_write_is_resent) {
+    FakeNet net;
+    g_net = &net;
+    Neighbour::Link link(&MakeFake);
+    Neighbour::Link::Options opt;
+    opt.url = "ws://fake";
+    opt.hello = Message("hello");
+    opt.firstRetryMs = 20;
+    opt.maxRetryMs = 40;
+    link.Start(opt);
+    for (int i = 0; i < 300 && (SentCount() < 1 || !link.Connected()); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        net.failSends = 1;   // the next write breaks the line
+    }
+    link.Send(Message("road").SetInt("cell", 7));
+    for (int i = 0; i < 300 && SentCount() < 3; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        CHECK_EQ(static_cast<int>(net.sent.size()), 3);   // hello, hello again, the road once
+        if (net.sent.size() == 3) {
+            CHECK_STREQ(net.sent[1].c_str(), "{\"t\":\"hello\"}");
+            CHECK_STREQ(net.sent[2].c_str(), "{\"t\":\"road\",\"cell\":7}");
+        }
+        CHECK(net.connects >= 2);
+    }
+    CHECK_EQ(static_cast<int>(link.Dropped()), 0);
+    link.Stop();
+    g_net = nullptr;
+}
+
+// A message queued while offline goes out after the hello once the line comes up; a villagers'
+// sample (ephemeral) sent while offline is not kept.
+UNIT_TEST(ext_neighbour_link_offline_queue_waits) {
     FakeNet net;
     net.failFirst = 1000;   // offline for now
     g_net = &net;
