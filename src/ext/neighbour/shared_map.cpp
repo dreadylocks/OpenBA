@@ -31,6 +31,10 @@
 #include "Component/DecalDescription.h"
 #include "Component/GrowthComponent.h"
 #include "Component/MapDescription.h"
+#include "Component/ClearResourceComponent.h"   // ScanExisting: not a structure (the removal tool's marks)
+#include "Component/ClearAreaComponent.h"
+#include "Component/RawMaterialComponent.h"     // goods dropped on the ground
+#include "Component/AnimalComponent.h"
 #include "Action/PathSearch.h"
 #include "Game/PathfinderThread.h"
 #include "Game/WorldGeometry.h"
@@ -745,17 +749,25 @@ void ScanExisting() {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     if (g == nullptr || g->m_entityList == nullptr) return;
     const auto& all = g->m_entityList->masterArray;
-    int n = 0;
+    int n = 0, skipped = 0;
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
         if (e == nullptr) continue;
         MapComponent* mc = e->FindComponent<MapComponent>();
         if (mc == nullptr || mc->tileX1 <= 0 || mc->tileY1 <= 0) continue;
         if (e->FindComponent<NaturalResourceComponent>() != nullptr || e->FindComponent<CitizenComponent>() != nullptr) continue;
+        // On the map but not a structure, and never reported in play: the removal tool's marks (a tile
+        // each, drawn as an orange cross on the neighbour's ground), goods lying on the ground, animals.
+        if (e->FindComponent<ClearResourceComponent>() != nullptr || e->FindComponent<ClearAreaComponent>() != nullptr ||
+            e->FindComponent<RawMaterialComponent>() != nullptr || e->FindComponent<AnimalComponent>() != nullptr) {
+            ++skipped;
+            continue;
+        }
         NoteStructure(e);
         ++n;
     }
-    fprintf(stderr, "[Neighbour] shared map: %d structure(s) of the loaded town reported\n", n);
+    fprintf(stderr, "[Neighbour] shared map: %d structure(s) of the loaded town reported (%d other thing(s) on the map "
+                    "left out)\n", n, skipped);
 }
 
 void NoteRoadCell(uint32_t cellIdx) {
