@@ -45,6 +45,7 @@
 #include "Game/WorldGeometry.h"     // _sceneGeometry's class (the device-lost pair)
 #include "Object/exe_type.h"      // DEFINE_EXE_VTABLE
 #include "autostart.h"
+#include "drive_harness.h"     // NOT RETAIL: BANISHED_DRIVE front-end screenshots
 #include <cstdio>
 #include <cstdint>
 #include "system/Filename.h"   // -Iruntime/types
@@ -489,6 +490,7 @@ void MenuDialogLoopT::Draw(float alpha) {
     } else if (trace) {
         printf("[MenuDLT::Draw] WARN: skipping UI::Draw (ctx=%p)\n", (void*)context);
     }
+    DriveHarness_AfterFrontEndDraw();   // NOT RETAIL (harness): BANISHED_DRIVE's `shot` on the menus
 
     // Auto-trigger a RenderDoc capture on draw 10 if RenderDoc is attached.
     // By this point the camera is stable, terrain is uploaded, and the menu

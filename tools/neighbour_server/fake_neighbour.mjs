@@ -9,6 +9,7 @@
 //                           [--say "hello"]... [--every 30 "a line repeated every 30 s"]
 //                           [--quit-after 10] [--send-goods "path:count"] [--send-family "3.5/1/0;3.2/0/0;0.8/1/1"]
 //                           [--token <seat token>] [--data-hash <16 hex>] [--mods "name|size|;..."]
+//                           [--echo-walkers <metres>]
 //
 // Protocol 2 (docs/fork/NEIGHBOUR_PROTOCOL.md): the relay seats a town by its token, not its name.
 // The first join prints the token it was given; pass it with --token to come back to the same seat.
@@ -19,12 +20,16 @@
 // (handy in scripts). Ctrl+C leaves. Parcels it receives (goods, families) are printed and
 // acknowledged, as the game does. Typed lines starting with "/goods <path> <count>" or
 // "/family <members>" send a parcel; anything else is chat.
+//
+// --echo-walkers N sends the game's own villagers back to it as the neighbour's, N metres east of
+// where they are (new ids), so a screenshot of the game shows each villager with its see-through
+// twin beside it: the drawing of the neighbour's villagers, checked with one game.
 
 import readline from "node:readline";
 
 function parseArgs(argv) {
   const o = { server: "ws://127.0.0.1:8787", room: "neighbours", pass: "", name: "Fake Town", say: [], every: null, quitAfter: 0, lastSeq: 0, parcels: [],
-              token: "", dataHash: "", mods: "" };
+              token: "", dataHash: "", mods: "", echoWalkers: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${k} needs a value`); return argv[++i]; };
@@ -41,6 +46,7 @@ function parseArgs(argv) {
     else if (k === "--token") o.token = next();
     else if (k === "--data-hash") o.dataHash = next();
     else if (k === "--mods") o.mods = next();
+    else if (k === "--echo-walkers") o.echoWalkers = Number(next());
     else if (k === "--help" || k === "-h") { console.log("see the comment at the top of fake_neighbour.mjs"); process.exit(0); }
     else throw new Error(`unknown argument ${k}`);
   }
@@ -100,6 +106,21 @@ ws.addEventListener("message", (ev) => {
       break;
     case "stored": log(`the relay holds parcel ${m.id}`); break;
     case "pong": break;
+    case "walkers": {
+      const entries = m.list ? m.list.split(";") : [];
+      if (opt.echoWalkers !== null) {
+        const dx = Math.round(opt.echoWalkers * 100);
+        const list = entries.map((e) => {
+          const v = e.split(",");
+          v[0] = String(Number(v[0]) + 100000);
+          v[1] = String(Number(v[1]) + dx);
+          return v.join(",");
+        }).join(";");
+        send({ t: "walkers", tmpl: m.tmpl, list });
+      }
+      log(`walkers: ${entries.length} of ${m.tmpl}${opt.echoWalkers !== null ? " (echoed)" : ""}; first ${entries[0] || "-"}`);
+      break;
+    }
     default: log(`(${m.t}) ${ev.data}`);
   }
 });

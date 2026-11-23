@@ -22,6 +22,17 @@
 //
 // While a script plays, the window counts as in front and the real mouse and keyboard are
 // ignored; between scripts the devices are the player's again.
+// The runtime type headers first (the front-end screenshot's capture, as w2_takescreenshot.cpp).
+#include "video/ImageBuffer.h"
+#include "graphics/FrameCopyImageBuffer.h"
+#include "system/String.h"
+#include "system/MemoryAllocator.h"
+#include "io/FileSystem.h"
+#include "system/Filename.h"
+#include "video/Device.h"
+#include "engine/MainLoop.h"
+#include <new>
+
 #include "drive_harness.h"
 #include "drive_script.h"
 #include "options.h"
@@ -48,6 +59,7 @@ std::chrono::steady_clock::time_point s_nextCheck;
 std::chrono::steady_clock::time_point s_nextCameraWrite;
 int  s_lastLine = -1;
 bool s_wasRunning = false;
+bool s_frontEndShot = false;   // a `shot` on the menus, for DriveHarness_AfterFrontEndDraw
 
 std::string PathOf(const char* name) {
     std::string p = Opt().drive;
@@ -175,7 +187,8 @@ bool Source(const Platform::Input::Virtual::Client& client, Platform::Input::Vir
             g->m_quickLoadPressed = 1;   // Draw's step 13: TakeScreenshot after the UI, which clears it
             Out("shot: requested (a new ScreenshotN.bmp in the save folder's Screenshots)");
         } else {
-            Out("shot: not in a game");
+            s_frontEndShot = true;   // the menus: DriveHarness_AfterFrontEndDraw takes it
+            Out("shot: requested on the front end (a new ScreenshotN.bmp in the save folder's Screenshots)");
         }
     }
     const int line = s_runner.CurrentLine();
@@ -192,6 +205,47 @@ bool Source(const Platform::Input::Virtual::Client& client, Platform::Input::Vir
 }
 
 }  // namespace
+
+// The front end's screenshot. In game, `shot` asks GameUpdateLoop::TakeScreenshot (its Draw takes
+// it after the UI); the menus have no game loop (its singleton is set by Load), so this is that
+// capture, line for line, called by MenuDialogLoopT::Draw after its UI: the back buffer to
+// <save folder>/Screenshots/ScreenshotN.bmp, the first N not taken.
+void DriveHarness_AfterFrontEndDraw() {
+    if (!s_frontEndShot) return;
+    s_frontEndShot = false;
+    ::Video::Device* device = ::Video::Device::_singleton;
+    ::Engine::MainLoop* mainLoop = ::Engine::MainLoop::_singleton;
+    const IO::FileSystem* fileSys = ::IO::FileSystem::_singleton;
+    if (device == nullptr || mainLoop == nullptr || fileSys == nullptr) {
+        Out("shot: no device yet");
+        return;
+    }
+    const int width = device->backBufferWidth;
+    const int height = device->backBufferHeight;
+    void* mem = System::MemoryAllocator::MemAlloc(0x88, 8);
+    if (mem == nullptr) return;
+    Graphics::FrameCopyImageBuffer* frameCopy = ::new (mem) Graphics::FrameCopyImageBuffer();
+    frameCopy->Create(0, 4, 5, 0x100u, width, height, 1, 1, 1, 1, nullptr);
+    static_cast<const Graphics::FrameCopyImageBuffer*>(frameCopy)->Generate(mainLoop->_context, 1);
+    const System::Filename saveDir(fileSys->GetSaveDirectory());
+    const System::String base(saveDir.AsString() + "\\Screenshots\\Screenshot");
+    System::Filename path;
+    int index = 0;
+    do {
+        const System::String full(base + System::String::Format("%i.%s", index, "bmp"));
+        path = full;
+        ++index;
+    } while (fileSys->Exists(path));
+    unsigned int* pixels = static_cast<unsigned int*>(
+        System::MemoryAllocator::MemAlloc(static_cast<uint64_t>(static_cast<int64_t>(height * width)) << 2, 4));
+    if (pixels != nullptr) {
+        frameCopy->CopyFromTexture(pixels, width, height);
+        Video::ImageBuffer::SaveImageToFile(path, width, height, pixels);
+        System::MemoryAllocator::MemFree(pixels);
+        Out("shot: front end, Screenshot" + std::to_string(index - 1) + ".bmp");
+    }
+    delete frameCopy;
+}
 
 // src/app/main.cpp, after OptionsInit: installs the source when BANISHED_DRIVE names a folder.
 void DriveHarness_Install() {
