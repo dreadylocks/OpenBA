@@ -178,7 +178,8 @@ bool JoinRoom(TransportFactory factory, const std::string& server, const std::st
               const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs) {
     Message hello("hello");
     hello.SetInt("v", kProtocolVersion).Set("room", room).Set("pass", pass).Set("name", town)
-         .SetInt("lastSeq", 0).SetBool("join", true);
+         .SetInt("lastSeq", 0).SetBool("join", true)
+         .SetBool("probe", true);   // the game's own line follows: the neighbour is not told of this one
     if (!token.empty()) hello.Set("token", token);
     AddHandshake(hello, info);
     RoomJoin j;

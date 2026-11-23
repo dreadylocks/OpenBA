@@ -399,6 +399,24 @@ check(!fa5.inbox.some((m) => m.t === "nat" && m.replay), "a plain reconnect is n
 fa5.ws.close();
 fb2.ws.close();
 
+// A lobby probe (the lobby's own check of a room just before the game connects) is not announced to
+// the neighbour, arriving or leaving, and does not replace the town's game line.
+const probeRoom = `probetest-${Date.now()}`;
+const prA = opener(probeRoom, { t: "create", pass: "pw5", name: "Prober", ...settings });
+await tryWait(prA.wait((m) => m.t === "welcome"));
+const prB = opener(probeRoom, { t: "hello", pass: "pw5", name: "Probed", join: true });
+await tryWait(prB.wait((m) => m.t === "welcome"));
+await tryWait(prA.wait((m) => m.t === "peer" && m.name === "Probed" && m.online === true));
+const seenBefore = prA.inbox.filter((m) => m.t === "peer").length;
+const prP = opener(probeRoom, { t: "hello", pass: "pw5", name: "Probed", join: true, probe: true });
+const prPw = await tryWait(prP.wait((m) => m.t === "welcome"));
+prP.ws.close(1000, "bye");
+await prP.closed;
+await new Promise((r) => setTimeout(r, 400));
+check(prPw && prPw.seat === 1 && prA.inbox.filter((m) => m.t === "peer").length === seenBefore &&
+      prB.ws.readyState === WebSocket.OPEN, "a lobby probe is not announced and leaves the game's line be");
+for (const x of [prA, prB]) x.ws.close();
+
 // The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
 const upgradeStatus = await new Promise((resolve) => {
   const u = new URL(`${server}/lobby`.replace(/^ws/, "http"));

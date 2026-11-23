@@ -265,10 +265,13 @@ export class Room {
     } catch { /* the list is best effort; the room itself is unaffected */ }
   }
 
+  // A seat's game lines. A lobby probe (hello `probe`: the lobby checking the room and getting its
+  // seat, just before the game connects) is not one: it is never announced, never replaces the
+  // game's line and is not sent the neighbour's messages.
   socketsFor(seat) {
     return this.ctx.getWebSockets().filter((ws) => {
       const a = ws.deserializeAttachment();
-      return a && a.seat === seat;
+      return a && a.seat === seat && !a.probe;
     });
   }
 
@@ -762,12 +765,16 @@ export class Room {
     meta.compat[seat] = read.compat;
     await this.ctx.storage.put("meta", meta);
 
-    // The same town connecting again (a reconnect): the older line goes.
-    for (const old of this.socketsFor(seat)) {
-      if (old !== ws) { try { old.close(4001, "replaced by a newer connection"); } catch { /* gone */ } }
+    // The same town connecting again (a reconnect): the older line goes (a probe leaves the game's be).
+    const probe = msg.probe === true;
+    if (!probe) {
+      for (const old of this.socketsFor(seat)) {
+        if (old !== ws) { try { old.close(4001, "replaced by a newer connection"); } catch { /* gone */ } }
+      }
     }
     a.seat = seat;
     a.name = name;
+    a.probe = probe;
     ws.serializeAttachment(a);
     if (msg.fresh === true) await this.resetSeat(seat);   // a new game in this seat: the old town goes
     // A loaded game (perhaps an older save than what the seat holds): the same, but the neighbour's
@@ -798,7 +805,7 @@ export class Room {
     const chats = (await this.ctx.storage.get("chats")) || [];
     const missed = chats.filter((c) => c.seq > lastSeq && c.seat !== seat).slice(-kReplayChats);
     for (const c of missed) this.send(ws, { t: "chat", from: c.from, text: c.text, seq: c.seq });
-    for (const peer of this.socketsFor(other)) this.send(peer, { t: "peer", name, online: true });
+    if (!probe) for (const peer of this.socketsFor(other)) this.send(peer, { t: "peer", name, online: true });
 
     // Parcels that waited for this town.
     for (const p of await this.parcels()) {
@@ -878,7 +885,7 @@ export class Room {
 
   async left(ws) {
     const a = ws.deserializeAttachment();
-    if (!a || a.seat < 0) return;
+    if (!a || a.seat < 0 || a.probe) return;
     // Still connected on another line (a reconnect replaced this one): not a departure.
     if (this.socketsFor(a.seat).some((s) => s !== ws)) return;
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "peer", name: a.name, online: false });
