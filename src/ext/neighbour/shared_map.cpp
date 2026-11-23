@@ -742,11 +742,15 @@ void NoteStructure(ComponentEntity* entity) {
     mine.rect = r;
     auto old = s_mine.find(id);
     if (old != s_mine.end() && old->second.entity.Get() != entity) s_mineIds.erase(old->second.entity.Get());
+    const bool placed = old == s_mine.end();
     s_mine[id] = mine;
     s_mineIds[entity] = id;
     s_claimQueue.push_back(r);
     s_buildQueue.push_back(id);
     ++s_waitingAdds;
+    if (placed && s_live)   // in play (a load's own scan has a line of its own)
+        fprintf(stderr, "[Neighbour] shared map: this town placed %s at tile %d,%d (%d x %d); its land is claimed\n",
+                tmpl.c_str(), r.x, r.y, r.w, r.h);
 }
 
 void ScanExisting() {
