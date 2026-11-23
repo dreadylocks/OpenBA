@@ -825,6 +825,9 @@ void NoteRemoved(ComponentEntity* entity) {
     if (ours != s_mineIds.end()) {
         auto it = s_mine.find(ours->second);
         if (it != s_mine.end() && it->second.entity.Get() == entity) {
+            const TileRect& r = it->second.rect;
+            fprintf(stderr, "[Neighbour] shared map: this town removed %s at tile %d,%d (%d x %d); its land is freed\n",
+                    it->second.build.GetOr("tmpl", "?").c_str(), r.x, r.y, r.w, r.h);
             s_unbuildQueue.push_back(it->first);
             s_releaseQueue.push_back(it->second.rect);
             ++s_waitingAdds;
