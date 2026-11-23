@@ -285,6 +285,7 @@ const bbuild = await tryWait(hsB.wait((m) => m.t === "compat" && /build/.test(m.
 check(bw && bw.seat === 1 && !!bbuild && bwarn && /Roads\.pkm/.test(bwarn.warn), "another build and other mods only warn the joiner");
 check(!!(await tryWait(hsA.wait((m) => m.t === "compat" && /Roads\.pkm/.test(m.warn)))), "and the neighbour is warned too");
 hsA.ws.send(JSON.stringify({ t: "hash", hash: "1234abcd" }));
+await new Promise((r) => setTimeout(r, 500));   // A's land first (over the internet B's could overtake it)
 hsB.ws.send(JSON.stringify({ t: "hash", hash: "9999aaaa" }));
 const el = await tryWait(hsB.wait((m) => m.t === "error"));
 check(el && el.fatal === true && /same land/.test(el.why), "a town that built other land is refused");
@@ -361,12 +362,23 @@ fa3.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 12, tmpl: "Template\\Rock
 await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 12));
 fa3.ws.close(1000, "bye");
 await fa3.closed;
+// A road the neighbour laid and took up again while this town was here (so in no queue) is taken up
+// again when the town loads a save, which may still have it; one laid again since is not.
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5555, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5555, off: true }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, off: true }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+await new Promise((r) => setTimeout(r, 400));
 const fa4 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
 const again = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 4097 && m.replay === true));
 const own = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 12 && m.replay === true));
 const latest = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 777 && m.replay === true));
 check(!!live && again && again.op === "rm" && again.tmpl === "Template\\Tree.rsc" && own && own.op === "rm" &&
       latest && latest.op === "add", "a town loading a save gets both towns' resource changes again");
+const roadAgain = await tryWait(fa4.wait((m) => m.t === "road" && m.cell === 5555 && m.off === true && m.replay === true));
+check(!!roadAgain && !fa4.inbox.some((m) => m.t === "road" && m.cell === 5556 && m.off === true),
+      "a town loading a save gets the neighbour's road removals again (not a road laid again since)");
 fa4.ws.close(1000, "bye");
 await fa4.closed;
 const fa5 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly" });

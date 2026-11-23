@@ -433,6 +433,7 @@ void OnMessage(const Message& m) {
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
+        SharedMap::OnWelcome();
         // A loaded game's first join: its roads again, once the neighbour's land is in.
         if ((s_freshGame && s_loadedFromSave) || s_testReload) SharedMap::ExpectReload();
         if (s_freshGame) {   // told once: a reconnect must not drop this game's own buildings

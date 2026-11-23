@@ -82,6 +82,9 @@ void NotePlanted(ComponentEntity* entity);
 // From Neighbour::BeginFrame: send what is queued, notice structures that are gone.
 void Tick(Link* link, uint64_t frame);
 // The relay joined us: send every structure again (the relay keeps the latest per id).
+// A welcome from the relay (a join or a reconnect), before the neighbour's land and structures arrive:
+// what this game holds of them from before is forgotten at the end of that list (mirrorEnd).
+void OnWelcome();
 void OnJoined(Link* link);
 // A loaded game's first join (hello `reload`): the relay forgets what this town's seat held, since the
 // save may be older than it. Once the neighbour's land is in (its `mirrorEnd`), this town's roads go

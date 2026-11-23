@@ -520,12 +520,37 @@ export class Room {
       all[cell] = [type, tt, msg.tmpl];
     }
     await this.ctx.storage.put(key, all);
+    await this.noteRoadsOff(a.seat, [cell], removed);
     const out = removed ? { t: "road", cell, off: true } : { t: "road", cell, type, tt, tmpl: msg.tmpl };
     const peers = this.socketsFor(1 - a.seat);
     for (const peer of peers) this.send(peer, out);
     // An absent neighbour keeps our roads in its save as real roads: one taken up while it is away must
     // reach it when it comes back (a road laid again meanwhile cancels that).
     if (peers.length === 0) await this.queueRoadOffs(1 - a.seat, [cell], removed);
+  }
+
+  // Every road tile a town has taken up (and not laid again), kept for good (roadoff:<seat>): a town that
+  // loads a save older than the removal still has that road in its copy, and gets the removal again.
+  async noteRoadsOff(seat, cells, off) {
+    const key = `roadoff:${seat}`;
+    const set = new Set((await this.ctx.storage.get(key)) || []);
+    const before = set.size;
+    for (const c of cells) {
+      if (off) set.add(c);
+      else set.delete(c);
+    }
+    if (set.size === before) return;
+    const list = [...set];
+    while (list.length > kMaxRoadCells) list.shift();
+    await this.ctx.storage.put(key, list);
+  }
+
+  // For a town joining with a new game or a loaded save: the neighbour's removed roads (replay: the
+  // town's copy may not have them any more), those it has not laid again since.
+  async sendRoadsOff(ws, seat) {
+    const removed = (await this.ctx.storage.get(`roadoff:${1 - seat}`)) || [];
+    const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    for (const cell of removed) if (!(cell in standing)) this.send(ws, { t: "road", cell, off: true, replay: true });
   }
 
   // The road tiles taken up while `seat` was away, sent to it on joining after the roads that stand.
@@ -622,6 +647,7 @@ export class Room {
     for (const id of Object.keys(mirror)) for (const p of peers) this.send(p, { t: "unbuild", id });
     const roads = (await this.ctx.storage.get(`roads:${seat}`)) || {};
     for (const cell of Object.keys(roads)) for (const p of peers) this.send(p, { t: "road", cell: Number(cell), off: true });
+    await this.noteRoadsOff(seat, Object.keys(roads).map(Number), true);
     if (peers.length === 0 && Object.keys(roads).length > 0) await this.queueRoadOffs(1 - seat, Object.keys(roads).map(Number));
     const blocks = await this.ctx.storage.list({ prefix: "claims:" });
     let batch = {};
@@ -764,7 +790,10 @@ export class Room {
       await this.sendRoadQueue(ws, seat);
       await this.sendNatQueue(ws, seat);
       // A new game or a loaded save in this seat: its copy of the land may lack changes it once had.
-      if (msg.fresh === true || msg.reload === true) await this.sendNatLog(ws);
+      if (msg.fresh === true || msg.reload === true) {
+        await this.sendNatLog(ws);
+        await this.sendRoadsOff(ws, seat);
+      }
     }
   }
 

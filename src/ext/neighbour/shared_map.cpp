@@ -106,8 +106,10 @@ struct Mirror {
     bool                    inScene = false;
     int                     decalId = -1;   // its ground: a WorldGeometry decal slot
     std::vector<uint32_t>   solid;   // the cells marked solid for the path worker
+    uint64_t                join = 0;   // the join (s_joinCount) whose structure list last named it
 };
 std::map<std::string, Mirror> s_mirrors;
+uint64_t s_joinCount = 0;   // joins to the relay this game (OnWelcome)
 std::vector<uint8_t> s_solidRef;            // per cell: how many mirrors hold it solid
 
 // M3.
@@ -303,6 +305,7 @@ void AddMirror(const Message& m) {
         mir.inScene = true;
     }
     mir.decalId = AddMirrorDecal(desc, m, grp);
+    mir.join = s_joinCount;
     if (mir.decalId >= 0) ++s_applied.grounds;
     s_mirrors[id] = mir;
 
@@ -861,6 +864,14 @@ void Tick(Link* link, uint64_t frame) {
     s_pending.erase(s_pending.begin(), s_pending.begin() + static_cast<long>(i));
 }
 
+void OnWelcome() {
+    if (!s_on) return;
+    ++s_joinCount;
+    // The relay sends the neighbour's land as it stands (claimBlock); land it gave up while the line
+    // was down sent no `released` here.
+    if (!s_peer.empty()) std::fill(s_peer.begin(), s_peer.end(), 0);
+}
+
 void OnJoined(Link* link) {
     if (!s_on || link == nullptr) return;
     // Claims are idempotent at the relay; builds replace the record by id.
@@ -939,6 +950,21 @@ bool OnMessage(const Message& m, std::string* notice) {
     if (m.type == "build") { AddMirror(m); return true; }
     if (m.type == "unbuild") { RemoveMirror(m.GetOr("id", "")); return true; }
     if (m.type == "mirrorEnd") {   // the neighbour's land is in: a loaded game's roads can go again
+        // What the list did not name was taken down while the line was down (a reconnect keeps the
+        // mirrors it had; the relay deletes a structure taken down while this town is away).
+        size_t gone = 0;
+        for (auto it = s_mirrors.begin(); it != s_mirrors.end();) {
+            if (it->second.join == s_joinCount) {
+                ++it;
+                continue;
+            }
+            FreeMirror(it->second, true);
+            it = s_mirrors.erase(it);
+            ++gone;
+        }
+        if (gone > 0)
+            fprintf(stderr, "[Neighbour] shared map: %zu of the neighbor's structure(s) taken down while away removed\n",
+                    gone);
         if (s_rescanRoads) {
             s_rescanRoads = false;
             ScanRoads();

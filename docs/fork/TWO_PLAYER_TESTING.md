@@ -19,9 +19,13 @@ its own window, and tells the other agent what it did and what it saw. Findings 
   window minus its title bar) or as fractions (`clickf 0.5 0.5`). `<dir>/info` gives the client
   size, `<dir>/status` says idle / playing line N / error, `<dir>/out` is the log. Write the script
   to `cmd.tmp` and rename it, so a half-written file is never played.
-- **Screenshots of the window**: computer use, in the background (`app_screenshot` on the Mac).
-  On the Mac `BANISHED_BACKGROUND=<W>x<H>` gives an unfocused window of that size (in points), so the
-  owner of the screen keeps working while the game runs behind.
+- **Screenshots**: the drive script's `shot` makes the game write its own screenshot, UI included
+  (`<save folder>/Screenshots/ScreenshotN.bmp`), in game and on the menus and lobby alike, with no
+  OS permission. It is the one to use: macOS stops showing a restarted game's window to computer use,
+  and a Windows agent may not be granted the window at all. On the Mac `BANISHED_BACKGROUND=<W>x<H>`
+  gives an unfocused window of that size (in points), so the owner of the screen keeps working while
+  the game runs behind. The drive folder's `camera` file says where the camera is (`camera X Y D YAW`
+  in a script moves it there).
 
 A typical Mac `devloop.cfg` for a test town (kept out of the tree, here `build/val/devloop.cfg`;
 the user dir keeps the test town's saves, settings and relay seat away from the player's own):
@@ -33,12 +37,34 @@ DEVLOOP_DIR="<checkout>/build/val/devloop"
 EXTRA_ENV="BANISHED_USER_DIR=<checkout>/build/val/user BANISHED_BACKGROUND=1280x800 BANISHED_DRIVE=<checkout>/build/val/drive"
 ```
 
+### One machine alone
+
+- A second town on the same Mac: `OpenBA.app/Contents/MacOS/OpenBA --run-dir <dir> --game-dir <Banished>`
+  with its own `BANISHED_USER_DIR` and `BANISHED_DRIVE` keeps its saves, settings and logs
+  (`<dir>/support/Run/`) apart from the first.
+- A local relay: `npx wrangler dev --port 8799 --ip 127.0.0.1` in `tools/neighbour_server`, then
+  `neighbour.server=ws://127.0.0.1:8799` in that town's settings.cfg.
+- `node fake_neighbour.mjs --server ws://127.0.0.1:8799 --room R --pass P --echo-walkers 3` joins as a
+  pretend neighbour that sends the town's own villagers back 3 m to the east: each villager on screen
+  gets its twin beside it, which checks the drawing of the neighbour's villagers with one game.
+
+### The test relay
+
+Testing a relay change against the friend's live relay would change it for every room. The test relay
+is the same Worker under another name (`npx wrangler deploy --name openba-neighbour-test`, then
+`node selftest.mjs wss://openba-neighbour-test.spellpress.workers.dev`); both towns pick it with the
+lobby's Change relay. The live relay is deployed only once the user says so.
+
 ## Rules of the game
 
 - Same build on both machines (the dev loop makes it so), same game data, the same mods in the same
   order (vanilla is the baseline).
 - Every finding names: what this town did, what it expected, what it saw (a screenshot), the log
   lines (`[Neighbour]` in `standalone_error.log`), and what the other town saw at the same moment.
+- Pause when a step is done (the pause is shared): a town left running unattended with no houses
+  starves and freezes, and a dead town sends no villagers (the first "no villagers" report was that).
+- A Colonial Charter start has no builders: set them first (Tools and Reports, F2, the profession list),
+  or nothing placed rises past its frame.
 - Adversarial: try to break it. Do the same thing in both towns at once, do things while the other
   town is offline or loading, quit at awkward moments, load old saves.
 
