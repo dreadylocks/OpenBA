@@ -750,6 +750,7 @@ void ScanExisting() {
     if (g == nullptr || g->m_entityList == nullptr) return;
     const auto& all = g->m_entityList->masterArray;
     int n = 0, skipped = 0;
+    std::map<std::string, int> kinds;   // what the scan saw, by template and the components that matter
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
         if (e == nullptr) continue;
@@ -758,14 +759,21 @@ void ScanExisting() {
         if (e->FindComponent<NaturalResourceComponent>() != nullptr || e->FindComponent<CitizenComponent>() != nullptr) continue;
         // On the map but not a structure, and never reported in play: the removal tool's marks (a tile
         // each, drawn as an orange cross on the neighbour's ground), goods lying on the ground, animals.
-        if (e->FindComponent<ClearResourceComponent>() != nullptr || e->FindComponent<ClearAreaComponent>() != nullptr ||
-            e->FindComponent<RawMaterialComponent>() != nullptr || e->FindComponent<AnimalComponent>() != nullptr) {
+        const bool clearRes = e->FindComponent<ClearResourceComponent>() != nullptr;
+        const bool clearArea = e->FindComponent<ClearAreaComponent>() != nullptr;
+        const bool raw = e->FindComponent<RawMaterialComponent>() != nullptr;
+        const bool animal = e->FindComponent<AnimalComponent>() != nullptr;
+        const std::string what = PathOf(e->_description) + (clearRes ? " clearRes" : "") + (clearArea ? " clearArea" : "") +
+                                 (raw ? " raw" : "") + (animal ? " animal" : "");
+        ++kinds[what];
+        if (clearRes || raw || animal) {
             ++skipped;
             continue;
         }
         NoteStructure(e);
         ++n;
     }
+    for (const auto& kv : kinds) fprintf(stderr, "[Neighbour] shared map: scan: %d x %s\n", kv.second, kv.first.c_str());
     fprintf(stderr, "[Neighbour] shared map: %d structure(s) of the loaded town reported (%d other thing(s) on the map "
                     "left out)\n", n, skipped);
 }
