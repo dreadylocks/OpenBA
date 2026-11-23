@@ -416,8 +416,16 @@ UNIT_TEST(ext_neighbour_lobby_settings) {
     CHECK_EQ(s.size, 1);
     CHECK(!s.disasters);
     CHECK_STREQ(Neighbour::DescribeSettings(s).c_str(), "Medium map, Valleys, Mild, StartEasy start, disasters off");
+    // A mod's larger map (Colonial Charter): a row past Large is a room like any other, numbered on.
+    Message modSize = m;
+    modSize.SetInt("size", 3);
+    CHECK(Neighbour::ReadSettings(modSize, s));
+    CHECK_EQ(s.size, 3);
+    CHECK_STREQ(Neighbour::DescribeSettings(s).c_str(), "Size 4 map, Valleys, Mild, StartEasy start, disasters off");
     Message bad = m;
-    bad.SetInt("size", 3);
+    bad.SetInt("size", 65);   // past the relay's bound
+    CHECK(!Neighbour::ReadSettings(bad, s));
+    bad.SetInt("size", -1);
     CHECK(!Neighbour::ReadSettings(bad, s));
     Message noPath("welcome");
     noPath.SetInt("seed", 1).SetInt("size", 0).SetInt("disasters", 1);
@@ -431,7 +439,7 @@ UNIT_TEST(ext_neighbour_lobby_list_and_join) {
     // The list: two rooms (one with a bad size, dropped), then the end.
     net.toReceive.push_back("{\"t\":\"room\",\"name\":\"river\",\"creator\":\"Ann\",\"seats\":1,\"size\":2,\"disasters\":1,"
                             "\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\",\"lastActive\":5}");
-    net.toReceive.push_back("{\"t\":\"room\",\"name\":\"broken\",\"seats\":1,\"size\":9,\"disasters\":1,"
+    net.toReceive.push_back("{\"t\":\"room\",\"name\":\"broken\",\"seats\":1,\"size\":99,\"disasters\":1,"
                             "\"start\":\"S.rsc\",\"terrain\":\"T.rsc\",\"climate\":\"C.rsc\"}");
     net.toReceive.push_back("{\"t\":\"roomsEnd\",\"count\":2}");
     std::vector<Neighbour::RoomInfo> rooms;
