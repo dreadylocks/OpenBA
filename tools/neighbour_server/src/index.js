@@ -228,7 +228,8 @@ async function passwordHash(room, pass) {
 // up and left every room unable to save a hello. Writes to these keys wait in memory and go together,
 // at most once every kFlushMs (an alarm), one row a key; reads see them at once. Claims, the room's meta,
 // chats and parcels still write through. A room evicted before its alarm loses those last seconds of the
-// buffered record (the live messages were already passed on; a town's structures are sent again on join).
+// buffered record (the live messages were already passed on; a town's structures are sent again on join),
+// a buffered delete included (a fresh start's removal of the old town's mirror and roads could come back).
 const kBufferedPrefixes = ["natlog:", "natq:", "roads:", "roadoff:", "roadq:", "mirror:"];
 const kFlushMs = 5000;
 
@@ -297,21 +298,38 @@ class BufferedStore {
     return out;
   }
 
-  arm() {
+  arm(delayMs = kFlushMs) {
     if (this.armed) return;
     this.armed = true;
-    this.ctx.storage.setAlarm(Date.now() + kFlushMs);
+    // A refused alarm must not leave the buffer unflushable: the next write arms again.
+    this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { this.armed = false; });
   }
 
+  // Writes what waits, chunk by chunk; an entry leaves the buffer only once written and only if nothing
+  // newer replaced it meanwhile, so a failed write (a refused quota) keeps the rest for the next alarm.
   async flush() {
     this.armed = false;
     const puts = [...this.puts];
     const dels = [...this.dels];
-    this.puts.clear();
-    this.dels.clear();
-    for (let i = 0; i < puts.length; i += 100) await this.ctx.storage.put(Object.fromEntries(puts.slice(i, i + 100)));
-    for (let i = 0; i < dels.length; i += 100) await this.ctx.storage.delete(dels.slice(i, i + 100));
-    this.rowsWritten += puts.length + dels.length;
+    let failed = false;
+    try {
+      for (let i = 0; i < puts.length; i += 100) {
+        const chunk = puts.slice(i, i + 100);
+        await this.ctx.storage.put(Object.fromEntries(chunk));
+        for (const [k, v] of chunk) if (this.puts.get(k) === v) this.puts.delete(k);
+        this.rowsWritten += chunk.length;
+      }
+      for (let i = 0; i < dels.length; i += 100) {
+        const chunk = dels.slice(i, i + 100);
+        await this.ctx.storage.delete(chunk);
+        for (const k of chunk) if (!this.puts.has(k)) this.dels.delete(k);
+        this.rowsWritten += chunk.length;
+      }
+    } catch {
+      failed = true;   // a write refused (the day's allowance gone, say): try again in a minute, not 5 s
+    } finally {
+      if (this.puts.size > 0 || this.dels.size > 0) this.arm(failed ? 60_000 : kFlushMs);
+    }
   }
 }
 
@@ -767,27 +785,40 @@ export class Room {
     await this.store.put(key, shard);
   }
 
+  // (natBatch, roadBatch and roadsOff are newer than protocol 2's one-a-tile messages: a game older than
+  // them misses what they carry, so both towns and the relay are updated together.)
   // Resource changes in few messages ("natBatch"): a long record sent one message a tile ran a joining
   // town's hello past what one Durable Object call can do (tens of thousands of sends) and the line lost
   // its seat. A batch: its templates once ("tmpls", one per line), then "cell,op,template[,grp,var]" a
   // change, op 0 removed / 1 planted. kNatBatch changes keep a batch well under the game's 16 KB frame.
   sendNatBatches(ws, entries, replay) {
-    const kNatBatch = 600;
-    for (let i = 0; i < entries.length; i += kNatBatch) {
-      const tmpls = new Map();
-      const parts = [];
-      for (const [cell, op, tmpl, grp, vr] of entries.slice(i, i + kNatBatch)) {
-        let k = tmpls.get(tmpl);
-        if (k === undefined) {
-          k = tmpls.size;
-          tmpls.set(tmpl, k);
-        }
-        parts.push(Number.isInteger(grp) && Number.isInteger(vr) ? `${cell},${op},${k},${grp},${vr}` : `${cell},${op},${k}`);
-      }
+    const kBatchChars = 12000;   // the encoded batch, well under the game's 16 KB frame
+    let tmpls = new Map();
+    let parts = [];
+    let chars = 0;
+    const out = () => {
+      if (parts.length === 0) return;
       const ev = { t: "natBatch", tmpls: [...tmpls.keys()].join("\n"), list: parts.join(";") };
       if (replay) ev.replay = true;
       this.send(ws, ev);
+      tmpls = new Map();
+      parts = [];
+      chars = 0;
+    };
+    for (const [cell, op, tmpl, grp, vr] of entries) {
+      const newTmpl = !tmpls.has(tmpl);
+      const entryChars = 24 + (newTmpl ? tmpl.length + 1 : 0);
+      if (chars + entryChars > kBatchChars) out();
+      let k = tmpls.get(tmpl);
+      if (k === undefined) {
+        k = tmpls.size;
+        tmpls.set(tmpl, k);
+        chars += tmpl.length + 1;
+      }
+      parts.push(Number.isInteger(grp) && Number.isInteger(vr) ? `${cell},${op},${k},${grp},${vr}` : `${cell},${op},${k}`);
+      chars += 24;
     }
+    out();
   }
 
   // Both towns' whole record of resource changes (replay: the game counts no refusal for a tile that is
