@@ -9,7 +9,7 @@
 //                           [--say "hello"]... [--every 30 "a line repeated every 30 s"]
 //                           [--quit-after 10] [--send-goods "path:count"] [--send-family "3.5/1/0;3.2/0/0;0.8/1/1"]
 //                           [--token <seat token>] [--data-hash <16 hex>] [--mods "name|size|;..."]
-//                           [--echo-walkers <metres>]
+//                           [--echo-walkers <metres>] [--fell-around <map size>]
 //
 // Protocol 2 (docs/fork/NEIGHBOUR_PROTOCOL.md): the relay seats a town by its token, not its name.
 // The first join prints the token it was given; pass it with --token to come back to the same seat.
@@ -24,12 +24,17 @@
 // --echo-walkers N sends the game's own villagers back to it as the neighbour's, N metres east of
 // where they are (new ids), so a screenshot of the game shows each villager with its see-through
 // twin beside it: the drawing of the neighbour's villagers, checked with one game.
+//
+// --fell-around DIM: each time the game fells a tree (a resource "rm"), the pretend neighbour fells the
+// eight tiles around it 0.5-3 s later (same template; a tile without that tree ignores it), and the same
+// tile again: the game's villagers lose trees they are walking to or chopping, as when both towns
+// harvest one forest. DIM is the map's size in tiles (the log's "map 384").
 
 import readline from "node:readline";
 
 function parseArgs(argv) {
   const o = { server: "ws://127.0.0.1:8787", room: "neighbours", pass: "", name: "Fake Town", say: [], every: null, quitAfter: 0, lastSeq: 0, parcels: [],
-              token: "", dataHash: "", mods: "", echoWalkers: null };
+              token: "", dataHash: "", mods: "", echoWalkers: null, fellAround: 0 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${k} needs a value`); return argv[++i]; };
@@ -47,6 +52,7 @@ function parseArgs(argv) {
     else if (k === "--data-hash") o.dataHash = next();
     else if (k === "--mods") o.mods = next();
     else if (k === "--echo-walkers") o.echoWalkers = Number(next());
+    else if (k === "--fell-around") o.fellAround = Number(next());
     else if (k === "--help" || k === "-h") { console.log("see the comment at the top of fake_neighbour.mjs"); process.exit(0); }
     else throw new Error(`unknown argument ${k}`);
   }
@@ -67,6 +73,7 @@ log(`connecting to ${url} as "${opt.name}"`);
 const ws = new WebSocket(url);
 const send = (msg) => ws.send(JSON.stringify(msg));
 let joined = false;
+let felled = 0;   // --fell-around removals sent
 let parcelCounter = 0;
 const sendParcel = (kind, body) => {
   const id = `fake-${Date.now().toString(36)}-${(++parcelCounter).toString(36)}`;
@@ -106,6 +113,18 @@ ws.addEventListener("message", (ev) => {
       break;
     case "stored": log(`the relay holds parcel ${m.id}`); break;
     case "pong": break;
+    case "nat": {
+      log(`nat ${m.op} cell ${m.cell} ${m.tmpl}${m.replay ? " (replay)" : ""}`);
+      if (opt.fellAround > 0 && m.op === "rm" && !m.replay) {
+        const d = opt.fellAround;
+        for (const off of [0, -1, 1, -d, d, -d - 1, -d + 1, d - 1, d + 1]) {
+          const cell = m.cell + off;
+          setTimeout(() => { send({ t: "nat", op: "rm", cell, tmpl: m.tmpl }); }, 500 + Math.floor(Math.random() * 2500));
+        }
+        felled += 9;
+      }
+      break;
+    }
     case "walkers": {
       const entries = m.list ? m.list.split(";") : [];
       if (opt.echoWalkers !== null) {
