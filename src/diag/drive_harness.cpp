@@ -15,6 +15,10 @@
 //                  (atomic writes).
 //   <dir>/out      a log, appended: each script's start, its errors, its end.
 //   <dir>/info     the window's client area: "client WxH points, density D, WPxHP pixels".
+//   <dir>/camera   in game, once a second: where the camera looks (map tile, distance, yaw) and where
+//                  this town started ("camera tile X,Y dist D yaw A; town tile X,Y; map N").
+//                  The script's `camera X Y [DIST [YAW]]` puts the focus on a tile, and `shot` takes
+//                  retail's screenshot with the UI (<save folder>/Screenshots/ScreenshotN.bmp).
 //
 // While a script plays, the window counts as in front and the real mouse and keyboard are
 // ignored; between scripts the devices are the player's again.
@@ -23,10 +27,17 @@
 #include "options.h"
 #include "platform/common/platform_input_virtual.h"
 #include "platform/common/platform_settings.h"   // Platform::ReadWholeFile / WriteFileAtomic
+#include "Entity/ComponentEntity.h"   // InternalPtr<ComponentEntity>::Get() needs the class complete
+#include "Game/GameUpdateLoop.h"
+#include "Game/Map.h"
+#include "Game/PlayerController.h"
+#include "Game/PlayerToolManager.h"
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
+
+extern "C" bool StartTown_GetSpawnTile(int* x, int* y);   // src/game/Game/starttown.cpp
 
 namespace {
 
@@ -34,6 +45,7 @@ Drive::Runner s_runner;
 Drive::Client s_lastClient;
 std::chrono::steady_clock::time_point s_start = std::chrono::steady_clock::now();
 std::chrono::steady_clock::time_point s_nextCheck;
+std::chrono::steady_clock::time_point s_nextCameraWrite;
 int  s_lastLine = -1;
 bool s_wasRunning = false;
 
@@ -67,6 +79,46 @@ void WriteInfo(const Drive::Client& c) {
     Platform::WriteFileAtomic(PathOf("info").c_str(), buf, std::char_traits<char>::length(buf));
 }
 
+// A map tile's world position (camera_input.cpp's convention: cell - (dim / 2 - 0.5)) and back.
+float TileToWorld(float tile, int dim) {
+    return tile - (static_cast<float>(dim >> 1) - 0.5f);
+}
+
+// The script's `camera` step: the focus on a tile, and the distance (with the zoom target, so the
+// smoothing does not pull it back) and the heading when given. Nothing outside a game.
+void ApplyCamera(const Drive::Frame& f) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    if (g == nullptr || g->m_game == nullptr || g->m_playerController == nullptr || g->m_toolManager == nullptr) {
+        Out("camera: not in a game");
+        return;
+    }
+    const int dim = g->m_game->size;
+    PlayerController* pc = g->m_playerController;
+    pc->target.x = TileToWorld(f.cameraX, dim);
+    pc->target.y = TileToWorld(f.cameraY, dim);
+    if (f.cameraDist >= 0.0f) {
+        pc->distance = f.cameraDist;
+        g->m_toolManager->field_0x3C = f.cameraDist;
+    }
+    if (f.cameraYaw >= 0.0f) pc->yaw = f.cameraYaw;
+}
+
+// <dir>/camera, once a second in game.
+void WriteCamera() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    if (g == nullptr || g->m_game == nullptr || g->m_playerController == nullptr) return;
+    const int dim = g->m_game->size;
+    const PlayerController* pc = g->m_playerController;
+    const float half = static_cast<float>(dim >> 1) - 0.5f;
+    int tx = -1;
+    int ty = -1;
+    StartTown_GetSpawnTile(&tx, &ty);
+    char buf[200];
+    std::snprintf(buf, sizeof(buf), "camera tile %.1f,%.1f dist %.1f yaw %.1f; town tile %d,%d; map %d\n",
+                  pc->target.x + half, pc->target.y + half, pc->distance, pc->yaw, tx, ty, dim);
+    Platform::WriteFileAtomic(PathOf("camera").c_str(), buf, std::char_traits<char>::length(buf));
+}
+
 // Takes <dir>/cmd when it is there: parses it and starts it, or reports why not.
 void TakeScript() {
     std::string text;
@@ -98,6 +150,10 @@ bool Source(const Platform::Input::Virtual::Client& client, Platform::Input::Vir
         WriteInfo(c);
     }
 
+    if (now >= s_nextCameraWrite) {
+        s_nextCameraWrite = now + std::chrono::seconds(1);
+        WriteCamera();
+    }
     if (!s_runner.Running() && now >= s_nextCheck) {
         s_nextCheck = now + std::chrono::milliseconds(500);
         TakeScript();
@@ -112,6 +168,16 @@ bool Source(const Platform::Input::Virtual::Client& client, Platform::Input::Vir
     }
     s_wasRunning = true;
     const Drive::Frame f = s_runner.Next(c, seconds);
+    if (f.camera) ApplyCamera(f);
+    if (f.shot) {
+        GameUpdateLoop* g = GameUpdateLoop::_singleton;
+        if (g != nullptr && g->m_game != nullptr) {
+            g->m_quickLoadPressed = 1;   // Draw's step 13: TakeScreenshot after the UI, which clears it
+            Out("shot: requested (a new ScreenshotN.bmp in the save folder's Screenshots)");
+        } else {
+            Out("shot: not in a game");
+        }
+    }
     const int line = s_runner.CurrentLine();
     if (line != s_lastLine && line != 0) {
         s_lastLine = line;

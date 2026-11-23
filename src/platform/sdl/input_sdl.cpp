@@ -82,6 +82,7 @@ bool GameWindowHasKeyboardFocus() {
 // and wheel are still drained each poll so none of it is delivered later.
 Virtual::Source g_virtualSource = nullptr;
 bool            g_virtualActive = false;
+bool            g_virtualEverActive = false;   // the parked cursor has a place (a script played, or parked once)
 Virtual::Frame  g_virtual;
 int32_t         g_virtualLastX = 0;   // the previous frame's cursor, for the relative motion
 int32_t         g_virtualLastY = 0;
@@ -103,11 +104,30 @@ void PollVirtual() {
     const bool wasActive = g_virtualActive;
     g_virtualActive = g_virtualSource(client, &next);
     if (g_virtualActive) {
+        g_virtualEverActive = true;
         g_virtual = next;
         if (!wasActive) {   // no jump from wherever the last script left the cursor
             g_virtualLastX = g_virtual.x;
             g_virtualLastY = g_virtual.y;
         }
+        return;
+    }
+    // Between scripts, in a window nobody has focused: the cursor stays parked where the last script left
+    // it (the middle of the window before the first), nothing pressed. Released, an unfocused window's
+    // poll reports the cursor at (0, 0) and the camera's edge scroll runs it into the map's top-left
+    // corner. Focused, the window is the player's again.
+    if (!GameWindowHasKeyboardFocus()) {
+        if (!g_virtualEverActive) {
+            g_virtualEverActive = true;
+            g_virtual.x = client.widthPx / 2;
+            g_virtual.y = client.heightPx / 2;
+            g_virtualLastX = g_virtual.x;
+            g_virtualLastY = g_virtual.y;
+        }
+        g_virtualActive = true;
+        g_virtual.buttons = 0;
+        g_virtual.wheel = 0;
+        std::memset(g_virtual.keys, 0, sizeof(g_virtual.keys));
     }
 }
 

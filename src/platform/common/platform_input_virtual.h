@@ -7,8 +7,10 @@
 // input sent to a window in the background never reaches it. BANISHED_DRIVE
 // (src/diag/drive_harness.cpp) plays a script instead: while a source is installed and says
 // it is active, every Platform::Input read answers from the frame it returned, the window
-// counts as in front, and the devices are drained and ignored. When it says inactive, or no
-// source is installed (every normal run), nothing changes.
+// counts as in front, and the devices are drained and ignored. When it says inactive and the window
+// has no keyboard focus, the input stays parked: the cursor where the last script left it (the middle
+// of the window before any), nothing pressed, so an unattended window does not edge-scroll on its own.
+// Focused, the window is the player's. With no source installed (every normal run), nothing changes.
 //
 // One implementation for every host: src/platform/sdl/input_sdl.cpp.
 // ============================================================================

@@ -140,3 +140,35 @@ UNIT_TEST(drive_script_wait_uses_the_clock_and_errors_stop_the_script) {
     CHECK(ok.errors.empty());
     CHECK_EQ(ok.commands, 2);
 }
+
+UNIT_TEST(drive_script_camera_step_fires_once) {
+    const std::vector<Drive::Frame> f = Play("camera 144 201 60\n");
+    int fired = 0;
+    for (const Drive::Frame& x : f) {
+        if (!x.camera) continue;
+        ++fired;
+        CHECK_EQ(static_cast<int>(x.cameraX), 144);
+        CHECK_EQ(static_cast<int>(x.cameraY), 201);
+        CHECK_EQ(static_cast<int>(x.cameraDist), 60);
+        CHECK(x.cameraYaw < 0.0f);   // not given: keep the heading
+    }
+    CHECK_EQ(fired, 1);
+    CHECK_EQ(Drive::Parse("camera 1\n").errors.size(), static_cast<size_t>(1));
+    CHECK_EQ(Drive::Parse("camera -3 4\n").errors.size(), static_cast<size_t>(1));
+}
+
+UNIT_TEST(drive_script_cursor_starts_in_the_middle_not_the_corner) {
+    // A script with no move (here a key) must not hold the cursor at (0, 0): the camera's edge scroll
+    // would run into the map's corner.
+    const std::vector<Drive::Frame> f = Play("key n\n");
+    CHECK(!f.empty());
+    CHECK_EQ(f.front().x, 1024);
+    CHECK_EQ(f.front().y, 640);
+}
+
+UNIT_TEST(drive_script_shot_fires_once) {
+    const std::vector<Drive::Frame> f = Play("shot\nwait 0.1\nshot\n");
+    int shots = 0;
+    for (const Drive::Frame& x : f) shots += x.shot ? 1 : 0;
+    CHECK_EQ(shots, 2);
+}

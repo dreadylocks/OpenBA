@@ -264,6 +264,22 @@ Parsed Parse(const std::string& text) {
                 }
             }
             if (ok) out.steps.insert(out.steps.end(), keys.begin(), keys.end());
+        } else if (cmd == "camera") {
+            double v[4] = {-1.0, -1.0, -1.0, -1.0};
+            bool ok = t.size() >= 3 && t.size() <= 5;
+            for (size_t i = 1; ok && i < t.size(); ++i) ok = Number(t[i], &v[i - 1]);
+            if (!ok || v[0] < 0.0 || v[1] < 0.0 || v[0] > 4096.0 || v[1] > 4096.0) {
+                fail("needs X Y [DIST [YAW]], a map tile");
+                continue;
+            }
+            Step c = Make(Op::Camera, line);
+            c.x = static_cast<float>(v[0]);
+            c.y = static_cast<float>(v[1]);
+            c.dist = static_cast<float>(v[2]);
+            c.yaw = static_cast<float>(v[3]);
+            out.steps.push_back(c);
+        } else if (cmd == "shot") {
+            out.steps.push_back(Make(Op::Shot, line));
         } else if (cmd == "wait") {
             double s = 0.0;
             if (t.size() < 2 || !Number(t[1], &s) || s < 0.0 || s > 3600.0) {
@@ -339,10 +355,19 @@ void Runner::Begin(const Client& client, double now) {
         _waitUntil = now + s.seconds;
         _framesLeft = 0;
         break;
+    case Op::Camera:
+    case Op::Shot:
+        _framesLeft = kHoldFrames;
+        break;
     }
 }
 
 Frame Runner::Next(const Client& client, double now) {
+    if (!_placed) {   // never (0, 0): a cursor in the corner edge-scrolls the camera into the map's corner
+        _placed = true;
+        _held.x = client.widthPx / 2;
+        _held.y = client.heightPx / 2;
+    }
     for (;;) {
         if (_index >= _steps.size()) {
             Frame idle = _held;
@@ -368,6 +393,14 @@ Frame Runner::Next(const Client& client, double now) {
             f.x = _held.x;
             f.y = _held.y;
         }
+        if (s.op == Op::Camera && _framesLeft == kHoldFrames) {   // its first frame only
+            f.camera = true;
+            f.cameraX = s.x;
+            f.cameraY = s.y;
+            f.cameraDist = s.dist;
+            f.cameraYaw = s.yaw;
+        }
+        if (s.op == Op::Shot && _framesLeft == kHoldFrames) f.shot = true;
         if (s.op == Op::Wheel) {
             const int total = std::abs(s.notches) * (1 + kHoldFrames);
             const int k = total - _framesLeft;

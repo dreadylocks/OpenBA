@@ -21,6 +21,12 @@
 //   type TEXT              the rest of the line, one key per character (shift where needed;
 //                          printable ASCII that a US keyboard types)
 //   wait SECONDS           do nothing for that long (fractions allowed)
+//   camera X Y [DIST [YAW]]     not input: put the camera's focus on map tile (X, Y), optionally at a
+//                          distance and heading (degrees), as a player would after panning there
+//                          (the harness applies it; the game's own camera code moves on from there)
+//   shot                   not input: in game, retail's screenshot with the UI (the quickload key's
+//                          TakeScreenshot, after UI::UserInterface::Draw): a new ScreenshotN.bmp in the
+//                          save folder's Screenshots
 //
 // Key names: a-z, 0-9, esc, enter, space, tab, back(space), delete, insert, home, end, pgup, pgdn,
 // up, down, left, right, shift, rshift, ctrl, rctrl, alt, ralt, f1-f12, minus, equals, comma,
@@ -45,6 +51,13 @@ struct Frame {
     uint8_t buttons = 0;
     int32_t wheel = 0;
     uint8_t keys[256] = {};
+    // A `camera` step, on its one frame: the focus tile, and the distance / yaw when given (< 0: keep).
+    bool camera = false;
+    float cameraX = 0.0f;
+    float cameraY = 0.0f;
+    float cameraDist = -1.0f;
+    float cameraYaw = -1.0f;
+    bool shot = false;   // a `shot` step, on its one frame
 };
 
 // The client area, for points -> pixels and fractions.
@@ -54,7 +67,7 @@ struct Client {
     float density = 1.0f;   // pixels per point
 };
 
-enum class Op { Move, Press, Release, Wheel, KeyDown, KeyUp, Wait };
+enum class Op { Move, Press, Release, Wheel, KeyDown, KeyUp, Wait, Camera, Shot };
 
 // One primitive step. Moves carry the target in points (or fractions when `fraction`).
 struct Step {
@@ -67,6 +80,8 @@ struct Step {
     int notches = 0;        // Wheel
     uint8_t key = 0;        // KeyDown / KeyUp: DIK code
     double seconds = 0.0;   // Wait
+    float dist = -1.0f;     // Camera: distance, < 0 = keep
+    float yaw = -1.0f;      // Camera: heading in degrees, < 0 = keep
     int line = 0;           // the script line it came from (1-based)
 };
 
@@ -106,6 +121,7 @@ private:
     int32_t _toY = 0;
     int _glideTotal = 0;
     Frame _held;   // the cursor, buttons and keys as they stand
+    bool _placed = false;   // the cursor has a place: the middle of the window until a move says otherwise
 };
 
 }  // namespace Drive
