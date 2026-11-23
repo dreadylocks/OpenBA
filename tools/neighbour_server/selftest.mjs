@@ -26,16 +26,51 @@ const withToken = (roomName, first) => {
 };
 const check = (ok, what) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) failures++; };
 
+// The relay sends long lists in batches (natBatch, roadBatch, roadsOff); the checks below read them as
+// the one-a-tile messages they stand for.
+function expand(m) {
+  if (m.t === "natBatch") {
+    const tmpls = m.tmpls.split("\n");
+    return m.list.split(";").filter(Boolean).map((e) => {
+      const [cell, op, k, grp, vr] = e.split(",").map(Number);
+      const out = { t: "nat", op: op === 1 ? "add" : "rm", cell, tmpl: tmpls[k], batched: true };
+      if (Number.isInteger(grp) && Number.isInteger(vr) && e.split(",").length === 5) { out.grp = grp; out.var = vr; }
+      if (m.replay) out.replay = true;
+      return out;
+    });
+  }
+  if (m.t === "roadBatch") {
+    const tmpls = m.tmpls.split("\n");
+    const mats = m.mats ? m.mats.split("\n") : [];
+    return m.list.split(";").filter(Boolean).map((e) => {
+      const [cell, type, tt, ti, mi] = e.split(",").map(Number);
+      const out = { t: "road", cell, type, tt, tmpl: tmpls[ti], batched: true };
+      if (mi >= 0) out.mat = mats[mi];
+      return out;
+    });
+  }
+  if (m.t === "roadsOff") {
+    return m.cells.split(",").filter(Boolean).map((c) => {
+      const out = { t: "road", cell: Number(c), off: true, batched: true };
+      if (m.replay) out.replay = true;
+      return out;
+    });
+  }
+  return [m];
+}
+
 function town(name, pass, lastSeq = 0) {
   const ws = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(room, { ...HS, t: "hello", room, pass, name, lastSeq }))));
   ws.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
-    keep(room, name, m);
-    inbox.push(m);
-    for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    const raw = JSON.parse(ev.data);
+    keep(room, name, raw);
+    for (const m of expand(raw)) {
+      inbox.push(m);
+      for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    }
   });
   const closed = new Promise((r) => ws.addEventListener("close", (ev) => r(ev)));
   return {
@@ -128,10 +163,12 @@ function opener(roomName, first) {
   ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(roomName, { ...HS, ...first }))));
   const closed = new Promise((r) => ws.addEventListener("close", (ev) => r(ev)));
   ws.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
-    keep(roomName, first.name, m);
-    inbox.push(m);
-    for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    const raw = JSON.parse(ev.data);
+    keep(roomName, first.name, raw);
+    for (const m of expand(raw)) {
+      inbox.push(m);
+      for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    }
   });
   return {
     ws, inbox, closed,

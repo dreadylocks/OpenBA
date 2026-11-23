@@ -350,6 +350,12 @@ void AddMirror(const Message& m) {
     }
 }
 
+// The natural resources by tile, for a neighbour's removal its tile's slots do not hold; built at most once
+// a frame (s_frame, from Tick), on the first such removal.
+uint64_t s_frame = 0;
+uint64_t s_natIndexFrame = ~0ull;
+std::unordered_multimap<int, ComponentEntity*> s_natIndex;
+
 // Nature traffic, for the log (LogNature): what this town sent and what came of the neighbour's.
 struct NatStats {
     uint64_t sentAdds = 0, sentRms = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
@@ -578,13 +584,23 @@ void ApplyNat(const Message& m) {
             return;
         }
         // Not in the tile's occupant / blocker slots (a plant that does not hold its tile, a wild herb):
-        // look for it among the natural resources.
-        const auto& all = g->m_entityList->masterArray;
-        for (int i = 0; i < all._size; ++i) {
-            ComponentEntity* e = all._data[i].Get();
-            if (e == nullptr || ((e->_entityFlags >> 10) & 1) || e->FindComponent<NaturalResourceComponent>() == nullptr)
-                continue;
-            if (CellOf(e) != cell || PathOf(e->_description) != tmpl) continue;
+        // look for it among the natural resources, indexed by tile once a frame (a load's replay brings
+        // thousands of removals at once, most of them for plants this copy no longer has).
+        if (s_natIndexFrame != s_frame) {
+            s_natIndexFrame = s_frame;
+            s_natIndex.clear();
+            const auto& all = g->m_entityList->masterArray;
+            for (int i = 0; i < all._size; ++i) {
+                ComponentEntity* e = all._data[i].Get();
+                if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+                const int at = CellOf(e);
+                if (at >= 0) s_natIndex.emplace(at, e);
+            }
+        }
+        const auto range = s_natIndex.equal_range(static_cast<int>(cell));
+        for (auto it = range.first; it != range.second; ++it) {
+            ComponentEntity* e = it->second;
+            if (((e->_entityFlags >> 10) & 1) || PathOf(e->_description) != tmpl) continue;
             s_quiet.insert(e);
             g->m_entityList->QueueDestroy(&e);
             ++s_applied.removed;
@@ -630,6 +646,66 @@ void ApplyNat(const Message& m) {
     g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
     ++s_applied.planted;
     s_applying = false;
+}
+
+std::vector<std::string> SplitOn(const std::string& s, char sep) {
+    std::vector<std::string> out;
+    size_t at = 0;
+    while (at <= s.size()) {
+        const size_t next = s.find(sep, at);
+        out.push_back(s.substr(at, next == std::string::npos ? std::string::npos : next - at));
+        if (next == std::string::npos) break;
+        at = next + 1;
+    }
+    return out;
+}
+
+bool ToInt(const std::string& s, int64_t& v) {
+    if (s.empty() || s.size() > 12) return false;
+    char* end = nullptr;
+    v = std::strtoll(s.c_str(), &end, 10);
+    return end != nullptr && *end == '\0';
+}
+
+// The relay's batches (a long list in few messages; index.js sendNatBatches / sendRoads / sendRoadsOff),
+// each change applied as the one-a-tile message it stands for.
+void ApplyBatch(const Message& m) {
+    bool replay = false;
+    m.GetBool("replay", replay);
+    if (m.type == "roadsOff") {
+        for (const std::string& c : SplitOn(m.GetOr("cells", ""), ',')) {
+            int64_t cell = 0;
+            if (!ToInt(c, cell)) continue;
+            Message r("road");
+            r.SetInt("cell", cell).SetBool("off", true);
+            if (replay) r.SetBool("replay", true);
+            ApplyRoad(r);
+        }
+        return;
+    }
+    const std::vector<std::string> tmpls = SplitOn(m.GetOr("tmpls", ""), '\n');
+    const std::vector<std::string> mats = SplitOn(m.GetOr("mats", ""), '\n');
+    for (const std::string& entry : SplitOn(m.GetOr("list", ""), ';')) {
+        const std::vector<std::string> f = SplitOn(entry, ',');
+        int64_t v[5] = {0, 0, 0, -1, -1};
+        bool ok = f.size() >= 3 && f.size() <= 5;
+        for (size_t i = 0; ok && i < f.size(); ++i) ok = ToInt(f[i], v[i]);
+        if (!ok) continue;
+        if (m.type == "natBatch") {
+            if (v[2] < 0 || v[2] >= static_cast<int64_t>(tmpls.size())) continue;
+            Message n("nat");
+            n.Set("op", v[1] == 1 ? "add" : "rm").SetInt("cell", v[0]).Set("tmpl", tmpls[static_cast<size_t>(v[2])]);
+            if (f.size() == 5) n.SetInt("grp", v[3]).SetInt("var", v[4]);
+            if (replay) n.SetBool("replay", true);
+            ApplyNat(n);
+        } else {   // roadBatch: cell, type, tt, template, material (-1 none)
+            if (f.size() != 5 || v[3] < 0 || v[3] >= static_cast<int64_t>(tmpls.size())) continue;
+            Message r("road");
+            r.SetInt("cell", v[0]).SetInt("type", v[1]).SetInt("tt", v[2]).Set("tmpl", tmpls[static_cast<size_t>(v[3])]);
+            if (v[4] >= 0 && v[4] < static_cast<int64_t>(mats.size())) r.Set("mat", mats[static_cast<size_t>(v[4])]);
+            ApplyRoad(r);
+        }
+    }
 }
 
 void RemoveMirror(const std::string& id) {
@@ -713,6 +789,8 @@ void End() {
     s_on = false;
     s_live = false;
     s_seat = -1;
+    s_natIndex.clear();
+    s_natIndexFrame = ~0ull;
     s_applying = false;
     s_solidRef.clear();
     s_quiet.clear();
@@ -997,6 +1075,7 @@ void LogFingerprint() {
 
 void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
+    s_frame = frame;
     EnsureGrid();
     s_live = true;   // from the first frame of play on, a change is news
     if (frame % kFingerprintFrames == 0) {
@@ -1202,6 +1281,7 @@ bool OnMessage(const Message& m, std::string* notice) {
     }
     if (m.type == "road") { ApplyRoad(m); return true; }
     if (m.type == "nat") { ApplyNat(m); return true; }
+    if (m.type == "natBatch" || m.type == "roadBatch" || m.type == "roadsOff") { ApplyBatch(m); return true; }
     return false;
 }
 

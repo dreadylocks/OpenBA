@@ -301,7 +301,12 @@ export class Room {
 
     if (msg.t === "hello") return this.onHello(ws, a, msg);
     if (msg.t === "create") return this.onCreate(ws, a, msg);
-    if (a.seat < 0) return this.fail(ws, "say hello first", true);
+    // Not fatal: the line closes and the town's game connects again with its hello.
+    if (a.seat < 0) {
+      this.send(ws, { t: "error", why: "say hello first" });
+      try { ws.close(4000, "say hello first"); } catch { /* already closed */ }
+      return;
+    }
     if (msg.t === "chat") return this.onChat(ws, a, msg);
     if (msg.t === "parcel") return this.onParcel(ws, a, msg);
     if (msg.t === "ack") return this.onAck(ws, a, msg);
@@ -571,7 +576,9 @@ export class Room {
   async sendRoadsOff(ws, seat) {
     const removed = (await this.ctx.storage.get(`roadoff:${1 - seat}`)) || [];
     const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
-    for (const cell of removed) if (!(cell in standing)) this.send(ws, { t: "road", cell, off: true, replay: true });
+    // In batches of cells (one message a tile could run past one call's sends).
+    const off = removed.filter((cell) => !(cell in standing));
+    for (let i = 0; i < off.length; i += 1800) this.send(ws, { t: "roadsOff", cells: off.slice(i, i + 1800).join(","), replay: true });
   }
 
   // The road tiles taken up while `seat` was away, sent to it on joining after the roads that stand.
@@ -596,16 +603,30 @@ export class Room {
     if (q.length === 0) return;
     // A road the neighbour holds now (laid again) is not taken up.
     const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
-    for (const cell of q) if (!(cell in standing)) this.send(ws, { t: "road", cell, off: true });
+    const off = q.filter((cell) => !(cell in standing));
+    for (let i = 0; i < off.length; i += 1800) this.send(ws, { t: "roadsOff", cells: off.slice(i, i + 1800).join(",") });
     await this.ctx.storage.delete(key);
   }
 
   async sendRoads(ws, seat) {
     const all = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
-    for (const [cell, [type, tt, tmpl, mat]] of Object.entries(all)) {
-      const out = { t: "road", cell: Number(cell), type, tt, tmpl };
-      if (mat) out.mat = mat;
-      this.send(ws, out);
+    // In batches ("roadBatch"): the templates and materials once each, then "cell,type,tt,template,material"
+    // a tile (material -1: none). 500 tiles keep a batch well under the game's 16 KB frame.
+    const rows = Object.entries(all);
+    for (let i = 0; i < rows.length; i += 500) {
+      const tmpls = new Map();
+      const mats = new Map();
+      const idx = (m, v) => {
+        let k = m.get(v);
+        if (k === undefined) {
+          k = m.size;
+          m.set(v, k);
+        }
+        return k;
+      };
+      const parts = rows.slice(i, i + 500).map(([cell, [type, tt, tmpl, mat]]) =>
+        `${cell},${type},${tt},${idx(tmpls, tmpl)},${mat ? idx(mats, mat) : -1}`);
+      this.send(ws, { t: "roadBatch", tmpls: [...tmpls.keys()].join("\n"), mats: [...mats.keys()].join("\n"), list: parts.join(";") });
     }
   }
 
@@ -647,30 +668,48 @@ export class Room {
     await this.ctx.storage.put(key, shard);
   }
 
+  // Resource changes in few messages ("natBatch"): a long record sent one message a tile ran a joining
+  // town's hello past what one Durable Object call can do (tens of thousands of sends) and the line lost
+  // its seat. A batch: its templates once ("tmpls", one per line), then "cell,op,template[,grp,var]" a
+  // change, op 0 removed / 1 planted. kNatBatch changes keep a batch well under the game's 16 KB frame.
+  sendNatBatches(ws, entries, replay) {
+    const kNatBatch = 600;
+    for (let i = 0; i < entries.length; i += kNatBatch) {
+      const tmpls = new Map();
+      const parts = [];
+      for (const [cell, op, tmpl, grp, vr] of entries.slice(i, i + kNatBatch)) {
+        let k = tmpls.get(tmpl);
+        if (k === undefined) {
+          k = tmpls.size;
+          tmpls.set(tmpl, k);
+        }
+        parts.push(Number.isInteger(grp) && Number.isInteger(vr) ? `${cell},${op},${k},${grp},${vr}` : `${cell},${op},${k}`);
+      }
+      const ev = { t: "natBatch", tmpls: [...tmpls.keys()].join("\n"), list: parts.join(";") };
+      if (replay) ev.replay = true;
+      this.send(ws, ev);
+    }
+  }
+
   // Both towns' whole record of resource changes (replay: the game counts no refusal for a tile that is
   // already as the record says). Returns how many.
   async sendNatLog(ws) {
-    let n = 0;
+    const entries = [];
     for (const [, shard] of await this.ctx.storage.list({ prefix: "natlog:" })) {
       for (const [cell, rec] of Object.entries(shard.c)) {
         const v = Array.isArray(rec) ? rec[0] : rec;
-        const ev = { t: "nat", op: (v & 1) ? "add" : "rm", cell: Number(cell), tmpl: shard.t[v >> 1], replay: true };
-        if (Array.isArray(rec)) { ev.grp = rec[1]; ev.var = rec[2]; }
-        this.send(ws, ev);
-        ++n;
+        entries.push(Array.isArray(rec) ? [Number(cell), v & 1, shard.t[v >> 1], rec[1], rec[2]]
+                                        : [Number(cell), v & 1, shard.t[v >> 1]]);
       }
     }
-    return n;
+    this.sendNatBatches(ws, entries, true);
+    return entries.length;
   }
 
   async sendNatQueue(ws, seat) {
     const key = `natq:${seat}`;
     const q = (await this.ctx.storage.get(key)) || [];
-    for (const [op, cell, tmpl, grp, vr] of q) {
-      const ev = { t: "nat", op: op === 0 ? "rm" : "add", cell, tmpl };
-      if (Number.isInteger(grp) && Number.isInteger(vr)) { ev.grp = grp; ev.var = vr; }
-      this.send(ws, ev);
-    }
+    this.sendNatBatches(ws, q.map(([op, cell, tmpl, grp, vr]) => [cell, op, tmpl, grp, vr]), false);
     if (q.length > 0) await this.ctx.storage.delete(key);
   }
 
