@@ -482,6 +482,9 @@ void ApplyNat(const Message& m) {
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr || !m.GetInt("cell", cell) || cell < 0 ||
         cell >= static_cast<int64_t>(map->size) * map->size || !m.Get("op", op) || !m.Get("tmpl", tmpl))
         return;
+    // `replay`: the relay's whole record, sent again after a load (the change may be in this copy already).
+    bool replay = false;
+    m.GetBool("replay", replay);
     const MapCell& c = map->cells.GetData()[cell];
     if (op == "rm") {
         // The same resource here: a natural resource of that template whose origin is the cell.
@@ -499,6 +502,7 @@ void ApplyNat(const Message& m) {
     if (op != "add") return;
     // A sapling, as the game's spreading plants one: on a free cell only.
     if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF) {
+        if (replay) return;   // most likely the sapling itself, grown or not
         ++s_applied.refused;
         s_lastRefusal = "a sapling on a tile that is taken";
         return;

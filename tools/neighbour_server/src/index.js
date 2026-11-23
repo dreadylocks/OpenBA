@@ -75,6 +75,11 @@ const kBuildingId = /^[0-9a-z_-]{1,40}$/;
 // go straight to the neighbour, or wait in a queue (the newest kMaxNatQueue) while it is away.
 const kMaxRoadCells = 200_000;
 const kMaxNatQueue = 20_000;
+// Every resource change is also kept for good, the newest per tile (natlog:<seat>:<shard>, kNatShard
+// tiles a shard, its template paths numbered within it). A town that starts again in its seat or loads a
+// save gets both towns' whole record: the changes after that save reached the neighbour live and sit in
+// no queue, and a tree felled in one copy of the land must be gone in the other.
+const kNatShardBits = 12;
 const kMaxCell = kMaxMapDim * kMaxMapDim;
 // Flood guard: at most this many messages per socket in kWindowMs.
 // The game paces its shared-map messages to 40 a second (shared_map.cpp kSendRate), a burst of 120.
@@ -563,6 +568,7 @@ export class Room {
       return this.fail(ws, "bad resource change", false);
     }
     const ev = { t: "nat", op: msg.op, cell, tmpl: msg.tmpl };
+    await this.logNat(a.seat, msg.op, cell, msg.tmpl);
     const peers = this.socketsFor(1 - a.seat);
     if (peers.length > 0) { for (const peer of peers) this.send(peer, ev); return; }
     const key = `natq:${1 - a.seat}`;
@@ -570,6 +576,31 @@ export class Room {
     q.push([ev.op === "rm" ? 0 : 1, cell, ev.tmpl]);
     while (q.length > kMaxNatQueue) q.shift();
     await this.ctx.storage.put(key, q);
+  }
+
+  async logNat(seat, op, cell, tmpl) {
+    const key = `natlog:${seat}:${cell >> kNatShardBits}`;
+    const shard = (await this.ctx.storage.get(key)) || { t: [], c: {} };
+    let i = shard.t.indexOf(tmpl);
+    if (i < 0) {
+      shard.t.push(tmpl);
+      i = shard.t.length - 1;
+    }
+    shard.c[cell] = (op === "rm" ? 0 : 1) + 2 * i;
+    await this.ctx.storage.put(key, shard);
+  }
+
+  // Both towns' whole record of resource changes (replay: the game counts no refusal for a tile that is
+  // already as the record says). Returns how many.
+  async sendNatLog(ws) {
+    let n = 0;
+    for (const [, shard] of await this.ctx.storage.list({ prefix: "natlog:" })) {
+      for (const [cell, v] of Object.entries(shard.c)) {
+        this.send(ws, { t: "nat", op: (v & 1) ? "add" : "rm", cell: Number(cell), tmpl: shard.t[v >> 1], replay: true });
+        ++n;
+      }
+    }
+    return n;
   }
 
   async sendNatQueue(ws, seat) {
@@ -732,6 +763,8 @@ export class Room {
       await this.sendRoads(ws, seat);
       await this.sendRoadQueue(ws, seat);
       await this.sendNatQueue(ws, seat);
+      // A new game or a loaded save in this seat: its copy of the land may lack changes it once had.
+      if (msg.fresh === true || msg.reload === true) await this.sendNatLog(ws);
     }
   }
 

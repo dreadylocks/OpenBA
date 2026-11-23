@@ -353,7 +353,28 @@ const rgone = await tryWait(fb2.wait((m) => m.t === "unbuild" && m.id === "rb1")
 const runpaved = await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && m.off === true));
 const kept = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 777));
 check(!!rgone && !!runpaved && !!kept, "a town loading a save drops what its seat held, but keeps the changes waiting for it");
-for (const x of [fa3, fb2]) x.ws.close();
+// A resource change that reached the town live (and so sits in no queue) comes again when it loads a
+// save (which may be older than that change), its own changes too; a plain reconnect does not get them.
+fb2.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 4097, tmpl: "Template\\Tree.rsc" }));
+const live = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 4097 && !m.replay));
+fa3.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 12, tmpl: "Template\\Rock.rsc" }));
+await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 12));
+fa3.ws.close(1000, "bye");
+await fa3.closed;
+const fa4 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
+const again = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 4097 && m.replay === true));
+const own = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 12 && m.replay === true));
+const latest = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 777 && m.replay === true));
+check(!!live && again && again.op === "rm" && again.tmpl === "Template\\Tree.rsc" && own && own.op === "rm" &&
+      latest && latest.op === "add", "a town loading a save gets both towns' resource changes again");
+fa4.ws.close(1000, "bye");
+await fa4.closed;
+const fa5 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly" });
+await tryWait(fa5.wait((m) => m.t === "mirrorEnd"));
+await new Promise((r) => setTimeout(r, 300));
+check(!fa5.inbox.some((m) => m.t === "nat" && m.replay), "a plain reconnect is not sent the record");
+fa5.ws.close();
+fb2.ws.close();
 
 // The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
 const upgradeStatus = await new Promise((resolve) => {
