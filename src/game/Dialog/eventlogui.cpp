@@ -13,6 +13,7 @@
 #include "collection/Collection.h"
 #include "ui/CheckElement.h"
 #include "ui/TableElement.h"   // the "display" table's GetRowCount (+0xC0)
+#include "ui/ButtonElement.h"  // the "display" rows' buttons (IsDerivedFrom check in OnOpened's loop)
 #include "Game/PlayerController.h"
 #include "ui/UserInterface.h"
 #include "object/TypeInfo.h"
@@ -86,19 +87,25 @@ void EventLogUI::OnOpened() {
     displayTexts.SetSize(displayElem->GetRowCount());
     displayButtons.SetSize(displayElem->GetRowCount());
 
-    // Iterate display rows: store child text element, store the row as a
-    // button, set element IDs
+    // Iterate display rows. The table holds two cells a row (Element::_children, row-major): the
+    // row's button, then its text. Retail walks a child index that steps by 2 (ADD ESI,2): the text
+    // is Child(2i + 1) (LEA R8D,[RSI+1], stored with no type check), the button Child(2i), kept
+    // only if it IsDerivedFrom ButtonElement (CMOVNE, else null), and the element id 0x6C + i goes
+    // on that child (read from the Steam build, Application-steam-x64.exe 0x14006822a..0x1400682be,
+    // the GOG build's loop shifted by about -0x923).
+    // (Before: both arrays took Child(i), so the event log drew every other entry and its bottom
+    // half of the rows never filled.)
     int rowCount = displayTexts._size;
     for (int i = 0; i < rowCount; i++) {
-        // Child text element (direct child at index i)
-        displayTexts[i] = displayElem->Child(i);
+        displayTexts[i] = displayElem->Child(2 * i + 1);
 
-        // The same child, as the row's button (the retail check is against
-        // Object::Internal, i.e. any element)
-        displayButtons[i] = displayElem->Child(i);
+        UI::Element* button = displayElem->Child(2 * i).Get();
+        displayButtons[i] = button->IsDerivedFrom(UI::ButtonElement::TypeId())
+                                ? Object::InternalPtr<UI::Element>(button)
+                                : Object::InternalPtr<UI::Element>();
 
-        // Set element ID on the button: 0x6C + index
-        displayButtons[i]->SetElementId(0x6C + i);
+        // Set element ID on the row's button cell: 0x6C + index
+        button->SetElementId(0x6C + i);
     }
 
     // Reset scroll offset to 0
