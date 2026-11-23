@@ -618,17 +618,23 @@ export class Room {
       return this.fail(ws, "bad resource change", false);
     }
     const ev = { t: "nat", op: msg.op, cell, tmpl: msg.tmpl };
-    await this.logNat(a.seat, msg.op, cell, msg.tmpl);
+    // A new plant's look (its model variant), so both copies draw the same tree: kept and passed on.
+    const look = msg.op === "add" && Number.isInteger(msg.grp) && Number.isInteger(msg.var) &&
+                 msg.grp >= 0 && msg.grp < 64 && msg.var >= 0 && msg.var < 64 ? [msg.grp, msg.var] : null;
+    if (look) { ev.grp = look[0]; ev.var = look[1]; }
+    await this.logNat(a.seat, msg.op, cell, msg.tmpl, look);
     const peers = this.socketsFor(1 - a.seat);
     if (peers.length > 0) { for (const peer of peers) this.send(peer, ev); return; }
     const key = `natq:${1 - a.seat}`;
     const q = (await this.ctx.storage.get(key)) || [];
-    q.push([ev.op === "rm" ? 0 : 1, cell, ev.tmpl]);
+    q.push(look ? [ev.op === "rm" ? 0 : 1, cell, ev.tmpl, look[0], look[1]] : [ev.op === "rm" ? 0 : 1, cell, ev.tmpl]);
     while (q.length > kMaxNatQueue) q.shift();
     await this.ctx.storage.put(key, q);
   }
 
-  async logNat(seat, op, cell, tmpl) {
+  // A tile's record: the op and template as one number (op + 2 * template index), or with a new plant's
+  // look [that number, grp, var].
+  async logNat(seat, op, cell, tmpl, look = null) {
     const key = `natlog:${seat}:${cell >> kNatShardBits}`;
     const shard = (await this.ctx.storage.get(key)) || { t: [], c: {} };
     let i = shard.t.indexOf(tmpl);
@@ -636,7 +642,8 @@ export class Room {
       shard.t.push(tmpl);
       i = shard.t.length - 1;
     }
-    shard.c[cell] = (op === "rm" ? 0 : 1) + 2 * i;
+    const code = (op === "rm" ? 0 : 1) + 2 * i;
+    shard.c[cell] = look ? [code, look[0], look[1]] : code;
     await this.ctx.storage.put(key, shard);
   }
 
@@ -645,8 +652,11 @@ export class Room {
   async sendNatLog(ws) {
     let n = 0;
     for (const [, shard] of await this.ctx.storage.list({ prefix: "natlog:" })) {
-      for (const [cell, v] of Object.entries(shard.c)) {
-        this.send(ws, { t: "nat", op: (v & 1) ? "add" : "rm", cell: Number(cell), tmpl: shard.t[v >> 1], replay: true });
+      for (const [cell, rec] of Object.entries(shard.c)) {
+        const v = Array.isArray(rec) ? rec[0] : rec;
+        const ev = { t: "nat", op: (v & 1) ? "add" : "rm", cell: Number(cell), tmpl: shard.t[v >> 1], replay: true };
+        if (Array.isArray(rec)) { ev.grp = rec[1]; ev.var = rec[2]; }
+        this.send(ws, ev);
         ++n;
       }
     }
@@ -656,7 +666,11 @@ export class Room {
   async sendNatQueue(ws, seat) {
     const key = `natq:${seat}`;
     const q = (await this.ctx.storage.get(key)) || [];
-    for (const [op, cell, tmpl] of q) this.send(ws, { t: "nat", op: op === 0 ? "rm" : "add", cell, tmpl });
+    for (const [op, cell, tmpl, grp, vr] of q) {
+      const ev = { t: "nat", op: op === 0 ? "rm" : "add", cell, tmpl };
+      if (Number.isInteger(grp) && Number.isInteger(vr)) { ev.grp = grp; ev.var = vr; }
+      this.send(ws, ev);
+    }
     if (q.length > 0) await this.ctx.storage.delete(key);
   }
 

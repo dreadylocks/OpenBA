@@ -247,9 +247,12 @@ check(modRoad && modRoad.type === 7 && modRoad.mat === "CC\\Material\\RoadGravel
 creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\\Tree.rsc" }));
 const nr = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1234));
 check(nr && nr.op === "rm", "a felled tree is passed on");
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 1235, tmpl: "Template\\Tree.rsc", grp: 1, var: 3 }));
+const na = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1235));
+check(na && na.op === "add" && na.grp === 1 && na.var === 3, "a new plant is passed on with its look");
 rejoin.ws.close();
 await new Promise((r) => setTimeout(r, 300));
-creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\\Tree.rsc" }));
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\\Tree.rsc", grp: 2, var: 5 }));
 // Roads taken up while the neighbour is away reach it when it comes back (it holds them in its save);
 // one laid again meanwhile does not.
 creator.ws.send(JSON.stringify({ t: "road", cell: 70002, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
@@ -260,7 +263,7 @@ creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "
 await new Promise((r) => setTimeout(r, 300));
 const rejoin2 = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));
-check(queued && queued.op === "add", "a resource change waits for a town that is away");
+check(queued && queued.op === "add" && queued.grp === 2 && queued.var === 5, "a resource change waits for a town that is away (a plant with its look)");
 const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
 check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001 && !m.off), "a town joining gets the neighbour's roads (not removed ones)");
 const keptMod = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70100));
@@ -358,7 +361,7 @@ fa2.ws.send(JSON.stringify({ t: "road", cell: 4321, type: 1, tt: 0, tmpl: "Templ
 await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && !m.off));
 fa2.ws.close(1000, "bye");
 await fa2.closed;
-fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 777, tmpl: "Template\\Tree.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 777, tmpl: "Template\\Tree.rsc", grp: 0, var: 4 }));
 await new Promise((r) => setTimeout(r, 300));
 const fa3 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
 const rgone = await tryWait(fb2.wait((m) => m.t === "unbuild" && m.id === "rb1"));
@@ -386,7 +389,7 @@ const again = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 4097 && 
 const own = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 12 && m.replay === true));
 const latest = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 777 && m.replay === true));
 check(!!live && again && again.op === "rm" && again.tmpl === "Template\\Tree.rsc" && own && own.op === "rm" &&
-      latest && latest.op === "add", "a town loading a save gets both towns' resource changes again");
+      latest && latest.op === "add" && latest.var === 4, "a town loading a save gets both towns' resource changes again");
 const roadAgain = await tryWait(fa4.wait((m) => m.t === "road" && m.cell === 5555 && m.off === true && m.replay === true));
 check(!!roadAgain && !fa4.inbox.some((m) => m.t === "road" && m.cell === 5556 && m.off === true),
       "a town loading a save gets the neighbour's road removals again (not a road laid again since)");

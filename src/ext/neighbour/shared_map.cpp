@@ -79,11 +79,11 @@ struct Mine {
     TileRect                             rect;
     int                                  built = -1;   // the stage last reported (percent)
     // Placed in this session's play (not a load's scan), and when: only such a site, a few seconds old,
-    // is taken back when the relay refuses it (buildRefused); nothing can have been delivered to it yet.
+    // is taken back when the relay refuses it (buildRefused); too young for anything to be hauled to it.
     bool                                  placedInPlay = false;
     std::chrono::steady_clock::time_point placedAt;
 };
-constexpr double kTakeBackSeconds = 30.0;   // a refusal comes back within a round trip; this is generous
+constexpr double kTakeBackSeconds = 5.0;   // a refusal comes back within a round trip; nothing hauled yet
 
 // How far along a structure's model is, in percent: its mesh index in the group's stages
 // (foundation first, the finished building last). No model or one stage: 100.

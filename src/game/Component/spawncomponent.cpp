@@ -300,7 +300,8 @@ void SpawnComponent::DoSpawn(SpawnDescription* desc, int entryIndex, char random
         // also carries on through the deleted IBP (its finders return null there).
         if (closed) ++g_doSpawn.listClosed; else ++g_doSpawn.created;
     }
-    Neighbour::SharedMap::NotePlanted(entityIbp.Get());   // EXT SEAM (NOT RETAIL): the neighbour gets the new plant
+    // EXT SEAM (NOT RETAIL): the neighbour gets the new plant (not one a closing list just deleted).
+    if (gw->m_entityList != nullptr && !gw->m_entityList->shuttingDown) Neighbour::SharedMap::NotePlanted(entityIbp.Get());
 
     // Optional random growth
     if (randomGrowth != '\0') {

@@ -128,3 +128,8 @@ dev loop game sitting in a Load's question.
   `modsOutOfDate` (CheckMod 2) when the same PC loads them; not yet traced (needs one such save).
 - The removal tool's preview over the neighbour's road is green (the removal itself skips those tiles).
 - Row 20 (Continents) not run; row 6 checked by solid-tile counts only.
+- Shared spreading (6263d4f8f): seat 0 spreads plants on the west half of the map, seat 1 on the east,
+  each sending its new plants to the other. So a shared-map game's forests differ from the same seed
+  played alone, since its random numbers are drawn differently after the first skipped spread. A
+  town's half spreads only while that town plays. The shared map sends at most 40 changes a second and
+  holds 20,000 waiting, so a huge burst of spreading can drop plants; the map fingerprint line shows it.

@@ -273,7 +273,8 @@ void GrowthComponent::SpawnSubResource(GrowthDescription* cfg) {
     ::Object::InternalPtr<ComponentEntity> regArg = newIBP;
     world->m_entityList->RegisterEntity(&regArg,   // 0x1400c48a0
         _entity->_description->_category);
-    Neighbour::SharedMap::NotePlanted(newIBP.Get());   // EXT SEAM (NOT RETAIL): the neighbour gets the new plant
+    // EXT SEAM (NOT RETAIL): the neighbour gets the new plant (not one a closing list just deleted).
+    if (!world->m_entityList->shuttingDown) Neighbour::SharedMap::NotePlanted(newIBP.Get());
 }
 
 // ===== ENDGAME B.3.8 CIT — GrowthComponent as a REAL class (GrowthComponent.h) =====
