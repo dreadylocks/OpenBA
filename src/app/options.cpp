@@ -99,6 +99,14 @@ void OptionsInit() {
     o.metalStats = On("BANISHED_METAL_STATS");
     o.inputTrace = On("BANISHED_INPUT_TRACE");
     o.background = On("BANISHED_BACKGROUND");
+    if (o.background) {   // "1" = 640x360; "<W>x<H>" = that size in points (at least 320x200)
+        int w = 0;
+        int h = 0;
+        if (std::sscanf(Raw("BANISHED_BACKGROUND"), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) {
+            o.backgroundWidth = w;
+            o.backgroundHeight = h;
+        }
+    }
     o.userDir = Raw("BANISHED_USER_DIR");
 
     // ── harness drivers: menu → game ─────────────────────────────────────────
@@ -146,6 +154,10 @@ void OptionsInit() {
     // ── front end / save-load ────────────────────────────────────────────────
     o.menuScene       = Int("BANISHED_MENU_SCENE", -1);
     o.saveTest        = Raw("BANISHED_SAVE_TEST");
+    o.devloop         = Raw("BANISHED_DEVLOOP");
+    if (o.devloop && !o.devloop[0]) o.devloop = nullptr;
+    o.drive           = Raw("BANISHED_DRIVE");
+    if (o.drive && !o.drive[0]) o.drive = nullptr;
     o.saveTestRepeat  = Int("BANISHED_SAVE_TEST_REPEAT", 0);
     o.userProfile     = Raw("USERPROFILE");
 

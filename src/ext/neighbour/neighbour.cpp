@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <set>
 #include <mutex>
 #include <vector>
 
@@ -64,6 +65,7 @@ const void*           s_owner = nullptr;    // the GameUpdateLoop whose game thi
 std::unique_ptr<Link> s_link;
 Config                s_config;
 bool                  s_announcedOffline = false;   // one "cannot reach" line per outage
+std::set<std::string> s_compatSaid;                 // the compat warnings already in this game's log
 bool                  s_everConnected = false;
 bool                  s_refused = false;   // the relay refused this town for good (a "fatal" error)
 bool                  s_joined = false;      // a welcome arrived on the current line
@@ -179,6 +181,7 @@ void SendPause(bool on) {
     Message m("pause");
     m.SetBool("on", on);
     s_link->Send(m);
+    fprintf(stderr, "[Neighbour] this town %s the game (sent to the neighbor)\n", on ? "paused" : "carried on with");
 }
 
 void PollPause() {
@@ -222,6 +225,7 @@ void SendSpeed(int32_t speed) {
     Message m("speed");
     m.SetInt("x", speed);
     s_link->Send(m);
+    fprintf(stderr, "[Neighbour] this town set the game speed to %dx (sent to the neighbor)\n", static_cast<int>(speed));
 }
 
 // Read with the pause (s_pauseKnown covers both: a game's first frame reads them).
@@ -431,6 +435,9 @@ void OnMessage(const Message& m) {
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
+        int64_t seat = -1;
+        if (m.GetInt("seat", seat)) SharedMap::SetSeat(static_cast<int>(seat));
+        SharedMap::OnWelcome();
         // A loaded game's first join: its roads again, once the neighbour's land is in.
         if ((s_freshGame && s_loadedFromSave) || s_testReload) SharedMap::ExpectReload();
         if (s_freshGame) {   // told once: a reconnect must not drop this game's own buildings
@@ -490,8 +497,10 @@ void OnMessage(const Message& m) {
                 if (out[i].id == id) { out.erase(out.begin() + static_cast<long>(i)); break; }
         }
     } else if (m.type == "compat") {
-        // A difference the separate-town profile only warns about (a different build or mod list).
-        Post(Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars), kColourProblem);
+        // A difference the separate-town profile only warns about (a different build or mod list). The
+        // relay says it on every join and every arrival of the neighbour: once a game is enough.
+        const std::string warn = Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars);
+        if (s_compatSaid.insert(warn).second) Post(warn, kColourProblem);
     } else if (m.type == "error") {
         bool fatal = false;
         m.GetBool("fatal", fatal);
@@ -863,6 +872,7 @@ void SelectForGame() {
     }
     s_active = true;
     s_announcedOffline = false;
+    s_compatSaid.clear();
     s_everConnected = false;
     s_refused = false;
     s_joined = false;

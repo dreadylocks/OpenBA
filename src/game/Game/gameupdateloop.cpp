@@ -372,6 +372,7 @@ extern "C" int GameUpdateLoop_CurrentFrame() { return s_frameNum; }
 // BANISHED_TOOL_HARNESS. No-op unless that env var is set.
 extern "C" void ToolHarness_Tick(PlayerToolManager* entityUI, int frameNum);
 #include "pausemenu_harness.h"   // PauseMenuHarness_Tick (src/diag)
+#include "devloop_harness.h"     // DevLoopHarness_Tick (src/diag)
 extern "C" void FoodPanel_Tick(PlayerToolManager* entityUI, int frameNum);  // src/diag/food_panel_harness.cpp
 extern "C" void FoodPlace_Tick(int frameNum);                  // src/diag/food_placement_harness.cpp
 extern "C" void StartTown_DeferredSpawn_Tick(int frameNum);    // src/game/Game/starttown.cpp
@@ -649,6 +650,11 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     // progress + the resulting .sav. No-op unless BANISHED_SAVE_TEST is set
     // (src/diag/saveload_harness.cpp).
     SaveLoadHarness_Tick(this, s_frameNum);
+
+    // The dev loop's in-game half: on <dir>/request, autosave and quit so the watcher can swap in a
+    // new build and load the save again. No-op unless BANISHED_DEVLOOP is set
+    // (src/diag/devloop_harness.cpp, docs/extensions/DEVLOOP.md).
+    DevLoopHarness_Tick(this);
 
     // Fire / citizen-disease / crop-infestation / tornado on demand. Every disaster
     // rolls its own dice inside its own component tick, and those chances are

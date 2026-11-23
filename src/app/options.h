@@ -41,6 +41,8 @@ struct Options {
     bool inputTrace = false;            // BANISHED_INPUT_TRACE: input_trace.log (tools/macos/handtest/run_handtest.sh sets it)
     bool background = false;            // BANISHED_BACKGROUND: small unobtrusive window (tools/macos/handtest/run_handtest.sh
                                         //   --background sets it; the launcher scripts of the packaging PR also set it)
+    int backgroundWidth = 640;          //   its size in points; BANISHED_BACKGROUND=<W>x<H> sets another
+    int backgroundHeight = 360;         //   (docs/fork/TWO_PLAYER_TESTING.md: a size to play at, unfocused)
     bool metalStats = false;            // BANISHED_METAL_STATS: Metal allocation / frame diagnostics (tools/macos/handtest/run_handtest.sh sets it)
 
     // ── harness: a second game directory (tools/game_dirs.sh) ─────────────
@@ -56,6 +58,11 @@ struct Options {
     int         autoquitFrames       = 0;      //   value > 1 overrides the settle frames
     bool        autoload             = false;  // tools/resave_gate/resave_gate.sh (BANISHED_AUTOLOAD=Gate)
     const char* autoloadName         = nullptr;//   save name; null when the value was "1" (= the autosave "Auto")
+    const char* drive                = nullptr;// docs/fork/TWO_PLAYER_TESTING.md — BANISHED_DRIVE=<dir>: play <dir>/cmd as
+                                               //   mouse / keyboard input (src/diag/drive_harness.cpp)
+    const char* devloop              = nullptr;// tools/devloop.sh — BANISHED_DEVLOOP=<dir>: save + quit on <dir>/request
+                                               //   (src/diag/devloop_harness.cpp, docs/extensions/DEVLOOP.md); its
+                                               //   autoload is unattended, the game after it is not (DevLoopHarness_Attended)
     bool        autotutorial         = false;  // CLAUDE.md unattended-boot list
     int         autotutorialIndex    = 0;      //   scenario entry index; 0 when the value was "1"
     int         automenuButton       = 0;      // CLAUDE.md / STATUS.md front-end button routes (Mods=7, Load=2, …)

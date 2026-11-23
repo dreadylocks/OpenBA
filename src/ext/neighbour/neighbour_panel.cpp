@@ -41,7 +41,10 @@ namespace {
 
 constexpr const char* kPanelRsc = "Dialog/ExtensionsNeighbour.rsc";
 constexpr int kKeyN      = 36;   // Input::KeyTables index of 'N' (kIndexToVirtualKey[36] = 0x4E)
-constexpr int kKeyEscape = 60;   // editelement.cpp's
+// Device::_keyboard indices (input_key_tables.h), as editelement.cpp's focus drop reads them: the main
+// Return key and the keypad's Enter.
+constexpr int kKeyReturn   = 60;
+constexpr int kKeyPadEnter = 93;
 constexpr int kRefreshFrames = 30;
 
 enum : int32_t {
@@ -110,9 +113,19 @@ public:
             }
             Refresh();
         } else if (msg == kMsgEditFinished && id == kIdChat) {
-            // Enter or a click elsewhere sends; Esc keeps the text unsent.
+            // Enter sends. A click elsewhere (another button, Cancel)
+            // or Esc only ends the typing and keeps the text: a half-typed line must not go because
+            // the player reached for something else.
             const ::Input::Device* dev = ::Input::Device::_singleton;
-            if (dev == nullptr || !dev->_keyboard[kKeyEscape].pressed) SendTyped();
+            // The event can come a frame after the key's press: Enter down, just pressed or just let go.
+            if (dev != nullptr) {
+                bool enter = false;
+                for (int k : {kKeyReturn, kKeyPadEnter}) {
+                    const ::Input::Device::State& key = dev->_keyboard[k];
+                    enter = enter || key.pressed || key.released || key.value != 0;
+                }
+                if (enter) SendTyped();
+            }
         }
         Object::InternalPtr<UI::Element> copy = *element;
         UI::DialogInstance::OnElementEvent(&copy, msg, id, c, d, e, userData);

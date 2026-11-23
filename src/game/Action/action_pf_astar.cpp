@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>    // [FLOODDIAG] diagnostic reporting
 #include <cstdlib>
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour, the neighbour's solid tiles (NOT RETAIL)
 
 // Ghidra decompile uses `uint`/`ushort` for the unsigned grid-index math; alias them
 // so the literal transcription below matches the decompile token-for-token.
@@ -780,7 +781,9 @@ void PathfinderThread::SetCellTerrain(int cell, int terrainType) {
     PathCommandArgs local;
     local.type = 2;
     local.arg1 = cell;
-    local.arg2 = terrainType;
+    // EXT SEAM (NOT RETAIL, ext.neighbour): a tile under the neighbour's building stays blocked for the
+    // path worker whatever this town writes there (a tree felled under it). terrainType when off.
+    local.arg2 = cell >= 0 ? Neighbour::SharedMap::PathTerrain(static_cast<uint32_t>(cell), terrainType) : terrainType;
     local.arg3 = 0;
     if (runInline == 0) {
         EnqueueNode(this, local);

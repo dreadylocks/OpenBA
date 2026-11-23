@@ -37,6 +37,7 @@
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
 #include "system/Value.h"   // ENDGAME B.3.4b System caller batch
 #include "Component/exe_bodies.h"
+#include "ext/neighbour/shared_map.h"   // EXT SEAM (NOT RETAIL, ext.neighbour): shared spreading
 #include "Player/exe_bodies.h"   // PlayerPath_CharComp_f5d0 (0x14009f5d0), the spawn placement test
 
 // ============================================================
@@ -225,6 +226,9 @@ void GrowthComponent::SpawnSubResource(GrowthDescription* cfg) {
     int x = (int)baseX + rng->RandTol(static_cast<int32_t>(tol));
     int y = (int)baseY + rng->RandTol(static_cast<int32_t>(tol));
     if (!(x >= 0 && y >= 0 && x < map->size && y < map->size)) return;
+    // EXT SEAM (NOT RETAIL, ext.neighbour): on a shared map one town spreads each half's plants and the
+    // other takes them from the relay (shared_map.h SpreadsHere). Never false otherwise.
+    if (!Neighbour::SharedMap::SpreadsHere(x, y)) return;
 
     // 0x14011fc99..0x14011fce6: the single-cell placement test 0x14009f5d0 with
     // (map, x, y, 4, [0x140172140] = 0.98f, [0x140172248] = 1000.0f, 0.0f, 0, 0, nullptr);
@@ -269,6 +273,8 @@ void GrowthComponent::SpawnSubResource(GrowthDescription* cfg) {
     ::Object::InternalPtr<ComponentEntity> regArg = newIBP;
     world->m_entityList->RegisterEntity(&regArg,   // 0x1400c48a0
         _entity->_description->_category);
+    // EXT SEAM (NOT RETAIL): the neighbour gets the new plant (not one a closing list just deleted).
+    if (!world->m_entityList->shuttingDown) Neighbour::SharedMap::NotePlanted(newIBP.Get());
 }
 
 // ===== ENDGAME B.3.8 CIT — GrowthComponent as a REAL class (GrowthComponent.h) =====

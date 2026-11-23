@@ -82,6 +82,14 @@ struct Ghost {
 std::map<uint32_t, Ghost> s_ghosts;
 size_t s_shownLogged = 0;   // the count last written to the log
 
+// The log: what we send and what arrives, when it changes (a line at most every 10 s), so a missing
+// villager can be traced to the side that lost it.
+std::string s_sendLogged;
+Clock::time_point s_sendLoggedAt;
+uint64_t s_received = 0;          // walkers messages from the neighbour since Begin
+std::string s_refusedTmpl;        // a template we could not draw, logged once
+size_t s_makeFailed = 0;          // ghosts that could not be made
+
 std::string PathOf(const ::Object::External* x) {
     if (x == nullptr) return std::string();
     const System::Filename p = x->GetPath();
@@ -99,14 +107,24 @@ void SendOurs(Link* link) {
     std::unordered_map<const CitizenComponent*, uint32_t> ids;
     std::map<std::string, std::string> lists;   // template path -> "id,x,y,z,yaw,clip,grp,scale,cloth;..."
     size_t sent = 0;
+    size_t gone = 0, noModel = 0, noTemplate = 0;
     for (int i = 0; i < tm->citizens._size && sent < kMaxSent; ++i) {
         CitizenComponent* c = tm->citizens._data[i].Get();
-        if (c == nullptr || c->_entity.Get() == nullptr || ((c->_entity->_entityFlags >> 10) & 1)) continue;
+        if (c == nullptr || c->_entity.Get() == nullptr || ((c->_entity->_entityFlags >> 10) & 1)) {
+            ++gone;
+            continue;
+        }
         CharacterComponent* ch = c->character.Get();
         ModelComponent* mc = ch != nullptr ? ch->modelComponent.Get() : nullptr;
-        if (mc == nullptr || mc->modelId < 0) continue;   // not in the scene
+        if (mc == nullptr || mc->modelId < 0) {   // not in the scene
+            ++noModel;
+            continue;
+        }
         const std::string tmpl = PathOf(c->_entity->_description);
-        if (tmpl.empty()) continue;
+        if (tmpl.empty()) {
+            ++noTemplate;
+            continue;
+        }
         auto known = s_ids.find(c);
         const uint32_t id = known != s_ids.end() ? known->second : s_nextId++;
         ids[c] = id;
@@ -127,7 +145,16 @@ void SendOurs(Link* link) {
     for (const auto& kv : lists) {
         Message m("walkers");
         m.Set("tmpl", kv.first).Set("list", kv.second);
-        link->Send(m);
+        link->Send(m, /*ephemeral=*/true);   // only the newest positions matter
+    }
+    char line[200];
+    snprintf(line, sizeof line, "%zu of %d citizen(s) in %zu message(s); skipped: %zu gone, %zu not in the scene, "
+             "%zu without a template", sent, tm->citizens._size, lists.size(), gone, noModel, noTemplate);
+    const Clock::time_point now = Clock::now();
+    if (line != s_sendLogged && Seconds(now - s_sendLoggedAt) >= 10.0) {
+        s_sendLogged = line;
+        s_sendLoggedAt = now;
+        fprintf(stderr, "[Neighbour] villagers: sending %s\n", line);
     }
 }
 
@@ -257,6 +284,10 @@ void Begin(bool on) {
 void End() {
     FreeAll(false);
     s_ids.clear();
+    s_sendLogged.clear();
+    s_received = 0;
+    s_refusedTmpl.clear();
+    s_makeFailed = 0;
     s_on = false;
     s_ticked = false;
 }
@@ -284,13 +315,31 @@ bool OnMessage(const Message& m) {
     if (m.type != "walkers") return false;
     if (!s_on) return true;
     std::string tmpl, list;
-    if (!m.Get("tmpl", tmpl) || !m.Get("list", list) || tmpl.empty() || tmpl.size() > 160) return true;
+    if (!m.Get("tmpl", tmpl) || !m.Get("list", list) || tmpl.empty() || tmpl.size() > 160) {
+        if (s_received == 0 && s_refusedTmpl.empty()) {
+            s_refusedTmpl = "?";   // said once
+            fprintf(stderr, "[Neighbour] villagers: a sample from the neighbour without a usable template (%zu chars) "
+                            "or list; ignored\n", tmpl.size());
+        }
+        return true;
+    }
+    if (++s_received == 1)
+        fprintf(stderr, "[Neighbour] villagers: the neighbour's first sample arrived (%s, %zu chars)\n", tmpl.c_str(),
+                list.size());
     ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
     if (f == nullptr) return true;
     ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(tmpl.c_str()));
-    if (!::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())) return true;
-    const ModelDescription* md = desc->FindDescription<ModelDescription>();
-    if (md == nullptr || md->_meshGroups == nullptr || md->_meshGroupCount <= 0) return true;
+    const ModelDescription* md = ::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())
+                                     ? desc->FindDescription<ModelDescription>()
+                                     : nullptr;
+    if (md == nullptr || md->_meshGroups == nullptr || md->_meshGroupCount <= 0) {
+        if (tmpl != s_refusedTmpl) {
+            s_refusedTmpl = tmpl;
+            fprintf(stderr, "[Neighbour] villagers: cannot draw the neighbour's %s (%s)\n", tmpl.c_str(),
+                    md != nullptr ? "no mesh groups" : "no such template here");
+        }
+        return true;
+    }
     const Clock::time_point now = Clock::now();
     size_t at = 0;
     while (at < list.size()) {
@@ -310,7 +359,12 @@ bool OnMessage(const Message& m) {
         if (it == s_ghosts.end()) {
             if (s_ghosts.size() >= kMaxShown) continue;
             Ghost gh;
-            if (!MakeGhost(gh, md, static_cast<int>(v[6]), pos, yaw, scale, cloth, static_cast<int>(v[5]))) continue;
+            if (!MakeGhost(gh, md, static_cast<int>(v[6]), pos, yaw, scale, cloth, static_cast<int>(v[5]))) {
+                if (s_makeFailed++ == 0)
+                    fprintf(stderr, "[Neighbour] villagers: could not make one of the neighbour's (group %d of %d)\n",
+                            static_cast<int>(v[6]), md->_meshGroupCount);
+                continue;
+            }
             gh.start = now;
             gh.seen = now;
             s_ghosts[id] = gh;

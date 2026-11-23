@@ -33,6 +33,7 @@
 #include "boot_state_watchdog.h"
 
 #include "options.h"
+#include "devloop_harness.h"   // DevLoopHarness_Attended: a dev loop game in play is attended
 #include "platform/common/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
 
 #include <dirent.h>
@@ -56,6 +57,13 @@
 namespace BootState {
 
 namespace {
+
+// Nobody is watching: an unattended boot, until a dev loop game reaches play (DevLoopHarness_Attended):
+// from then on its window is a player's, and a modal there (a Load that asks about mods) waits for them.
+bool Unattended() {
+    return Opt().unattendedBoot && !DevLoopHarness_Attended();
+}
+
 
 std::atomic<int>      g_startupComplete{0};
 std::atomic<int>      g_quitting{0};
@@ -252,13 +260,13 @@ void* WatchdogThread(void*) {
                 "frame for %us (budget %us, frame=%d). Writing standalone_hang.log "
                 "(all-thread stacks).%s\n",
                 phase, uptimeSec, staleSec, budget, static_cast<int32_t>(frame),
-                Opt().unattendedBoot ? " Unattended run: terminating with exit code 4."
+                Unattended() ? " Unattended run: terminating with exit code 4."
                                      : " Attended run: NOT terminating.");
             std::fflush(stderr);
 
             WriteHangDump(phase, uptimeSec, frame, staleSec, budget);
 
-            if (Opt().unattendedBoot) {
+            if (Unattended()) {
                 std::fflush(stdout);
                 std::fflush(stderr);
                 _exit(4);

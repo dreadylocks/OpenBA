@@ -26,16 +26,51 @@ const withToken = (roomName, first) => {
 };
 const check = (ok, what) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) failures++; };
 
+// The relay sends long lists in batches (natBatch, roadBatch, roadsOff); the checks below read them as
+// the one-a-tile messages they stand for.
+function expand(m) {
+  if (m.t === "natBatch") {
+    const tmpls = m.tmpls.split("\n");
+    return m.list.split(";").filter(Boolean).map((e) => {
+      const [cell, op, k, grp, vr] = e.split(",").map(Number);
+      const out = { t: "nat", op: op === 1 ? "add" : "rm", cell, tmpl: tmpls[k], batched: true };
+      if (Number.isInteger(grp) && Number.isInteger(vr) && e.split(",").length === 5) { out.grp = grp; out.var = vr; }
+      if (m.replay) out.replay = true;
+      return out;
+    });
+  }
+  if (m.t === "roadBatch") {
+    const tmpls = m.tmpls.split("\n");
+    const mats = m.mats ? m.mats.split("\n") : [];
+    return m.list.split(";").filter(Boolean).map((e) => {
+      const [cell, type, tt, ti, mi] = e.split(",").map(Number);
+      const out = { t: "road", cell, type, tt, tmpl: tmpls[ti], batched: true };
+      if (mi >= 0) out.mat = mats[mi];
+      return out;
+    });
+  }
+  if (m.t === "roadsOff") {
+    return m.cells.split(",").filter(Boolean).map((c) => {
+      const out = { t: "road", cell: Number(c), off: true, batched: true };
+      if (m.replay) out.replay = true;
+      return out;
+    });
+  }
+  return [m];
+}
+
 function town(name, pass, lastSeq = 0) {
   const ws = new WebSocket(`${server}/room/${encodeURIComponent(room)}`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(room, { ...HS, t: "hello", room, pass, name, lastSeq }))));
   ws.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
-    keep(room, name, m);
-    inbox.push(m);
-    for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    const raw = JSON.parse(ev.data);
+    keep(room, name, raw);
+    for (const m of expand(raw)) {
+      inbox.push(m);
+      for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    }
   });
   const closed = new Promise((r) => ws.addEventListener("close", (ev) => r(ev)));
   return {
@@ -128,10 +163,12 @@ function opener(roomName, first) {
   ws.addEventListener("open", () => ws.send(JSON.stringify(withToken(roomName, { ...HS, ...first }))));
   const closed = new Promise((r) => ws.addEventListener("close", (ev) => r(ev)));
   ws.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
-    keep(roomName, first.name, m);
-    inbox.push(m);
-    for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    const raw = JSON.parse(ev.data);
+    keep(roomName, first.name, raw);
+    for (const m of expand(raw)) {
+      inbox.push(m);
+      for (const w of [...waiters]) if (w.pred(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+    }
   });
   return {
     ws, inbox, closed,
@@ -187,6 +224,11 @@ check(told && told.seat === 0, "the neighbour is told about the claim");
 joiner.ws.send(JSON.stringify({ t: "claim", id: "cl2", rects: "11,11,2,2" }));
 const cl2 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl2"));
 check(cl2 && cl2.ok === false, "a claim overlapping the neighbour's land is refused");
+// The building that claim was for (both towns placed there at once; the neighbour won): not mirrored.
+joiner.ws.send(JSON.stringify({ t: "build", id: "lost1", tmpl: "Template\\WoodHouse.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 11, ty: 11, tw: 2, th: 2, built: 25 }));
+const br = await tryWait(joiner.wait((m) => m.t === "buildRefused" && m.id === "lost1"));
+await new Promise((r) => setTimeout(r, 300));
+check(br && !creator.inbox.some((m) => m.t === "build" && m.id === "lost1"), "a building on the neighbour's land is refused, not mirrored");
 joiner.ws.send(JSON.stringify({ t: "claim", id: "cl3", rects: "40,40,2,2;50,50,1,1" }));
 const cl3 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl3"));
 check(cl3 && cl3.ok === true, "a claim elsewhere is granted");
@@ -217,31 +259,55 @@ const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"
 check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
 
 // M3: solid tiles, shared roads and resource changes.
-creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 50, ty: 50, tw: 2, th: 2, built: 100, bm: "1101", dec: "50,50,2,2,90,0" }));
+creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 60, ty: 60, tw: 2, th: 2, built: 100, bm: "1101", dec: "60,60,2,2,90,0" }));
 const bb2 = await tryWait(rejoin.wait((m) => m.t === "build" && m.id === "b2"));
 check(bb2 && bb2.bm === "1101", "a building's solid tiles are passed on");
-check(bb2 && bb2.dec === "50,50,2,2,90,0", "and its ground (footprint, rotation, decal state)");
-creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+check(bb2 && bb2.dec === "60,60,2,2,90,0", "and its ground (footprint, rotation, decal state)");
+creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
 const rd = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70000));
-check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\RoadDirt.rsc", "a finished road tile is passed on");
-creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "Template\RoadStone.rsc" }));
+check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\\RoadDirt.rsc", "a finished road tile is passed on");
+creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "Template\\RoadStone.rsc" }));
 await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001));
 creator.ws.send(JSON.stringify({ t: "road", cell: 70001, off: true }));
 check(!!(await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001 && m.off === true))), "a removed road tile is passed on");
+// A town taking up the NEIGHBOUR's road in its own copy (the Remove tool over it) never takes it up in
+// the neighbour's game: the relay passes on only a town's own road removals.
+rejoin.ws.send(JSON.stringify({ t: "road", cell: 70000, off: true }));
+await new Promise((r) => setTimeout(r, 300));
+check(!creator.inbox.some((m) => m.t === "road" && m.cell === 70000 && m.off === true), "a town cannot take up the neighbour's road");
 creator.ws.send(JSON.stringify({ t: "road", cell: -4, type: 0, tt: 6, tmpl: "" }));
 check(!!(await tryWait(creator.wait((m) => m.t === "error" && /road/.test(m.why)))), "a malformed road is refused");
-creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\Tree.rsc" }));
+// A mod's road type (Colonial Charter's run past a dozen) with its material, kept and passed on.
+creator.ws.send(JSON.stringify({ t: "road", cell: 70100, type: 7, tt: 6, tmpl: "", mat: "CC\\Material\\RoadGravel.rsc" }));
+const modRoad = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70100));
+check(modRoad && modRoad.type === 7 && modRoad.mat === "CC\\Material\\RoadGravel.rsc", "a mod's road type is passed on with its material");
+creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\\Tree.rsc" }));
 const nr = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1234));
 check(nr && nr.op === "rm", "a felled tree is passed on");
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 1235, tmpl: "Template\\Tree.rsc", grp: 1, var: 3 }));
+const na = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1235));
+check(na && na.op === "add" && na.grp === 1 && na.var === 3, "a new plant is passed on with its look");
 rejoin.ws.close();
 await new Promise((r) => setTimeout(r, 300));
-creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\Tree.rsc" }));
+creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\\Tree.rsc", grp: 2, var: 5 }));
+// Roads taken up while the neighbour is away reach it when it comes back (it holds them in its save);
+// one laid again meanwhile does not.
+creator.ws.send(JSON.stringify({ t: "road", cell: 70002, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70002, off: true }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, off: true }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\\RoadDirt.rsc" }));
 await new Promise((r) => setTimeout(r, 300));
 const rejoin2 = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));
-check(queued && queued.op === "add", "a resource change waits for a town that is away");
+check(queued && queued.op === "add" && queued.grp === 2 && queued.var === 5, "a resource change waits for a town that is away (a plant with its look)");
 const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
-check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001), "a town joining gets the neighbour's roads (not removed ones)");
+check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001 && !m.off), "a town joining gets the neighbour's roads (not removed ones)");
+const keptMod = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70100));
+check(keptMod && keptMod.mat === "CC\\Material\\RoadGravel.rsc", "and a mod road keeps its material");
+const awayOff = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70002 && m.off === true));
+check(!!awayOff, "a road taken up while the town was away is taken up on its return");
+check(!rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70003 && m.off === true), "but not one laid again meanwhile");
 rejoin2.ws.close();
 
 creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();
@@ -270,6 +336,7 @@ const bbuild = await tryWait(hsB.wait((m) => m.t === "compat" && /build/.test(m.
 check(bw && bw.seat === 1 && !!bbuild && bwarn && /Roads\.pkm/.test(bwarn.warn), "another build and other mods only warn the joiner");
 check(!!(await tryWait(hsA.wait((m) => m.t === "compat" && /Roads\.pkm/.test(m.warn)))), "and the neighbour is warned too");
 hsA.ws.send(JSON.stringify({ t: "hash", hash: "1234abcd" }));
+await new Promise((r) => setTimeout(r, 500));   // A's land first (over the internet B's could overtake it)
 hsB.ws.send(JSON.stringify({ t: "hash", hash: "9999aaaa" }));
 const el = await tryWait(hsB.wait((m) => m.t === "error"));
 check(el && el.fatal === true && /same land/.test(el.why), "a town that built other land is refused");
@@ -331,14 +398,64 @@ fa2.ws.send(JSON.stringify({ t: "road", cell: 4321, type: 1, tt: 0, tmpl: "Templ
 await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && !m.off));
 fa2.ws.close(1000, "bye");
 await fa2.closed;
-fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 777, tmpl: "Template\\Tree.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 777, tmpl: "Template\\Tree.rsc", grp: 0, var: 4 }));
 await new Promise((r) => setTimeout(r, 300));
 const fa3 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
 const rgone = await tryWait(fb2.wait((m) => m.t === "unbuild" && m.id === "rb1"));
 const runpaved = await tryWait(fb2.wait((m) => m.t === "road" && m.cell === 4321 && m.off === true));
 const kept = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 777));
 check(!!rgone && !!runpaved && !!kept, "a town loading a save drops what its seat held, but keeps the changes waiting for it");
-for (const x of [fa3, fb2]) x.ws.close();
+// A resource change that reached the town live (and so sits in no queue) comes again when it loads a
+// save (which may be older than that change), its own changes too; a plain reconnect does not get them.
+fb2.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 4097, tmpl: "Template\\Tree.rsc" }));
+const live = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 4097 && !m.replay));
+fa3.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 12, tmpl: "Template\\Rock.rsc" }));
+await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 12));
+fa3.ws.close(1000, "bye");
+await fa3.closed;
+// A road the neighbour laid and took up again while this town was here (so in no queue) is taken up
+// again when the town loads a save, which may still have it; one laid again since is not.
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5555, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5555, off: true }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, off: true }));
+fb2.ws.send(JSON.stringify({ t: "road", cell: 5556, type: 1, tt: 0, tmpl: "Template\\Road.rsc" }));
+await new Promise((r) => setTimeout(r, 400));
+const fa4 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly", reload: true });
+const again = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 4097 && m.replay === true));
+const own = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 12 && m.replay === true));
+const latest = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 777 && m.replay === true));
+check(!!live && again && again.op === "rm" && again.tmpl === "Template\\Tree.rsc" && own && own.op === "rm" &&
+      latest && latest.op === "add" && latest.var === 4, "a town loading a save gets both towns' resource changes again");
+const roadAgain = await tryWait(fa4.wait((m) => m.t === "road" && m.cell === 5555 && m.off === true && m.replay === true));
+check(!!roadAgain && !fa4.inbox.some((m) => m.t === "road" && m.cell === 5556 && m.off === true),
+      "a town loading a save gets the neighbour's road removals again (not a road laid again since)");
+fa4.ws.close(1000, "bye");
+await fa4.closed;
+const fa5 = opener(freshRoom, { t: "hello", pass: "pw4", name: "Firstly" });
+await tryWait(fa5.wait((m) => m.t === "mirrorEnd"));
+await new Promise((r) => setTimeout(r, 300));
+check(!fa5.inbox.some((m) => m.t === "nat" && m.replay), "a plain reconnect is not sent the record");
+fa5.ws.close();
+fb2.ws.close();
+
+// A lobby probe (the lobby's own check of a room just before the game connects) is not announced to
+// the neighbour, arriving or leaving, and does not replace the town's game line.
+const probeRoom = `probetest-${Date.now()}`;
+const prA = opener(probeRoom, { t: "create", pass: "pw5", name: "Prober", ...settings });
+await tryWait(prA.wait((m) => m.t === "welcome"));
+const prB = opener(probeRoom, { t: "hello", pass: "pw5", name: "Probed", join: true });
+await tryWait(prB.wait((m) => m.t === "welcome"));
+await tryWait(prA.wait((m) => m.t === "peer" && m.name === "Probed" && m.online === true));
+const seenBefore = prA.inbox.filter((m) => m.t === "peer").length;
+const prP = opener(probeRoom, { t: "hello", pass: "pw5", name: "Probed", join: true, probe: true });
+const prPw = await tryWait(prP.wait((m) => m.t === "welcome"));
+prP.ws.close(1000, "bye");
+await prP.closed;
+await new Promise((r) => setTimeout(r, 400));
+check(prPw && prPw.seat === 1 && prA.inbox.filter((m) => m.t === "peer").length === seenBefore &&
+      prB.ws.readyState === WebSocket.OPEN, "a lobby probe is not announced and leaves the game's line be");
+for (const x of [prA, prB]) x.ws.close();
 
 // The Upgrade value is case-insensitive (RFC 6455 4.2.1): macOS's Network.framework sends "WebSocket".
 const upgradeStatus = await new Promise((resolve) => {

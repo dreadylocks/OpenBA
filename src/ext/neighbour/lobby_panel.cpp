@@ -137,6 +137,12 @@ T* LoadAs(const std::string& path) {
     return ::Object::IsDerivedFromNullSafe(x, T::TypeId()) ? x : nullptr;
 }
 
+// The room's map size is a row of the terrain's size table; a game without the mod that adds a row
+// (Colonial Charter's larger maps) must refuse the room, not read past the table.
+bool HasSizeRow(const TerrainGenerator* tg, int row) {
+    return row >= 0 && row < tg->sizeRows.GetSize();
+}
+
 class LobbyDialog final : public UI::DialogInstance {
 public:
     LobbyDialog(UI::UserInterface* ui, const UI::Dialog* dialog, MainMenuDialog* menu, std::string note)
@@ -522,7 +528,7 @@ private:
         MapGenerator* mg = LoadAs<MapGenerator>(j.settings.start);
         TerrainGenerator* tg = LoadAs<TerrainGenerator>(j.settings.terrain);
         ClimateGenerator* cg = LoadAs<ClimateGenerator>(j.settings.climate);
-        if (mg == nullptr || tg == nullptr || cg == nullptr) {
+        if (mg == nullptr || tg == nullptr || cg == nullptr || !HasSizeRow(tg, j.settings.size)) {
             Problem("This game doesn't have the room's map (" + DescribeSettings(j.settings) +
                     "). Both games need the same version and mods.");
             return false;
@@ -652,7 +658,7 @@ void Lobby_RoomSettingsForJoin(uint32_t* seed, uint32_t* terrainSize, bool* disa
     MapGenerator* mg = LoadAs<MapGenerator>(rs.start);
     TerrainGenerator* tg = LoadAs<TerrainGenerator>(rs.terrain);
     ClimateGenerator* cg = LoadAs<ClimateGenerator>(rs.climate);
-    if (mg == nullptr || tg == nullptr || cg == nullptr) {
+    if (mg == nullptr || tg == nullptr || cg == nullptr || !HasSizeRow(tg, rs.size)) {
         fprintf(stderr, "[Neighbour] this game does not have the room's map settings (%s)\n",
                 DescribeSettings(rs).c_str());
         return;

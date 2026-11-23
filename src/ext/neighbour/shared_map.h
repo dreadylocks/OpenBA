@@ -49,6 +49,10 @@ void Stop();
 // EXT SEAMs: true when the neighbour holds the tile (only ever in a lobby game).
 bool PeerHolds(int x, int y);
 bool PeerHoldsCell(uint32_t cellIdx);
+// EXT SEAM in PathfinderThread::SetCellTerrain: the terrain type the path worker gets for `cell`. A tile
+// under a solid part of the neighbour's building stays blocked whatever this town writes there (a tree
+// felled under it, a field's soil); `terrainType` otherwise, and always when the extension is off.
+int PathTerrain(uint32_t cell, int terrainType);
 
 // EXT SEAMs at the places structures are made: claim + mirror the entity's footprint.
 void NoteStructure(ComponentEntity* entity);
@@ -74,10 +78,23 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType);
 void NoteRemoved(ComponentEntity* entity);
 // EXT SEAM in CreateNaturalResource: a forester planted a sapling.
 void NotePlanted(ComponentEntity* entity);
+// Nature spreading by itself (a grown plant seeding a new one: GrowthComponent::SpawnSubResource,
+// SpawnComponent::DoSpawn) is run by one town per half of the map, so the two copies of the land grow
+// the same forest: the town in seat 0 spreads the west half (x < size / 2), seat 1 the east; the
+// other game takes those plants from the relay (NotePlanted / "nat add"). False where this game must
+// not spread: the other half, a tile the neighbour holds, or a shared map whose seat is not known yet
+// (a loaded game before the relay's welcome). Always true outside a shared map and before play (world
+// generation must stay the same in both games).
+bool SpreadsHere(int x, int y);
+// This town's seat in the room (the relay's welcome), for SpreadsHere.
+void SetSeat(int seat);
 
 // From Neighbour::BeginFrame: send what is queued, notice structures that are gone.
 void Tick(Link* link, uint64_t frame);
 // The relay joined us: send every structure again (the relay keeps the latest per id).
+// A welcome from the relay (a join or a reconnect), before the neighbour's land and structures arrive:
+// what this game holds of them from before is forgotten at the end of that list (mirrorEnd).
+void OnWelcome();
 void OnJoined(Link* link);
 // A loaded game's first join (hello `reload`): the relay forgets what this town's seat held, since the
 // save may be older than it. Once the neighbour's land is in (its `mirrorEnd`), this town's roads go

@@ -26,6 +26,7 @@
 #include "boot_state_watchdog.h"
 #include "autostart.h"
 #include "stress_harness.h"
+#include "drive_harness.h"   // DriveHarness_Install: BANISHED_DRIVE, the scripted input
 #include "sampler.h"
 #include "load_time.h"   // [LoadTime] stamps (NOT RETAIL, print-only; block LOADSTAMP)
 #include "hw_watch.h"
@@ -1035,6 +1036,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     // The stress town's own state (home-loss watch, the [Stress] banner).
     StressHarness_Init();
 
+    // BANISHED_DRIVE: a script in a file plays as the mouse and keyboard (src/diag/drive_harness.cpp).
+    DriveHarness_Install();
+
     printf("[Standalone] Banished Reimplementation - Standalone EXE\n");
     printf("[Standalone] Build: %s %s\n", __DATE__, __TIME__);
 
@@ -1183,6 +1187,7 @@ int main(int argc, char** argv) {
     CrashHandler_OpenLog();
 
     StressHarness_Init();
+    DriveHarness_Install();   // BANISHED_DRIVE (src/diag/drive_harness.cpp), as in WinMain
 
     printf("[Standalone] Banished Reimplementation - Standalone EXE (POSIX)\n");
     printf("[Standalone] Build: %s %s\n", __DATE__, __TIME__);

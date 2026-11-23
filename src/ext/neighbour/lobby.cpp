@@ -15,6 +15,7 @@ namespace {
 
 constexpr size_t kMaxRooms = 500;
 constexpr size_t kMaxPathChars = 160;
+constexpr int64_t kMaxSizeRow = 64;   // the relay's bound on "size" (index.js kIntSettings)
 
 // Run one conversation: start a Link with `hello`, collect messages until `done` says so (true =
 // finished) or the time runs out. A refusal ({"t":"error"}) ends it with the relay's reason.
@@ -99,7 +100,11 @@ bool ReadSettings(const Message& m, RoomSettings& out) {
     RoomSettings s;
     int64_t size = 0, disasters = 0;
     if (!m.GetInt("seed", s.seed) || !m.GetInt("size", size) || !m.GetInt("disasters", disasters)) return false;
-    if (s.seed < 0 || s.seed > 0xFFFFFFFFll || size < 0 || size > 2 || disasters < 0 || disasters > 1) return false;
+    // size is a row of the terrain's size table: 0..2 in the game's own terrains, more with a mod's (Colonial
+    // Charter's larger maps); the relay's bound. A joiner whose terrain lacks the row refuses (lobby_panel.cpp).
+    if (s.seed < 0 || s.seed > 0xFFFFFFFFll || size < 0 || size > kMaxSizeRow || disasters < 0 || disasters > 1) {
+        return false;
+    }
     s.size = static_cast<int>(size);
     s.disasters = disasters != 0;
     std::string terrain;
@@ -113,10 +118,12 @@ bool ReadSettings(const Message& m, RoomSettings& out) {
 
 std::string DescribeSettings(const RoomSettings& s) {
     static const char* kSizes[] = {"Small", "Medium", "Large"};
-    const char* size = (s.size >= 0 && s.size <= 2) ? kSizes[s.size] : "?";
+    // A mod's larger sizes have names only its terrain's string table knows: number them on from Large.
+    const std::string size = (s.size >= 0 && s.size <= 2) ? std::string(kSizes[s.size])
+                                                          : "Size " + std::to_string(s.size + 1);
     const std::string terrain = s.map == Continents::kMapContinents ? "Continents (" + ShortName(s.terrain) + ")"
                                                                      : ShortName(s.terrain);
-    return std::string(size) + " map, " + terrain + ", " + ShortName(s.climate) + ", " + ShortName(s.start) +
+    return size + " map, " + terrain + ", " + ShortName(s.climate) + ", " + ShortName(s.start) +
            " start, disasters " + (s.disasters ? "on" : "off");
 }
 
@@ -171,7 +178,8 @@ bool JoinRoom(TransportFactory factory, const std::string& server, const std::st
               const LocalInfo& info, RoomJoin& out, std::string& why, uint32_t timeoutMs) {
     Message hello("hello");
     hello.SetInt("v", kProtocolVersion).Set("room", room).Set("pass", pass).Set("name", town)
-         .SetInt("lastSeq", 0).SetBool("join", true);
+         .SetInt("lastSeq", 0).SetBool("join", true)
+         .SetBool("probe", true);   // the game's own line follows: the neighbour is not told of this one
     if (!token.empty()) hello.Set("token", token);
     AddHandshake(hello, info);
     RoomJoin j;

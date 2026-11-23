@@ -6,6 +6,7 @@
 
 #include "graphics/Scene.h"
 #include "graphics/Mesh.h"
+#include "graphics/Material.h"   // Graphics::MaterialInstance: a road's material by path
 #include "math/Math.h"
 
 #include "ext/neighbour/shared_map.h"
@@ -30,6 +31,11 @@
 #include "Component/DecalDescription.h"
 #include "Component/GrowthComponent.h"
 #include "Component/MapDescription.h"
+#include "Component/ClearResourceComponent.h"   // ScanExisting: not a structure (the removal tool's marks)
+#include "Component/ClearAreaComponent.h"
+#include "Component/RawMaterialComponent.h"     // goods dropped on the ground
+#include "Component/AnimalComponent.h"
+#include "Component/BuildComponent.h"        // a structure still being built (a refused one is taken back)
 #include "Action/PathSearch.h"
 #include "Game/PathfinderThread.h"
 #include "Game/WorldGeometry.h"
@@ -59,6 +65,8 @@ constexpr size_t   kMaxPending = 20000;     // road / resource messages waiting 
 // at most kSendRate a second, kSendBurst at once; what does not fit waits for the next frame.
 constexpr double   kSendRate = 40.0;
 constexpr double   kSendBurst = 120.0;
+// The link's queue length under which the shared map hands it more (see Tick's backpressure).
+constexpr size_t   kLinkLowWater = 8;
 
 bool s_on = false;
 int  s_dim = 0;
@@ -70,7 +78,12 @@ struct Mine {
     Message                              build;   // the "build" message
     TileRect                             rect;
     int                                  built = -1;   // the stage last reported (percent)
+    // Placed in this session's play (not a load's scan), and when: only such a site, a few seconds old,
+    // is taken back when the relay refuses it (buildRefused); too young for anything to be hauled to it.
+    bool                                  placedInPlay = false;
+    std::chrono::steady_clock::time_point placedAt;
 };
+constexpr double kTakeBackSeconds = 5.0;   // a refusal comes back within a round trip; nothing hauled yet
 
 // How far along a structure's model is, in percent: its mesh index in the group's stages
 // (foundation first, the finished building last). No model or one stage: 100.
@@ -104,14 +117,17 @@ struct Mirror {
     bool                    inScene = false;
     int                     decalId = -1;   // its ground: a WorldGeometry decal slot
     std::vector<uint32_t>   solid;   // the cells marked solid for the path worker
+    uint64_t                join = 0;   // the join (s_joinCount) whose structure list last named it
 };
 std::map<std::string, Mirror> s_mirrors;
+uint64_t s_joinCount = 0;   // joins to the relay this game (OnWelcome)
 std::vector<uint8_t> s_solidRef;            // per cell: how many mirrors hold it solid
 
 // M3.
 bool s_live = false;                        // the world is built (the first Tick): changes are news
+int s_seat = -1;                            // this town's seat in the room (the relay's welcome); -1 not yet
 bool s_applying = false;                    // applying the neighbour's change: not news
-std::string s_roadTmpl[2];                  // the road tool's template per road type
+std::map<int, std::string> s_roadTmpl;      // the road tool's template per road type (a mod adds types)
 // The game's own road tools, per road type (CreateRoadDescription's bool: 0 stone, 1 dirt): sent when
 // this game has not used the road tool since it was loaded.
 const char* const kRoadTmplDefault[2] = {"Template\\StoneRoad.rsc:resource", "Template\\DirtRoad.rsc:resource"};
@@ -143,9 +159,9 @@ bool EnsureGrid() {
 
 void MarkPeer(const std::vector<TileRect>& rects, uint8_t v) {
     if (!EnsureGrid()) return;
-    for (const TileRect& r : rects)
-        for (int y = r.y; y < r.y + r.h && y < s_dim; ++y)
-            for (int x = r.x; x < r.x + r.w && x < s_dim; ++x)
+    for (const TileRect& r : rects)   // clipped to the map: a bad rect from the wire never writes outside
+        for (int y = std::max(r.y, 0); y < r.y + r.h && y < s_dim; ++y)
+            for (int x = std::max(r.x, 0); x < r.x + r.w && x < s_dim; ++x)
                 s_peer[static_cast<size_t>(y) * s_dim + x] = v;
 }
 
@@ -174,6 +190,7 @@ void MarkSolid(uint32_t cell, bool on) {
         if (ref++ == 0) pf->SetCellTerrain(static_cast<int>(cell), kBlockedType);
     } else {
         if (ref == 0) return;
+        // Count down first: PathTerrain lets the map's real type through once nothing holds the tile.
         if (--ref == 0) pf->SetCellTerrain(static_cast<int>(cell), map->cells.GetData()[cell].terrainType);
     }
 }
@@ -206,8 +223,8 @@ void ClearNatureUnder(const TileRect& r) {
     Map* map = TheMap();
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr) return;
     std::vector<ComponentEntity*> doomed;
-    for (int y = r.y; y < r.y + r.h && y < map->size; ++y) {
-        for (int x = r.x; x < r.x + r.w && x < map->size; ++x) {
+    for (int y = std::max(r.y, 0); y < r.y + r.h && y < map->size; ++y) {
+        for (int x = std::max(r.x, 0); x < r.x + r.w && x < map->size; ++x) {
             const MapCell& cell = map->cells.GetData()[static_cast<size_t>(y) * map->size + x];
             for (ComponentEntity* e : {cell.occupant.Get(), cell.blocker.Get()}) {
                 if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
@@ -300,6 +317,7 @@ void AddMirror(const Message& m) {
         mir.inScene = true;
     }
     mir.decalId = AddMirrorDecal(desc, m, grp);
+    mir.join = s_joinCount;
     if (mir.decalId >= 0) ++s_applied.grounds;
     s_mirrors[id] = mir;
 
@@ -332,18 +350,76 @@ void AddMirror(const Message& m) {
     }
 }
 
+// The natural resources by tile, for a neighbour's removal its tile's slots do not hold; built at most once
+// a frame (s_frame, from Tick), on the first such removal.
+uint64_t s_frame = 0;
+uint64_t s_natIndexFrame = ~0ull;
+std::unordered_multimap<int, ComponentEntity*> s_natIndex;
+
+// Nature traffic, for the log (LogNature): what this town sent and what came of the neighbour's.
+struct NatStats {
+    uint64_t sentAdds = 0, sentRms = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
+    std::map<std::string, int> missByTmpl;
+};
+NatStats s_nat;
+std::string s_natLogged;
+
 void Queue(const Message& m) {
-    if (s_pending.size() >= kMaxPending) s_pending.erase(s_pending.begin());
+    if (s_pending.size() >= kMaxPending) {
+        s_pending.erase(s_pending.begin());
+        ++s_nat.dropped;
+    }
+    if (m.type == "nat") {
+        if (m.GetOr("op", "") == "add") ++s_nat.sentAdds;
+        else ++s_nat.sentRms;
+    }
     s_pending.push_back(m);
     ++s_waitingAdds;
+}
+
+void LogNature() {
+    std::string top;
+    std::vector<std::pair<int, std::string>> misses;
+    for (const auto& kv : s_nat.missByTmpl) misses.emplace_back(kv.second, kv.first);
+    std::sort(misses.rbegin(), misses.rend());
+    for (size_t i = 0; i < misses.size() && i < 4; ++i)
+        top += (i ? ", " : "") + misses[i].second + " x" + std::to_string(misses[i].first);
+    char line[600];
+    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s), %llu dropped (queue full); of the neighbor's "
+             "removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
+             static_cast<unsigned long long>(s_nat.sentAdds), static_cast<unsigned long long>(s_nat.sentRms),
+             static_cast<unsigned long long>(s_nat.dropped), static_cast<unsigned long long>(s_nat.rmByScan),
+             static_cast<unsigned long long>(s_nat.rmMiss), top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
+    if (line == s_natLogged) return;
+    s_natLogged = line;
+    fprintf(stderr, "[Neighbour] nature: %s\n", line);
 }
 
 // ---- M3: roads ----------------------------------------------------------------------------------
 
 // The template sent with a road of this type: the road tool's, or the game's own road of that type.
+// A road type is CreateRoadDescription's byte, which retail's roads keep at 0 (stone) and 1 (dirt); a mod's
+// roads use more (Colonial Charter's run past a dozen), the same on both sides with the same mods.
 std::string RoadTemplate(uint8_t type) {
-    if (type > 1) return std::string();
-    return s_roadTmpl[type].empty() ? std::string(kRoadTmplDefault[type]) : s_roadTmpl[type];
+    auto it = s_roadTmpl.find(type);
+    if (it != s_roadTmpl.end() && !it->second.empty()) return it->second;
+    return type <= 1 ? std::string(kRoadTmplDefault[type]) : std::string();
+}
+
+// The material the finished road of this type is drawn with (WorldGeometry's batch material, which the
+// save keeps): what the neighbour loads when it does not know the template (a loaded game whose road tool
+// has not been used since).
+std::string RoadMaterial(uint8_t type) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    WorldGeometry* wg = g != nullptr ? g->m_worldGeometry : nullptr;
+    if (wg == nullptr || wg->_batchMaterials.data == nullptr || type >= wg->_batchMaterials.size) return std::string();
+    return PathOf(wg->_batchMaterials.data[type]);
+}
+
+void SetRoadLook(Message& r, uint8_t type) {
+    r.Set("tmpl", RoadTemplate(type));
+    const std::string mat = RoadMaterial(type);
+    if (!mat.empty()) r.Set("mat", mat);
 }
 
 // A loaded game's roads, sent again (ExpectReload): every road tile of this town's -- a road here on land
@@ -363,12 +439,12 @@ void ScanRoads() {
                 if (runStart < 0) runStart = x;
                 ++claimed;
                 const MapCell& c = cells[i];
-                if (c.field_0x2B != 0x80 && c.field_0x2A <= 1) {
+                if (c.field_0x2B != 0x80) {
                     Message r("road");
                     r.SetInt("cell", static_cast<int64_t>(i))
                      .SetInt("type", c.field_0x2A)
-                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f))
-                     .Set("tmpl", RoadTemplate(c.field_0x2A));
+                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f));
+                    SetRoadLook(r, c.field_0x2A);
                     Queue(r);
                     ++sent;
                 }
@@ -425,6 +501,11 @@ void ApplyRoad(const Message& m) {
         if (::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId()))
             if (const MapDescription* md = desc->FindDescription<MapDescription>()) tt = md->_cellType;
     }
+    // The same road already here (a replay after a load, or a re-send after a reconnect): nothing to do.
+    if (type >= 0 && type <= 254 && c.field_0x2A == static_cast<uint8_t>(type) && c.field_0x2B != 0x80) {
+        s_applying = false;
+        return;
+    }
     ComponentEntity* standing = c.blocker.Get();
     const bool ours = standing != nullptr && standing->FindComponent<NaturalResourceComponent>() == nullptr;
     // Not where something of ours stands, not over a road as good, not over one being built.
@@ -441,6 +522,14 @@ void ApplyRoad(const Message& m) {
     if (wg->_batchMaterials.size <= type || wg->_batchMaterials.data == nullptr ||
         wg->_batchMaterials.data[type] == nullptr) {
         Graphics::MaterialInstance* decal = RoadDecal(tmpl);
+        if (decal == nullptr) {   // a template this game does not know: the material itself
+            const std::string mat = m.GetOr("mat", "");
+            ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
+            if (!mat.empty() && mat.size() <= 200 && f != nullptr) {
+                Graphics::MaterialInstance* mi = f->FindOrLoadAs<Graphics::MaterialInstance>(System::Filename(mat.c_str()));
+                if (::Object::IsDerivedFromNullSafe(mi, Graphics::MaterialInstance::TypeId())) decal = mi;
+            }
+        }
         if (decal == nullptr) {
             ++s_applied.refused;
             s_lastRefusal = "a road of a kind this game does not know";
@@ -479,6 +568,9 @@ void ApplyNat(const Message& m) {
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr || !m.GetInt("cell", cell) || cell < 0 ||
         cell >= static_cast<int64_t>(map->size) * map->size || !m.Get("op", op) || !m.Get("tmpl", tmpl))
         return;
+    // `replay`: the relay's whole record, sent again after a load (the change may be in this copy already).
+    bool replay = false;
+    m.GetBool("replay", replay);
     const MapCell& c = map->cells.GetData()[cell];
     if (op == "rm") {
         // The same resource here: a natural resource of that template whose origin is the cell.
@@ -491,11 +583,40 @@ void ApplyNat(const Message& m) {
             ++s_applied.removed;
             return;
         }
+        // Not in the tile's occupant / blocker slots (a plant that does not hold its tile, a wild herb):
+        // look for it among the natural resources, indexed by tile once a frame (a load's replay brings
+        // thousands of removals at once, most of them for plants this copy no longer has).
+        if (s_natIndexFrame != s_frame) {
+            s_natIndexFrame = s_frame;
+            s_natIndex.clear();
+            const auto& all = g->m_entityList->masterArray;
+            for (int i = 0; i < all._size; ++i) {
+                ComponentEntity* e = all._data[i].Get();
+                if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+                const int at = CellOf(e);
+                if (at >= 0) s_natIndex.emplace(at, e);
+            }
+        }
+        const auto range = s_natIndex.equal_range(static_cast<int>(cell));
+        for (auto it = range.first; it != range.second; ++it) {
+            ComponentEntity* e = it->second;
+            if (((e->_entityFlags >> 10) & 1) || PathOf(e->_description) != tmpl) continue;
+            s_quiet.insert(e);
+            g->m_entityList->QueueDestroy(&e);
+            ++s_applied.removed;
+            if (!replay) ++s_nat.rmByScan;
+            return;
+        }
+        if (!replay) {
+            ++s_nat.rmMiss;
+            if (s_nat.missByTmpl.size() < 64 || s_nat.missByTmpl.count(tmpl)) ++s_nat.missByTmpl[tmpl];
+        }
         return;
     }
     if (op != "add") return;
     // A sapling, as the game's spreading plants one: on a free cell only.
     if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF) {
+        if (replay) return;   // most likely the sapling itself, grown or not
         ++s_applied.refused;
         s_lastRefusal = "a sapling on a tile that is taken";
         return;
@@ -518,9 +639,73 @@ void ApplyNat(const Message& m) {
     s_applying = true;
     nr->PlaceAtCell(static_cast<int>(cell));
     growth->SetProgress(0.0f);
+    int64_t grp = -1, var = -1;
+    if (m.GetInt("grp", grp) && m.GetInt("var", var) && grp >= 0 && grp < 64 && var >= 0 && var < 64)
+        if (ModelComponent* model = ent->FindComponent<ModelComponent>())
+            model->SelectMesh(static_cast<uint16_t>(grp), static_cast<int16_t>(var));
     g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
     ++s_applied.planted;
     s_applying = false;
+}
+
+std::vector<std::string> SplitOn(const std::string& s, char sep) {
+    std::vector<std::string> out;
+    size_t at = 0;
+    while (at <= s.size()) {
+        const size_t next = s.find(sep, at);
+        out.push_back(s.substr(at, next == std::string::npos ? std::string::npos : next - at));
+        if (next == std::string::npos) break;
+        at = next + 1;
+    }
+    return out;
+}
+
+bool ToInt(const std::string& s, int64_t& v) {
+    if (s.empty() || s.size() > 12) return false;
+    char* end = nullptr;
+    v = std::strtoll(s.c_str(), &end, 10);
+    return end != nullptr && *end == '\0';
+}
+
+// The relay's batches (a long list in few messages; index.js sendNatBatches / sendRoads / sendRoadsOff),
+// each change applied as the one-a-tile message it stands for.
+void ApplyBatch(const Message& m) {
+    bool replay = false;
+    m.GetBool("replay", replay);
+    if (m.type == "roadsOff") {
+        for (const std::string& c : SplitOn(m.GetOr("cells", ""), ',')) {
+            int64_t cell = 0;
+            if (!ToInt(c, cell)) continue;
+            Message r("road");
+            r.SetInt("cell", cell).SetBool("off", true);
+            if (replay) r.SetBool("replay", true);
+            ApplyRoad(r);
+        }
+        return;
+    }
+    const std::vector<std::string> tmpls = SplitOn(m.GetOr("tmpls", ""), '\n');
+    const std::vector<std::string> mats = SplitOn(m.GetOr("mats", ""), '\n');
+    for (const std::string& entry : SplitOn(m.GetOr("list", ""), ';')) {
+        const std::vector<std::string> f = SplitOn(entry, ',');
+        int64_t v[5] = {0, 0, 0, -1, -1};
+        bool ok = f.size() >= 3 && f.size() <= 5;
+        for (size_t i = 0; ok && i < f.size(); ++i) ok = ToInt(f[i], v[i]);
+        if (!ok) continue;
+        if (m.type == "natBatch") {
+            if (v[2] < 0 || v[2] >= static_cast<int64_t>(tmpls.size())) continue;
+            Message n("nat");
+            n.Set("op", v[1] == 1 ? "add" : "rm").SetInt("cell", v[0]).Set("tmpl", tmpls[static_cast<size_t>(v[2])]);
+            if (f.size() == 5) n.SetInt("grp", v[3]).SetInt("var", v[4]);
+            if (replay) n.SetBool("replay", true);
+            ApplyNat(n);
+        } else {   // roadBatch: cell, type, tt, template, material (-1 none)
+            if (f.size() != 5 || v[3] < 0 || v[3] >= static_cast<int64_t>(tmpls.size())) continue;
+            Message r("road");
+            r.SetInt("cell", v[0]).SetInt("type", v[1]).SetInt("tt", v[2]).Set("tmpl", tmpls[static_cast<size_t>(v[3])]);
+            if (v[4] >= 0 && v[4] < static_cast<int64_t>(mats.size())) r.Set("mat", mats[static_cast<size_t>(v[4])]);
+            ApplyRoad(r);
+        }
+    }
 }
 
 void RemoveMirror(const std::string& id) {
@@ -539,10 +724,25 @@ bool Spend() {
     return true;
 }
 
+// How many rects from the front of `q` fit one message: at most kMaxRects, and at most kMaxClaimTiles
+// tiles between them (the relay refuses a message past either). At least one.
+size_t FitOneMessage(const std::vector<TileRect>& q) {
+    size_t n = 0;
+    int64_t tiles = 0;
+    while (n < q.size() && n < static_cast<size_t>(kMaxRects)) {
+        const int64_t t = static_cast<int64_t>(q[n].w) * q[n].h;
+        if (n > 0 && tiles + t > kMaxClaimTiles) break;
+        tiles += t;
+        ++n;
+    }
+    return n;
+}
+
 void SendClaims(Link* link) {
-    // At most kMaxRects rectangles a message.
+    // A reloaded town with many fields once packed 64 of them into one message: past the relay's
+    // tile limit, refused whole ("bad claim"), and refused again on every join.
     while (!s_claimQueue.empty() && Spend()) {
-        const size_t n = s_claimQueue.size() < static_cast<size_t>(kMaxRects) ? s_claimQueue.size() : kMaxRects;
+        const size_t n = FitOneMessage(s_claimQueue);
         std::vector<TileRect> part(s_claimQueue.begin(), s_claimQueue.begin() + static_cast<long>(n));
         s_claimQueue.erase(s_claimQueue.begin(), s_claimQueue.begin() + static_cast<long>(n));
         Message c("claim");
@@ -550,7 +750,7 @@ void SendClaims(Link* link) {
         link->Send(c);
     }
     while (!s_releaseQueue.empty() && Spend()) {
-        const size_t n = s_releaseQueue.size() < static_cast<size_t>(kMaxRects) ? s_releaseQueue.size() : kMaxRects;
+        const size_t n = FitOneMessage(s_releaseQueue);
         std::vector<TileRect> part(s_releaseQueue.begin(), s_releaseQueue.begin() + static_cast<long>(n));
         s_releaseQueue.erase(s_releaseQueue.begin(), s_releaseQueue.begin() + static_cast<long>(n));
         Message r("release");
@@ -588,12 +788,14 @@ void End() {
     s_dim = 0;
     s_on = false;
     s_live = false;
+    s_seat = -1;
+    s_natIndex.clear();
+    s_natIndexFrame = ~0ull;
     s_applying = false;
     s_solidRef.clear();
     s_quiet.clear();
     s_pending.clear();
-    s_roadTmpl[0].clear();
-    s_roadTmpl[1].clear();
+    s_roadTmpl.clear();
     s_rescanRoads = false;
     s_applied = Applied();
     s_appliedLogged = Applied();
@@ -603,6 +805,11 @@ void End() {
 bool PeerHolds(int x, int y) {
     if (!s_on || s_dim == 0 || x < 0 || y < 0 || x >= s_dim || y >= s_dim) return false;
     return s_peer[static_cast<size_t>(y) * s_dim + x] != 0;
+}
+
+int PathTerrain(uint32_t cell, int terrainType) {
+    if (!s_on || cell >= s_solidRef.size() || s_solidRef[cell] == 0) return terrainType;
+    return kBlockedType;
 }
 
 bool PeerHoldsCell(uint32_t cellIdx) {
@@ -615,11 +822,13 @@ void NoteStructure(ComponentEntity* entity) {
     if (!s_on || entity == nullptr || entity->_description == nullptr) return;
     MapComponent* mc = entity->FindComponent<MapComponent>();
     if (mc == nullptr || mc->tileX1 <= 0 || mc->tileY1 <= 0) return;
-    TileRect r{mc->tileX0, mc->tileY0, mc->tileX1, mc->tileY1};
+    // MapComponent holds the footprint as it lies on the map: tileX1 / tileY1 are its width and height
+    // after the rotation (the tile tool stores x1 - x0 + 1, the start town the swapped size, and the
+    // game's own unmark walks w x h as stored). No second swap here: one turned a 90 / 270 degree
+    // structure's claim, solid tiles and tree clearing on their side.
+    const TileRect r{mc->tileX0, mc->tileY0, mc->tileX1, mc->tileY1};
     if (r.x < 0 || r.y < 0) return;
-    // The footprint's axes swap at 90 / 270 degrees (as the placement and start-town code do).
     const int rot = ((mc->extraField % 360) + 360) % 360;
-    if (rot == 90 || rot == 270) std::swap(r.w, r.h);
     const std::string tmpl = PathOf(entity->_description);
     if (tmpl.empty()) return;
     // The id: the footprint origin and the template (a fence's corner post and the fence itself
@@ -674,11 +883,22 @@ void NoteStructure(ComponentEntity* entity) {
     mine.rect = r;
     auto old = s_mine.find(id);
     if (old != s_mine.end() && old->second.entity.Get() != entity) s_mineIds.erase(old->second.entity.Get());
+    const bool placed = old == s_mine.end();
+    if (placed) {
+        mine.placedInPlay = s_live;
+        mine.placedAt = std::chrono::steady_clock::now();
+    } else {
+        mine.placedInPlay = old->second.placedInPlay;
+        mine.placedAt = old->second.placedAt;
+    }
     s_mine[id] = mine;
     s_mineIds[entity] = id;
     s_claimQueue.push_back(r);
     s_buildQueue.push_back(id);
     ++s_waitingAdds;
+    if (placed && s_live)   // in play (a load's own scan has a line of its own)
+        fprintf(stderr, "[Neighbour] shared map: this town placed %s at tile %d,%d (%d x %d); its land is claimed\n",
+                tmpl.c_str(), r.x, r.y, r.w, r.h);
 }
 
 void ScanExisting() {
@@ -686,17 +906,33 @@ void ScanExisting() {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     if (g == nullptr || g->m_entityList == nullptr) return;
     const auto& all = g->m_entityList->masterArray;
-    int n = 0;
+    int n = 0, skipped = 0;
+    std::map<std::string, int> kinds;   // what the scan saw, by template and the components that matter
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
         if (e == nullptr) continue;
         MapComponent* mc = e->FindComponent<MapComponent>();
         if (mc == nullptr || mc->tileX1 <= 0 || mc->tileY1 <= 0) continue;
         if (e->FindComponent<NaturalResourceComponent>() != nullptr || e->FindComponent<CitizenComponent>() != nullptr) continue;
+        // On the map but not a structure, and never reported in play: the removal tool's marks (a tile
+        // each, drawn as an orange cross on the neighbour's ground), goods lying on the ground, animals.
+        const bool clearRes = e->FindComponent<ClearResourceComponent>() != nullptr;
+        const bool clearArea = e->FindComponent<ClearAreaComponent>() != nullptr;
+        const bool raw = e->FindComponent<RawMaterialComponent>() != nullptr;
+        const bool animal = e->FindComponent<AnimalComponent>() != nullptr;
+        const std::string what = PathOf(e->_description) + (clearRes ? " clearRes" : "") + (clearArea ? " clearArea" : "") +
+                                 (raw ? " raw" : "") + (animal ? " animal" : "");
+        ++kinds[what];
+        if (clearRes || raw || animal) {
+            ++skipped;
+            continue;
+        }
         NoteStructure(e);
         ++n;
     }
-    fprintf(stderr, "[Neighbour] shared map: %d structure(s) of the loaded town reported\n", n);
+    for (const auto& kv : kinds) fprintf(stderr, "[Neighbour] shared map: scan: %d x %s\n", kv.second, kv.first.c_str());
+    fprintf(stderr, "[Neighbour] shared map: %d structure(s) of the loaded town reported (%d other thing(s) on the map "
+                    "left out)\n", n, skipped);
 }
 
 void NoteRoadCell(uint32_t cellIdx) {
@@ -707,7 +943,7 @@ void NoteRoadCell(uint32_t cellIdx) {
 }
 
 void NoteRoadTemplate(uint8_t roadType, const ComponentDescription* tool) {
-    if (!s_on || roadType > 1) return;
+    if (!s_on) return;
     s_roadTmpl[roadType] = PathOf(tool);
 }
 
@@ -718,10 +954,12 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
     Message r("road");
     r.SetInt("cell", cellIdx);
     if (terrainType == 2) {
+        if (PeerHoldsCell(static_cast<uint32_t>(cellIdx))) return;   // the neighbour's road: not ours to take up
         r.SetBool("off", true);
     } else {
-        if (c.field_0x2A > 1) return;   // not a road type this side knows
-        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f)).Set("tmpl", RoadTemplate(c.field_0x2A));
+        if (c.field_0x2A == 0xFF) return;   // no road here after all
+        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f));
+        SetRoadLook(r, c.field_0x2A);
     }
     Queue(r);
 }
@@ -734,6 +972,9 @@ void NoteRemoved(ComponentEntity* entity) {
     if (ours != s_mineIds.end()) {
         auto it = s_mine.find(ours->second);
         if (it != s_mine.end() && it->second.entity.Get() == entity) {
+            const TileRect& r = it->second.rect;
+            fprintf(stderr, "[Neighbour] shared map: this town removed %s at tile %d,%d (%d x %d); its land is freed\n",
+                    it->second.build.GetOr("tmpl", "?").c_str(), r.x, r.y, r.w, r.h);
             s_unbuildQueue.push_back(it->first);
             s_releaseQueue.push_back(it->second.rect);
             ++s_waitingAdds;
@@ -760,13 +1001,87 @@ void NotePlanted(ComponentEntity* entity) {
     if (cell < 0 || tmpl.empty()) return;
     Message n("nat");
     n.Set("op", "add").SetInt("cell", cell).Set("tmpl", tmpl);
+    // Its look (the model variant a spreading plant rolls), so both copies draw the same tree.
+    if (ModelComponent* model = entity->FindComponent<ModelComponent>(); model != nullptr && model->meshIndex >= 0)
+        n.SetInt("grp", model->meshGroup).SetInt("var", model->meshIndex);
     Queue(n);
+}
+
+void SetSeat(int seat) {
+    s_seat = (seat == 0 || seat == 1) ? seat : -1;
+}
+
+bool SpreadsHere(int x, int y) {
+    if (!s_on || !s_live) return true;
+    Map* map = TheMap();
+    if (map == nullptr || x < 0 || y < 0 || x >= map->size || y >= map->size) return true;
+    if (s_seat < 0) return false;
+    if (PeerHoldsCell(static_cast<uint32_t>(y * map->size + x))) return false;
+    return (x < map->size / 2 ? 0 : 1) == s_seat;
+}
+
+// Drift check: an order-free fingerprint of the land both copies must agree on -- every natural
+// resource (tile, template) and every finished road tile (tile, type). Logged when it changes, at most
+// every kFingerprintFrames; two paused games on the same land print the same numbers.
+constexpr uint64_t kFingerprintFrames = 1800;
+std::string s_fingerprintLogged;
+
+uint64_t Mix(uint64_t h) {
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 33;
+    return h;
+}
+
+void LogFingerprint() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    Map* map = TheMap();
+    if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
+    uint64_t natSum = 0, roadSum = 0, halfSum[2] = {0, 0};
+    size_t nat = 0, roads = 0, half[2] = {0, 0};
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || ((e->_entityFlags >> 10) & 1) || e->FindComponent<NaturalResourceComponent>() == nullptr)
+            continue;
+        const int cell = CellOf(e);
+        if (cell < 0) continue;
+        uint64_t th = 1469598103934665603ull;
+        for (unsigned char c : PathOf(e->_description)) th = (th ^ c) * 1099511628211ull;
+        const uint64_t h = Mix(th ^ (static_cast<uint64_t>(cell) << 1));
+        natSum += h;
+        ++nat;
+        const int side = (cell % map->size) < map->size / 2 ? 0 : 1;
+        halfSum[side] += h;
+        ++half[side];
+    }
+    const MapCell* cells = map->cells.GetData();
+    const int n = map->size * map->size;
+    for (int i = 0; i < n; ++i) {
+        if (cells[i].field_0x2A == 0xFF || cells[i].field_0x2B == 0x80) continue;
+        roadSum += Mix((static_cast<uint64_t>(i) << 8) | cells[i].field_0x2A);
+        ++roads;
+    }
+    char line[240];
+    snprintf(line, sizeof line, "nature %zu (%016llx) [west %zu %08llx, east %zu %08llx], roads %zu (%016llx)", nat,
+             static_cast<unsigned long long>(natSum), half[0], static_cast<unsigned long long>(halfSum[0] >> 32), half[1],
+             static_cast<unsigned long long>(halfSum[1] >> 32), roads, static_cast<unsigned long long>(roadSum));
+    if (line == s_fingerprintLogged) return;
+    s_fingerprintLogged = line;
+    fprintf(stderr, "[Neighbour] map fingerprint: %s\n", line);
 }
 
 void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
+    s_frame = frame;
     EnsureGrid();
     s_live = true;   // from the first frame of play on, a change is news
+    if (frame % kFingerprintFrames == 0) {
+        LogFingerprint();
+        LogNature();
+    }
     // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
     // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {
@@ -774,10 +1089,16 @@ void Tick(Link* link, uint64_t frame) {
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
             a.solid != l.solid || a.refused != l.refused || a.grounds != l.grounds) {
+            // Structures, solid tiles and grounds as they stand now (a rejoin re-sends the same buildings,
+            // which replace their mirrors: a running total would count them again).
+            size_t solidNow = 0, groundsNow = 0;
+            for (uint8_t ref : s_solidRef) solidNow += ref > 0 ? 1 : 0;
+            for (const auto& kv : s_mirrors) groundsNow += kv.second.decalId >= 0 ? 1 : 0;
             fprintf(stderr, "[Neighbour] shared map: from the neighbor so far: %d road tile(s) laid, %d taken up, "
-                            "%d resource(s) gone, %d planted, %d tile(s) solid, %d ground(s) painted; %d not applied%s%s\n",
-                    a.roads, a.unroads, a.removed, a.planted, a.solid, a.grounds, a.refused, a.refused > 0 ? " (last: " : "",
-                    a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
+                            "%d resource(s) gone, %d planted; now %zu of their structure(s) drawn, %zu tile(s) solid, "
+                            "%zu ground(s) painted; %d not applied%s%s\n",
+                    a.roads, a.unroads, a.removed, a.planted, s_mirrors.size(), solidNow, groundsNow, a.refused,
+                    a.refused > 0 ? " (last: " : "", a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
             s_appliedLogged = s_applied;
         }
         for (auto it = s_mine.begin(); it != s_mine.end();) {
@@ -799,6 +1120,10 @@ void Tick(Link* link, uint64_t frame) {
         }
     }
     if (!link->Connected()) return;   // the queues wait; OnJoined sends the structures again
+    // Backpressure: the link writes one message at a time, and a slow line (the Mac's waits for each
+    // write) fell behind and once dropped what it held. Hand it more only when it is nearly empty; the
+    // backlog stays in these queues, which the save keeps.
+    if (link->Queued() > kLinkLowWater) return;
     const auto now = std::chrono::steady_clock::now();
     const double dt = std::chrono::duration<double>(now - s_tokensAt).count();
     s_tokensAt = now;
@@ -819,6 +1144,14 @@ void Tick(Link* link, uint64_t frame) {
     s_unbuildQueue.erase(s_unbuildQueue.begin(), s_unbuildQueue.begin() + static_cast<long>(i));
     for (i = 0; i < s_pending.size() && Spend(); ++i) link->Send(s_pending[i]);
     s_pending.erase(s_pending.begin(), s_pending.begin() + static_cast<long>(i));
+}
+
+void OnWelcome() {
+    if (!s_on) return;
+    ++s_joinCount;
+    // The relay sends the neighbour's land as it stands (claimBlock); land it gave up while the line
+    // was down sent no `released` here.
+    if (!s_peer.empty()) std::fill(s_peer.begin(), s_peer.end(), 0);
 }
 
 void OnJoined(Link* link) {
@@ -892,13 +1225,54 @@ bool OnMessage(const Message& m, std::string* notice) {
     if (m.type == "claimed") {
         bool ok = true;
         m.GetBool("ok", ok);
-        if (!ok && notice != nullptr)
-            *notice = "Some land you built on was already your neighbor's; the two towns overlap there.";
+        if (!ok)
+            fprintf(stderr, "[Neighbour] shared map: the relay refused land this town claimed (%s): the neighbor holds it\n",
+                    m.GetOr("refused", "?").c_str());
+        return true;
+    }
+    if (m.type == "buildRefused") {
+        // Both towns placed on the same land at once and the neighbour's claim came first: the relay does
+        // not mirror ours. A site this player placed seconds ago, still a site, is taken back (nothing can
+        // have been delivered to it yet), so neither map has two buildings in one place. Anything older (a
+        // half-built house found on the neighbour's land at a rejoin, with materials in it) stays, and the
+        // player is told.
+        const std::string id = m.GetOr("id", "");
+        auto it = s_mine.find(id);
+        ComponentEntity* e = it != s_mine.end() ? it->second.entity.Get() : nullptr;
+        GameUpdateLoop* g = GameUpdateLoop::_singleton;
+        const double age = it != s_mine.end()
+                               ? std::chrono::duration<double>(std::chrono::steady_clock::now() - it->second.placedAt).count()
+                               : 1e9;
+        const bool fresh = e != nullptr && it->second.placedInPlay && age < kTakeBackSeconds &&
+                           e->FindComponent<BuildComponent>() != nullptr;
+        if (fresh && g != nullptr && g->m_entityList != nullptr && !((e->_entityFlags >> 10) & 1)) {
+            g->m_entityList->QueueDestroy(&e);
+            fprintf(stderr, "[Neighbour] shared map: %s taken back: the neighbor got that land first\n", id.c_str());
+            if (notice != nullptr) *notice = "Your neighbor got that land first: the building you placed there is taken back.";
+        } else if (e != nullptr) {
+            fprintf(stderr, "[Neighbour] shared map: %s stands on the neighbor's land (already being built)\n", id.c_str());
+            if (notice != nullptr) *notice = "A building of yours stands on your neighbor's land; your neighbor does not see it.";
+        }
         return true;
     }
     if (m.type == "build") { AddMirror(m); return true; }
     if (m.type == "unbuild") { RemoveMirror(m.GetOr("id", "")); return true; }
     if (m.type == "mirrorEnd") {   // the neighbour's land is in: a loaded game's roads can go again
+        // What the list did not name was taken down while the line was down (a reconnect keeps the
+        // mirrors it had; the relay deletes a structure taken down while this town is away).
+        size_t gone = 0;
+        for (auto it = s_mirrors.begin(); it != s_mirrors.end();) {
+            if (it->second.join == s_joinCount) {
+                ++it;
+                continue;
+            }
+            FreeMirror(it->second, true);
+            it = s_mirrors.erase(it);
+            ++gone;
+        }
+        if (gone > 0)
+            fprintf(stderr, "[Neighbour] shared map: %zu of the neighbor's structure(s) taken down while away removed\n",
+                    gone);
         if (s_rescanRoads) {
             s_rescanRoads = false;
             ScanRoads();
@@ -907,6 +1281,7 @@ bool OnMessage(const Message& m, std::string* notice) {
     }
     if (m.type == "road") { ApplyRoad(m); return true; }
     if (m.type == "nat") { ApplyNat(m); return true; }
+    if (m.type == "natBatch" || m.type == "roadBatch" || m.type == "roadsOff") { ApplyBatch(m); return true; }
     return false;
 }
 

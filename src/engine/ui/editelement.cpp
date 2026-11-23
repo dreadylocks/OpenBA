@@ -61,8 +61,12 @@ namespace {
 // displacements are +0x6c6 + key * 0x18 (and +2): Escape 0xc66, Enter 0xf7e,
 // Left 0xea6, Right 0xed6, Home 0xe16, End 0xe5e, Back 0xba6, Delete 0xe46.
 constexpr int kKeyCount  = ::Input::Device::kKeyboardInputCount;
-constexpr int kKeyEscape = 60;
-constexpr int kKeyEnter  = 93;
+// Indices into Device::_keyboard (input_key_tables.h kScanCodeToIndex), not DIK codes: Escape is index
+// 0 (DIK 0x01), the main Return key 60 (DIK 0x1C), the keypad's Enter 93 (DIK 0x9C). (These two were
+// once named kKeyEscape / kKeyEnter; the focus drop below reads all three, so nothing changed but names.)
+constexpr int kKeyEscapeIndex = 0;
+constexpr int kKeyReturn   = 60;
+constexpr int kKeyPadEnter = 93;
 constexpr int kKeyLeft   = 84;
 constexpr int kKeyRight  = 86;
 constexpr int kKeyHome   = 78;
@@ -304,8 +308,8 @@ void EditElement::Update(const System::Time& time, UserInterface* ui,
 
     // ---- drop focus -------------------------------------------------------
     const bool clickedAway = st.buttonPressed != 0 && (_flags & 0x20000u) == 0;
-    if (clickedAway || dev->_keyboard[0].pressed != 0 ||
-        dev->_keyboard[kKeyEscape].pressed != 0 || dev->_keyboard[kKeyEnter].pressed != 0) {
+    if (clickedAway || dev->_keyboard[kKeyEscapeIndex].pressed != 0 ||
+        dev->_keyboard[kKeyReturn].pressed != 0 || dev->_keyboard[kKeyPadEnter].pressed != 0) {
         _active = 0;
         --::Input::Configuration::_singleton->_keyMap->_suspendCount;
 

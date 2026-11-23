@@ -19,6 +19,7 @@
 #include "Component/ComponentDescription.h"
 #include "Entity/ComponentEntity.h"
 #include "Entity/EntityList.h"   // EntityList::shuttingDown
+#include "ext/neighbour/shared_map.h"   // EXT SEAM (NOT RETAIL, ext.neighbour): shared spreading
 #include "Game/Map.h"   // Map::size
 #include "object/TypeInfo.h"
 #include "Game/GameUpdateLoop.h"   // B3R STORAGE: GameUpdateLoop::_singleton
@@ -250,6 +251,10 @@ void SpawnComponent::DoSpawn(SpawnDescription* desc, int entryIndex, char random
     if (x < 0 || y < 0) { ++g_doSpawn.offMap; return; }
     int mapSize = map->size;
     if (x >= mapSize || y >= mapSize) { ++g_doSpawn.offMap; return; }
+    // EXT SEAM (NOT RETAIL, ext.neighbour): on a shared map one town spreads each half's plants and the
+    // other takes them from the relay (shared_map.h SpreadsHere). Never false otherwise (world generation
+    // included: it runs before play).
+    if (!Neighbour::SharedMap::SpreadsHere(x, y)) return;
 
     float ca = SC_RdataF32(kRdata_140172140);
     float cb = SC_RdataF32(kRdata_140172248);
@@ -295,6 +300,8 @@ void SpawnComponent::DoSpawn(SpawnDescription* desc, int entryIndex, char random
         // also carries on through the deleted IBP (its finders return null there).
         if (closed) ++g_doSpawn.listClosed; else ++g_doSpawn.created;
     }
+    // EXT SEAM (NOT RETAIL): the neighbour gets the new plant (not one a closing list just deleted).
+    if (gw->m_entityList != nullptr && !gw->m_entityList->shuttingDown) Neighbour::SharedMap::NotePlanted(entityIbp.Get());
 
     // Optional random growth
     if (randomGrowth != '\0') {

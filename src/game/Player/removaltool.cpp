@@ -31,6 +31,7 @@
 #include "Game/Map.h"
 #include "Game/PlayerToolManager.h"
 #include "Action/PathAvl.h"   // AvlNode28 (Map +0xE8)
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour, the neighbour's roads (NOT RETAIL)
 
 // ============================================================
 // RemovalTool::Startup (vtable +0x20, Slot4)
@@ -288,7 +289,9 @@ void RemovalTool::Draw(Video::Context* ctx, char param3) {
                     mapGrid = GameUpdateLoop::_singleton->m_game;
 
                     // Check road removal flag (+0x40 on removalDesc)
-                    if (removalDesc && removalDesc->_b40) {
+                    // EXT SEAM (NOT RETAIL, ext.neighbour): not a road on the neighbour's land (theirs).
+                    if (removalDesc && removalDesc->_b40 &&
+                        !Neighbour::SharedMap::PeerHoldsCell(static_cast<uint32_t>(mapGrid->size * (int)r + (int)c))) {
                         int tileIdx2 = mapGrid->size * (int)r + (int)c;
                         const MapCell* cellBase2 = &mapGrid->cells.GetData()[tileIdx2];
                         uint32_t terrainFlag = 1u << (cellBase2->terrainType & 0x1f);

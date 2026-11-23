@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -57,7 +58,10 @@ public:
         Message     hello;               // sent first on every (re)connect
         uint32_t    firstRetryMs = 2000;
         uint32_t    maxRetryMs   = 30000;
-        size_t      maxQueued    = 64;   // outgoing messages kept while offline; oldest dropped
+        // Outgoing messages kept (while offline, or while the line is slower than the game): a
+        // generous bound, so nothing that matters is lost; the shared map stops handing over more while
+        // Queued() is high (backpressure), and keeps its own backlog, which the save holds.
+        size_t      maxQueued    = 20000;
         uint32_t    pingMs       = 25000; // a {"t":"ping"} after this long with nothing sent
     };
 
@@ -73,7 +77,15 @@ public:
 
     // Main thread. The hello for the NEXT connect (e.g. a newer lastSeq).
     void SetHello(const Message& hello);
-    void Send(const Message& message);
+    // `ephemeral`: a message that only matters now (the villagers' positions). It does not wait in the
+    // queue: it is kept as the newest of its kind (its type and its "tmpl"), a newer one replaces it, and
+    // the writer sends it before anything queued, so a long queue (a shared map catching up) can neither
+    // starve it nor fill up with stale copies. Not kept while offline; never resent.
+    void Send(const Message& message, bool ephemeral = false);
+    // Messages waiting in the queue (any thread); ephemeral ones are not counted.
+    size_t Queued();
+    // Messages dropped because the queue was full since Start (any thread).
+    uint64_t Dropped() const { return dropped_.load(); }
     // Main thread: move everything that arrived into `out` (appended).
     void Poll(std::vector<Incoming>& out);
 
@@ -88,10 +100,12 @@ private:
     std::thread           worker_;
     std::atomic<bool>     stop_{false};
     std::atomic<bool>     connected_{false};
+    std::atomic<uint64_t> dropped_{0};
 
     std::mutex              mu_;          // guards everything below
     std::condition_variable cv_;
     std::deque<std::string> outgoing_;
+    std::map<std::string, std::string> newest_;   // ephemeral: kind -> its newest text, sent first
     std::vector<Incoming>   incoming_;
     bool                    readerDone_ = false;
     Transport*              live_ = nullptr;   // the connected transport, for Stop's Close
