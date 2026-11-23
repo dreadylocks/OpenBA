@@ -125,6 +125,7 @@ std::vector<uint8_t> s_solidRef;            // per cell: how many mirrors hold i
 
 // M3.
 bool s_live = false;                        // the world is built (the first Tick): changes are news
+int s_seat = -1;                            // this town's seat in the room (the relay's welcome); -1 not yet
 bool s_applying = false;                    // applying the neighbour's change: not news
 std::map<int, std::string> s_roadTmpl;      // the road tool's template per road type (a mod adds types)
 // The game's own road tools, per road type (CreateRoadDescription's bool: 0 stone, 1 dirt): sent when
@@ -571,6 +572,10 @@ void ApplyNat(const Message& m) {
     s_applying = true;
     nr->PlaceAtCell(static_cast<int>(cell));
     growth->SetProgress(0.0f);
+    int64_t grp = -1, var = -1;
+    if (m.GetInt("grp", grp) && m.GetInt("var", var) && grp >= 0 && grp < 64 && var >= 0 && var < 64)
+        if (ModelComponent* model = ent->FindComponent<ModelComponent>())
+            model->SelectMesh(static_cast<uint16_t>(grp), static_cast<int16_t>(var));
     g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
     ++s_applied.planted;
     s_applying = false;
@@ -656,6 +661,7 @@ void End() {
     s_dim = 0;
     s_on = false;
     s_live = false;
+    s_seat = -1;
     s_applying = false;
     s_solidRef.clear();
     s_quiet.clear();
@@ -866,13 +872,78 @@ void NotePlanted(ComponentEntity* entity) {
     if (cell < 0 || tmpl.empty()) return;
     Message n("nat");
     n.Set("op", "add").SetInt("cell", cell).Set("tmpl", tmpl);
+    // Its look (the model variant a spreading plant rolls), so both copies draw the same tree.
+    if (ModelComponent* model = entity->FindComponent<ModelComponent>(); model != nullptr && model->meshIndex >= 0)
+        n.SetInt("grp", model->meshGroup).SetInt("var", model->meshIndex);
     Queue(n);
+}
+
+void SetSeat(int seat) {
+    s_seat = (seat == 0 || seat == 1) ? seat : -1;
+}
+
+bool SpreadsHere(int x, int y) {
+    if (!s_on || !s_live) return true;
+    Map* map = TheMap();
+    if (map == nullptr || x < 0 || y < 0 || x >= map->size || y >= map->size) return true;
+    if (s_seat < 0) return false;
+    if (PeerHoldsCell(static_cast<uint32_t>(y * map->size + x))) return false;
+    return (x < map->size / 2 ? 0 : 1) == s_seat;
+}
+
+// Drift check: an order-free fingerprint of the land both copies must agree on -- every natural
+// resource (tile, template) and every finished road tile (tile, type). Logged when it changes, at most
+// every kFingerprintFrames; two paused games on the same land print the same numbers.
+constexpr uint64_t kFingerprintFrames = 1800;
+std::string s_fingerprintLogged;
+
+uint64_t Mix(uint64_t h) {
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 33;
+    return h;
+}
+
+void LogFingerprint() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    Map* map = TheMap();
+    if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
+    uint64_t natSum = 0, roadSum = 0;
+    size_t nat = 0, roads = 0;
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || ((e->_entityFlags >> 10) & 1) || e->FindComponent<NaturalResourceComponent>() == nullptr)
+            continue;
+        const int cell = CellOf(e);
+        if (cell < 0) continue;
+        uint64_t th = 1469598103934665603ull;
+        for (unsigned char c : PathOf(e->_description)) th = (th ^ c) * 1099511628211ull;
+        natSum += Mix(th ^ (static_cast<uint64_t>(cell) << 1));
+        ++nat;
+    }
+    const MapCell* cells = map->cells.GetData();
+    const int n = map->size * map->size;
+    for (int i = 0; i < n; ++i) {
+        if (cells[i].field_0x2A == 0xFF || cells[i].field_0x2B == 0x80) continue;
+        roadSum += Mix((static_cast<uint64_t>(i) << 8) | cells[i].field_0x2A);
+        ++roads;
+    }
+    char line[160];
+    snprintf(line, sizeof line, "nature %zu (%016llx), roads %zu (%016llx)", nat,
+             static_cast<unsigned long long>(natSum), roads, static_cast<unsigned long long>(roadSum));
+    if (line == s_fingerprintLogged) return;
+    s_fingerprintLogged = line;
+    fprintf(stderr, "[Neighbour] map fingerprint: %s\n", line);
 }
 
 void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
     EnsureGrid();
     s_live = true;   // from the first frame of play on, a change is news
+    if (frame % kFingerprintFrames == 0) LogFingerprint();
     // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
     // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {

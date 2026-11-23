@@ -435,6 +435,8 @@ void OnMessage(const Message& m) {
         s_joined = true;
         s_peerName = peer;
         s_peerOnline = online;
+        int64_t seat = -1;
+        if (m.GetInt("seat", seat)) SharedMap::SetSeat(static_cast<int>(seat));
         SharedMap::OnWelcome();
         // A loaded game's first join: its roads again, once the neighbour's land is in.
         if ((s_freshGame && s_loadedFromSave) || s_testReload) SharedMap::ExpectReload();
