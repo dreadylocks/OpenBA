@@ -103,6 +103,8 @@ Each row is done when both towns have seen the right thing on screen.
 | 2 | pass | No trees inside the neighbour's start buildings; their ground painted. They draw solid, not see-through: the model material ignores the mirror's opacity (a shader change, not done). |
 | 3 | pass | Both ways once both towns had people (the first failure was a town that had starved: "sending 0 of 0"). Villagers' positions now never wait behind the shared map's queue. |
 | 4 | pass | Each town's Log Cabin and storage barn rose to finished on the other's screen. |
+| 5 | pass | Placing on the neighbour's land is red and refused. Both towns clicking the same free spot in the same second (20:33:00, 6 ms apart): the relay keeps the first, refuses the second's claim and its mirror, and the second game takes its fresh site back with an event line; one cabin on both maps. |
+| 13 | pass | Lines arrive in order, quotes, brackets, braces, %, &, backslash intact. Found on the way: the event log drew every other entry (a retail-divergent row index in EventLogUI), the chat line went out on any click away (Cancel included), the box widened and moved Send, and only the keypad's Enter sent. |
 | 12 | pass | Pause and unpause both ways; a town joining a paused game comes up paused. |
 | 7 | pass (Mac to PC) | A Colonial Charter dirt road reaches the neighbour (it never did: only road types 0 and 1 were sent, and CC's roads use more). Removing the neighbour's road is refused. Not yet: PC to Mac, stone roads, the speed bonus. |
 | 10 | pass | A half-built cabin demolished while the neighbour was away is gone from its map on return. A demolition done while paused is sent when the game runs on (the entity goes then). |
