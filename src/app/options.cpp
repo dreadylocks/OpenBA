@@ -99,6 +99,14 @@ void OptionsInit() {
     o.metalStats = On("BANISHED_METAL_STATS");
     o.inputTrace = On("BANISHED_INPUT_TRACE");
     o.background = On("BANISHED_BACKGROUND");
+    if (o.background) {   // "1" = 640x360; "<W>x<H>" = that size in points (at least 320x200)
+        int w = 0;
+        int h = 0;
+        if (std::sscanf(Raw("BANISHED_BACKGROUND"), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) {
+            o.backgroundWidth = w;
+            o.backgroundHeight = h;
+        }
+    }
     o.userDir = Raw("BANISHED_USER_DIR");
 
     // ── harness drivers: menu → game ─────────────────────────────────────────
@@ -148,6 +156,8 @@ void OptionsInit() {
     o.saveTest        = Raw("BANISHED_SAVE_TEST");
     o.devloop         = Raw("BANISHED_DEVLOOP");
     if (o.devloop && !o.devloop[0]) o.devloop = nullptr;
+    o.drive           = Raw("BANISHED_DRIVE");
+    if (o.drive && !o.drive[0]) o.drive = nullptr;
     o.saveTestRepeat  = Int("BANISHED_SAVE_TEST_REPEAT", 0);
     o.userProfile     = Raw("USERPROFILE");
 
@@ -226,9 +236,8 @@ void OptionsInit() {
     // ── boot / engine plumbing ───────────────────────────────────────────────
     // Which flags mean "nobody is watching this run": the set
     // HarnessGuardUnattendedBoot has always used (src/app/main.cpp).
-    // A dev-loop relaunch (BANISHED_DEVLOOP) autoloads, but a player is in it: attended.
-    o.unattendedBoot = !o.devloop && (o.autostart || o.autoquit || o.autoload || o.autotutorial ||
-                                      On("BANISHED_AUTOMENU_BUTTON") || On("BANISHED_PAUSEMENU_BUTTON"));
+    o.unattendedBoot = o.autostart || o.autoquit || o.autoload || o.autotutorial ||
+                       On("BANISHED_AUTOMENU_BUTTON") || On("BANISHED_PAUSEMENU_BUTTON");
     {   const char* v = Raw("BANISHED_DEFER_WINDOW_SHOW");
         o.deferWindowShow = !v || (std::strcmp(v, "0") != 0 && std::strcmp(v, "false") != 0); }
     {   const char* v = Raw("BANISHED_SKIP_ENGINE_LOADER");

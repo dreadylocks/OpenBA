@@ -33,8 +33,6 @@ namespace Window {
 
 namespace {
 
-constexpr int32_t kBackgroundWidth = 640;
-constexpr int32_t kBackgroundHeight = 360;
 constexpr int32_t kBackgroundX = 8;
 constexpr int32_t kBackgroundY = 32;
 constexpr long kActivationPolicyProhibited = 2;   // NSApplicationActivationPolicyProhibited
@@ -48,8 +46,8 @@ uint64_t PrepareCreate(int32_t* width, int32_t* height) {
         SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
         SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0");
         ConfigureBackgroundWindow(nullptr);
-        *width = kBackgroundWidth;
-        *height = kBackgroundHeight;
+        *width = Opt().backgroundWidth;
+        *height = Opt().backgroundHeight;
     }
     // Native Retina is unconditional on Apple: the window is high-pixel-density. The
     // graphics-API flag is the render backend's fact (SDL_WINDOW_METAL for Metal).
@@ -63,7 +61,7 @@ void ConfigureBackgroundWindow(SDL_Window* window) {
     reinterpret_cast<BOOL (*)(id, SEL, long)>(objc_msgSend)(
         app, sel_registerName("setActivationPolicy:"), kActivationPolicyProhibited);
     if (window == nullptr) return;
-    SDL_SetWindowSize(window, kBackgroundWidth, kBackgroundHeight);
+    SDL_SetWindowSize(window, Opt().backgroundWidth, Opt().backgroundHeight);
     SDL_SetWindowPosition(window, kBackgroundX, kBackgroundY);
     id native = static_cast<id>(SDL_GetPointerProperty(
         SDL_GetWindowProperties(window), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr));

@@ -47,6 +47,7 @@
 // ============================================================================
 
 #include "platform_input.h"
+#include "platform_input_virtual.h"   // BANISHED_DRIVE's scripted source (harness only)
 #include "sdl_dik_tables.h"
 #include "display_geometry.h"
 #include "platform_input_hooks.h"
@@ -74,6 +75,40 @@ namespace {
 // window, as DISCL_FOREGROUND / GetForegroundWindow require).
 bool GameWindowHasKeyboardFocus() {
     return SDL_GetKeyboardFocus() == Window::Sdl::GameWindow();
+}
+
+// The scripted source (platform_input_virtual.h), asked once per Poll. While it drives, every
+// read below answers from g_virtual and the window counts as in front; the devices' own motion
+// and wheel are still drained each poll so none of it is delivered later.
+Virtual::Source g_virtualSource = nullptr;
+bool            g_virtualActive = false;
+Virtual::Frame  g_virtual;
+int32_t         g_virtualLastX = 0;   // the previous frame's cursor, for the relative motion
+int32_t         g_virtualLastY = 0;
+
+void PollVirtual() {
+    g_virtualLastX = g_virtual.x;
+    g_virtualLastY = g_virtual.y;
+    if (g_virtualSource == nullptr) {
+        g_virtualActive = false;
+        return;
+    }
+    SDL_Window* w = Window::Sdl::GameWindow();
+    Virtual::Client client;
+    if (w != nullptr) {
+        SDL_GetWindowSizeInPixels(w, &client.widthPx, &client.heightPx);
+        client.density = Window::PixelDensity(w);
+    }
+    Virtual::Frame next;
+    const bool wasActive = g_virtualActive;
+    g_virtualActive = g_virtualSource(client, &next);
+    if (g_virtualActive) {
+        g_virtual = next;
+        if (!wasActive) {   // no jump from wherever the last script left the cursor
+            g_virtualLastX = g_virtual.x;
+            g_virtualLastY = g_virtual.y;
+        }
+    }
 }
 
 // SDL's key state with the platform's key layer applied (platform_input_hooks.h: the Mac
@@ -165,9 +200,20 @@ void Release(void* /*object*/) {
 
 void Poll() {
     SDL_PumpEvents();
+    PollVirtual();
 }
 
+namespace Virtual {
+void SetSource(Source source) {
+    g_virtualSource = source;
+}
+}  // namespace Virtual
+
 int32_t ReadKeyboard(void* /*device*/, uint8_t dik[256]) {
+    if (g_virtualActive) {
+        std::memcpy(dik, g_virtual.keys, 256);
+        return kOk;
+    }
     if (!GameWindowHasKeyboardFocus()) return kNotAcquired;
 #if BANISHED_TWEAK_OVERLAY
     if (Diag::TweakOverlay::IsOpen()) {   // the debug tweak overlay has the keyboard: every key released
@@ -190,7 +236,7 @@ int32_t ReadKeyboard(void* /*device*/, uint8_t dik[256]) {
 
 bool IsForeground(void* /*window*/) {
     // `window` is the game window's native handle, the only window there is.
-    return GameWindowHasKeyboardFocus();
+    return g_virtualActive || GameWindowHasKeyboardFocus();
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +269,17 @@ int32_t ReadMouse(void* /*device*/, MouseState* out) {
     float dy = 0.0f;
     SDL_GetRelativeMouseState(&dx, &dy);
     const float wheel = WheelSinceLastPump();
+
+    if (g_virtualActive) {   // the script's frame; the devices' motion and wheel are dropped
+        SetRotateDrag(false);
+        g_remainderX = 0.0f;
+        g_remainderY = 0.0f;
+        out->x = g_virtual.x - g_virtualLastX;
+        out->y = g_virtual.y - g_virtualLastY;
+        out->z = g_virtual.wheel > 0 ? 120 : (g_virtual.wheel < 0 ? -120 : 0);
+        for (int b = 0; b < 8; ++b) out->buttons[b] = (b < 3 && (g_virtual.buttons >> b) & 1) ? 0x80 : 0;
+        return kOk;
+    }
 
     if (!GameWindowHasKeyboardFocus()) {
         SetRotateDrag(false);
@@ -269,6 +326,10 @@ int16_t AsyncMouseButtonState(int32_t vk) {
 #if BANISHED_TWEAK_OVERLAY
     if (Diag::TweakOverlay::IsOpen()) return 0;   // the debug tweak overlay has the mouse
 #endif
+    if (g_virtualActive) {
+        const int bit = vk == 0x01 ? 0 : (vk == 0x02 ? 1 : (vk == 0x04 ? 2 : -1));
+        return (bit >= 0 && ((g_virtual.buttons >> bit) & 1)) ? INT16_MIN : 0;
+    }
     const SDL_MouseButtonFlags b = LiveButtons();
     SDL_MouseButtonFlags mask = 0;
     switch (vk) {
@@ -287,11 +348,19 @@ int16_t AsyncMouseButtonState(int32_t vk) {
 // same unit. A cursor in the last point of the client area is snapped to the last pixel
 // (CursorPointToPixel) so edge scrolling reaches the right and bottom edges.
 void GetCursorPos(Point* out) {
+    SDL_Window* w = Window::Sdl::GameWindow();
+    const float d = Window::PixelDensity(w);
+    if (g_virtualActive) {   // the script's client pixel, in the screen unit ScreenToClient undoes
+        int wx = 0;
+        int wy = 0;
+        if (w != nullptr) SDL_GetWindowPosition(w, &wx, &wy);
+        out->x = Window::PointsToPixels(static_cast<float>(wx), d) + g_virtual.x;
+        out->y = Window::PointsToPixels(static_cast<float>(wy), d) + g_virtual.y;
+        return;
+    }
     float x = 0.0f;
     float y = 0.0f;
     SDL_GetGlobalMouseState(&x, &y);
-    SDL_Window* w = Window::Sdl::GameWindow();
-    const float d = Window::PixelDensity(w);
     if (d == 1.0f || w == nullptr) {
         out->x = static_cast<int32_t>(std::floor(x));
         out->y = static_cast<int32_t>(std::floor(y));
@@ -329,6 +398,12 @@ int16_t AsyncKeyState(int32_t vk) {
 #if BANISHED_TWEAK_OVERLAY
     if (Diag::TweakOverlay::IsOpen()) return 0;   // the debug tweak overlay has the keyboard
 #endif
+    if (g_virtualActive) {   // the legacy path by virtual key: through the scan code it maps to
+        for (const uint16_t sc : kVirtualKeyToSdlScancode[static_cast<uint8_t>(vk)]) {
+            if (sc != 0 && sc < kSdlScancodeCount && g_virtual.keys[kSdlScancodeToDik[sc]] != 0) return INT16_MIN;
+        }
+        return 0;
+    }
     int count = 0;
     bool scratch[kKeyLayerCapacity];
     const bool* state = EffectiveKeyState(&count, scratch);

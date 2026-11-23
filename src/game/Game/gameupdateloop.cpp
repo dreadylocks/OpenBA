@@ -372,6 +372,7 @@ extern "C" int GameUpdateLoop_CurrentFrame() { return s_frameNum; }
 // BANISHED_TOOL_HARNESS. No-op unless that env var is set.
 extern "C" void ToolHarness_Tick(PlayerToolManager* entityUI, int frameNum);
 #include "pausemenu_harness.h"   // PauseMenuHarness_Tick (src/diag)
+#include "devloop_harness.h"     // DevLoopHarness_Tick (src/diag)
 extern "C" void FoodPanel_Tick(PlayerToolManager* entityUI, int frameNum);  // src/diag/food_panel_harness.cpp
 extern "C" void FoodPlace_Tick(int frameNum);                  // src/diag/food_placement_harness.cpp
 extern "C" void StartTown_DeferredSpawn_Tick(int frameNum);    // src/game/Game/starttown.cpp
@@ -379,7 +380,6 @@ extern "C" void StartTown_ApplyPendingOccupiedVisuals(int frameNum);   // src/ga
 extern "C" void FoodStockCensus_Tick(int frame);                 // src/diag/food_stock_census.cpp
 extern "C" void CitizenDeathHarness_Tick(int frameNum);   // src/diag/death_harness.cpp
 extern "C" void SaveLoadHarness_Tick(GameUpdateLoop* gul, int frameNum); // src/diag/saveload_harness.cpp
-extern "C" void DevLoopHarness_Tick(GameUpdateLoop* gul);                // src/diag/devloop_harness.cpp
 extern "C" void DisasterHarness_Tick(int frameNum);       // src/diag/disaster_harness.cpp
 extern "C" void PastureFillHarness_Tick(int frameNum);    // src/diag/pasture_harness.cpp
 extern "C" void MarketOverstock_Tick(int frameNum);   // src/diag/market_overstock_harness.cpp

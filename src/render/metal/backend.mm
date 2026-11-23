@@ -917,9 +917,9 @@ bool DeviceData::CreateDevice() {
         if (!w) {
             return false;
         }
-        if (Opt().background) {
-            _owner->backBufferWidth = 640;
-            _owner->backBufferHeight = 360;
+        if (Opt().background) {   // points: the window is sized to them below, then read back in pixels
+            _owner->backBufferWidth = Opt().backgroundWidth;
+            _owner->backBufferHeight = Opt().backgroundHeight;
         }
         auto* cfg = Video::Configuration::_singleton;
         if (cfg && !cfg->fullscreen && !Opt().background) {

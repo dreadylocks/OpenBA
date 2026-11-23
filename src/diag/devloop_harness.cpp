@@ -21,6 +21,7 @@
 //   quitting           the save is on disk; the game is closing
 // Every step is also an event-log row, so the player sees the restart coming and sees which build
 // came back, and a [DevLoop] line in standalone_error.log.
+#include "devloop_harness.h"
 #include "options.h"
 #include "openba_build_info.h"      // OPENBA_GIT_HASH / OPENBA_BUILD_DATE (generated into <build>/gen)
 #include "platform/common/platform_settings.h"   // Platform::ReadWholeFile / WriteFileAtomic
@@ -121,6 +122,10 @@ std::string StartSave(GameUpdateLoop* gul, Save::SaveLoad* saveLoad) {
 }
 
 }  // namespace
+
+bool DevLoopHarness_Attended() {
+    return Opt().devloop != nullptr && s_world != nullptr;
+}
 
 // Once per GameUpdateLoop::Update, beside the save harness (gameupdateloop.cpp).
 extern "C" void DevLoopHarness_Tick(GameUpdateLoop* gul) {

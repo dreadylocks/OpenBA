@@ -59,6 +59,7 @@
 #include "video/ImageBuffer.h"
 #include "graphics/Material.h"
 #include "options.h"
+#include "devloop_harness.h"   // DevLoopHarness_Attended (not retail: the dev loop, src/diag)
 #include "ui/DialogInstance.h"
 #include "object/TypeInfo.h"
 #include "graphics/Camera.h"
@@ -723,7 +724,8 @@ void SaveLoadDialog::OnUpdate(const System::Time& time) {
 // answer the question "may we take a decision retail would put to the player?".
 // The same six drivers src/app/main.cpp's unattended-boot guard keys on;
 // options.cpp folds them into one field.
-static bool SaveLoad_UnattendedRun() { return Opt().unattendedBoot; }
+// A dev-loop relaunch is unattended until its autoload lands in game (src/diag/devloop_harness.h).
+static bool SaveLoad_UnattendedRun() { return Opt().unattendedBoot && !DevLoopHarness_Attended(); }
 
 static int SaveLoad_ModalShowDialog(UI::UserInterface* ui,
                                     Object::InternalPtr<UI::DialogInstance>* dlgPtr,
