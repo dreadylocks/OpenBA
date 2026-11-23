@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -76,14 +77,15 @@ public:
 
     // Main thread. The hello for the NEXT connect (e.g. a newer lastSeq).
     void SetHello(const Message& hello);
-    // `ephemeral`: a message that only matters now (the villagers' positions): not queued while offline
-    // or while the queue is backed up (kEphemeralQueue), and the first to go when it is full.
+    // `ephemeral`: a message that only matters now (the villagers' positions). It does not wait in the
+    // queue: it is kept as the newest of its kind (its type and its "tmpl"), a newer one replaces it, and
+    // the writer sends it before anything queued, so a long queue (a shared map catching up) can neither
+    // starve it nor fill up with stale copies. Not kept while offline; never resent.
     void Send(const Message& message, bool ephemeral = false);
-    // Messages waiting to be written (any thread).
+    // Messages waiting in the queue (any thread); ephemeral ones are not counted.
     size_t Queued();
     // Messages dropped because the queue was full since Start (any thread).
     uint64_t Dropped() const { return dropped_.load(); }
-    static constexpr size_t kEphemeralQueue = 16;
     // Main thread: move everything that arrived into `out` (appended).
     void Poll(std::vector<Incoming>& out);
 
@@ -103,6 +105,7 @@ private:
     std::mutex              mu_;          // guards everything below
     std::condition_variable cv_;
     std::deque<std::string> outgoing_;
+    std::map<std::string, std::string> newest_;   // ephemeral: kind -> its newest text, sent first
     std::vector<Incoming>   incoming_;
     bool                    readerDone_ = false;
     Transport*              live_ = nullptr;   // the connected transport, for Stop's Close

@@ -235,6 +235,8 @@ struct FakeNet {
     std::vector<std::string> sent;                  // every frame sent, in order
     std::deque<std::string>  toReceive;             // frames the next Receives return
     bool                     dropLine = false;      // the current line "breaks"
+    bool                     holdSends = false;     // writes wait (a slow line) until cleared
+    int                      held = 0;              // writes waiting on holdSends now
 };
 FakeNet* g_net = nullptr;
 
@@ -248,7 +250,11 @@ public:
         return true;
     }
     bool Send(const std::string& text) override {
-        std::lock_guard<std::mutex> lock(g_net->mu);
+        std::unique_lock<std::mutex> lock(g_net->mu);
+        ++g_net->held;
+        g_net->cv.notify_all();
+        g_net->cv.wait(lock, [this] { return closed_ || !g_net->holdSends; });
+        --g_net->held;
         if (closed_) return false;
         g_net->sent.push_back(text);
         g_net->cv.notify_all();
@@ -680,6 +686,57 @@ UNIT_TEST(ext_neighbour_world_maths_same_bits_everywhere) {
 // A write that fails is not lost: the message goes back to the front of the queue and is the first
 // thing written on the next connection, after its hello. Villager positions (ephemeral) are never
 // queued while offline.
+// The villagers' positions (ephemeral) never wait behind a long queue: the newest of each kind goes
+// out first and replaces the one before it; queued messages keep their order.
+UNIT_TEST(ext_neighbour_link_ephemeral_newest_goes_first) {
+    FakeNet net;
+    g_net = &net;
+    Neighbour::Link link(&MakeFake);
+    Neighbour::Link::Options opt;
+    opt.url = "ws://fake";
+    opt.hello = Message("hello");
+    link.Start(opt);
+    for (int i = 0; i < 300 && (SentCount() < 1 || !link.Connected()); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK(link.Connected());
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        net.holdSends = true;   // a slow line: the next write waits
+    }
+    link.Send(Message("road").SetInt("cell", 1));
+    for (int i = 0; i < 300; ++i) {   // until the writer is stuck in that write
+        {
+            std::lock_guard<std::mutex> lock(net.mu);
+            if (net.held == 1) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    link.Send(Message("road").SetInt("cell", 2));
+    link.Send(Message("road").SetInt("cell", 3));
+    link.Send(Message("walkers").Set("tmpl", "T").Set("list", "a"), /*ephemeral=*/true);
+    link.Send(Message("walkers").Set("tmpl", "T").Set("list", "b"), /*ephemeral=*/true);   // replaces "a"
+    CHECK_EQ(static_cast<int>(link.Queued()), 2);
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        net.holdSends = false;
+        net.cv.notify_all();
+    }
+    for (int i = 0; i < 300 && SentCount() < 5; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));   // nothing more arrives
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        CHECK_EQ(static_cast<int>(net.sent.size()), 5);
+        if (net.sent.size() == 5) {
+            CHECK_STREQ(net.sent[1].c_str(), "{\"t\":\"road\",\"cell\":1}");
+            CHECK_STREQ(net.sent[2].c_str(), "{\"t\":\"walkers\",\"tmpl\":\"T\",\"list\":\"b\"}");
+            CHECK_STREQ(net.sent[3].c_str(), "{\"t\":\"road\",\"cell\":2}");
+            CHECK_STREQ(net.sent[4].c_str(), "{\"t\":\"road\",\"cell\":3}");
+        }
+    }
+    link.Stop();
+    g_net = nullptr;
+}
+
 UNIT_TEST(ext_neighbour_link_failed_write_is_resent) {
     FakeNet net;
     net.failFirst = 1000;   // offline for now
