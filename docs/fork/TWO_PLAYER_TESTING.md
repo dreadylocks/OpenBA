@@ -104,9 +104,14 @@ Each row is done when both towns have seen the right thing on screen.
 | 3 | pass | Both ways once both towns had people (the first failure was a town that had starved: "sending 0 of 0"). Villagers' positions now never wait behind the shared map's queue. |
 | 4 | pass | Each town's Log Cabin and storage barn rose to finished on the other's screen. |
 | 12 | pass | Pause and unpause both ways; a town joining a paused game comes up paused. |
-| 16 | in progress | See below. |
+| 7 | pass (Mac to PC) | A Colonial Charter dirt road reaches the neighbour (it never did: only road types 0 and 1 were sent, and CC's roads use more). Removing the neighbour's road is refused. Not yet: PC to Mac, stone roads, the speed bonus. |
+| 10 | pass | A half-built cabin demolished while the neighbour was away is gone from its map on return. A demolition done while paused is sent when the game runs on (the entity goes then). |
+| 16 | pass | The PC quit; the Mac built a road and a cabin, felled trees and demolished a site; the PC loaded its older save and saw all of it (after the fixes below); the PC's structures stayed drawn on the Mac while it was away. |
+| 17 | pass | The PC placed a cabin, was killed (taskkill /F) and loaded a save older than it: the cabin vanished from the Mac; the Mac's changes since that save all showed on the PC. |
 
 Found and fixed during the run: a dead town sends nothing (pause between steps); villagers starved behind
 a long queue; a reconnect kept structures taken down while away and the neighbour's released land; a tree
 felled or a road taken up after a town's last save came back when that save was loaded (the relay now
-keeps both records and replays them to a town that loads a save or starts again).
+keeps both records and replays them to a town that loads a save or starts again); a reload reported the
+removal tool's marks and the goods lying on the ground as buildings (61 for 3); the hang watchdog killed a
+dev loop game sitting in a Load's question.
