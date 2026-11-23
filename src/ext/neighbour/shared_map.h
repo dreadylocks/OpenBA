@@ -49,6 +49,10 @@ void Stop();
 // EXT SEAMs: true when the neighbour holds the tile (only ever in a lobby game).
 bool PeerHolds(int x, int y);
 bool PeerHoldsCell(uint32_t cellIdx);
+// EXT SEAM in PathfinderThread::SetCellTerrain: the terrain type the path worker gets for `cell`. A tile
+// under a solid part of the neighbour's building stays blocked whatever this town writes there (a tree
+// felled under it, a field's soil); `terrainType` otherwise, and always when the extension is off.
+int PathTerrain(uint32_t cell, int terrainType);
 
 // EXT SEAMs at the places structures are made: claim + mirror the entity's footprint.
 void NoteStructure(ComponentEntity* entity);

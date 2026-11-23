@@ -176,6 +176,7 @@ void MarkSolid(uint32_t cell, bool on) {
         if (ref++ == 0) pf->SetCellTerrain(static_cast<int>(cell), kBlockedType);
     } else {
         if (ref == 0) return;
+        // Count down first: PathTerrain lets the map's real type through once nothing holds the tile.
         if (--ref == 0) pf->SetCellTerrain(static_cast<int>(cell), map->cells.GetData()[cell].terrainType);
     }
 }
@@ -541,10 +542,25 @@ bool Spend() {
     return true;
 }
 
+// How many rects from the front of `q` fit one message: at most kMaxRects, and at most kMaxClaimTiles
+// tiles between them (the relay refuses a message past either). At least one.
+size_t FitOneMessage(const std::vector<TileRect>& q) {
+    size_t n = 0;
+    int64_t tiles = 0;
+    while (n < q.size() && n < static_cast<size_t>(kMaxRects)) {
+        const int64_t t = static_cast<int64_t>(q[n].w) * q[n].h;
+        if (n > 0 && tiles + t > kMaxClaimTiles) break;
+        tiles += t;
+        ++n;
+    }
+    return n;
+}
+
 void SendClaims(Link* link) {
-    // At most kMaxRects rectangles a message.
+    // A reloaded town with many fields once packed 64 of them into one message: past the relay's
+    // tile limit, refused whole ("bad claim"), and refused again on every join.
     while (!s_claimQueue.empty() && Spend()) {
-        const size_t n = s_claimQueue.size() < static_cast<size_t>(kMaxRects) ? s_claimQueue.size() : kMaxRects;
+        const size_t n = FitOneMessage(s_claimQueue);
         std::vector<TileRect> part(s_claimQueue.begin(), s_claimQueue.begin() + static_cast<long>(n));
         s_claimQueue.erase(s_claimQueue.begin(), s_claimQueue.begin() + static_cast<long>(n));
         Message c("claim");
@@ -552,7 +568,7 @@ void SendClaims(Link* link) {
         link->Send(c);
     }
     while (!s_releaseQueue.empty() && Spend()) {
-        const size_t n = s_releaseQueue.size() < static_cast<size_t>(kMaxRects) ? s_releaseQueue.size() : kMaxRects;
+        const size_t n = FitOneMessage(s_releaseQueue);
         std::vector<TileRect> part(s_releaseQueue.begin(), s_releaseQueue.begin() + static_cast<long>(n));
         s_releaseQueue.erase(s_releaseQueue.begin(), s_releaseQueue.begin() + static_cast<long>(n));
         Message r("release");
@@ -605,6 +621,11 @@ void End() {
 bool PeerHolds(int x, int y) {
     if (!s_on || s_dim == 0 || x < 0 || y < 0 || x >= s_dim || y >= s_dim) return false;
     return s_peer[static_cast<size_t>(y) * s_dim + x] != 0;
+}
+
+int PathTerrain(uint32_t cell, int terrainType) {
+    if (!s_on || cell >= s_solidRef.size() || s_solidRef[cell] == 0) return terrainType;
+    return kBlockedType;
 }
 
 bool PeerHoldsCell(uint32_t cellIdx) {

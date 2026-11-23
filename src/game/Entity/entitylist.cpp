@@ -1515,6 +1515,10 @@ void EntityList::FlushForSerialize(IO::Stream& stream) {
         if (removalCount > 0) {
             for (int64_t i = 0; i < removalCount; i++) {
                 ComponentEntity* localIBP = removalList._data[i];
+                // EXT SEAM (NOT RETAIL, ext.neighbour): the shared map forgets an entity before its free
+                // here too, as in DrainRemovals; a structure freed by a save otherwise stayed in its
+                // list and was read after the free.
+                Neighbour::SharedMap::NoteRemoved(localIBP);
                 RemoveEntity(&localIBP);
             }
             // B.3.2: Collection::Array<T>::SetSize — retail 0x1400032e0, stride 8

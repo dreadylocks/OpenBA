@@ -94,6 +94,7 @@ bool DecodeMembers(const std::string& text, std::vector<FamilyMember>& out);
 struct TileRect { int x = 0, y = 0, w = 0, h = 0; };
 constexpr int kMaxMapDim = 1024;
 constexpr int kMaxRects  = 64;
+constexpr int64_t kMaxClaimTiles = 4096;   // tiles in one claim / release message (the relay's kMaxClaimTiles)
 std::string EncodeRects(const std::vector<TileRect>& rects);
 bool DecodeRects(const std::string& text, std::vector<TileRect>& out);
 

@@ -419,15 +419,25 @@ export class Room {
     const rects = this.parseRects(msg.rects);
     if (!id || !rects) return this.fail(ws, "bad claim", false);
     const mine = String(a.seat);
-    let takenBy = null;
-    await this.eachTile(rects, false, (b, off) => {
-      if (b[off] !== "." && b[off] !== mine) { takenBy = b[off]; return false; }
-      return true;
-    });
-    if (takenBy !== null) return this.send(ws, { t: "claimed", id, ok: false, why: "your neighbor already holds that land" });
-    await this.eachTile(rects, true, (b, off) => { b[off] = mine; return true; });
-    this.send(ws, { t: "claimed", id, ok: true });
-    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "claims", seat: a.seat, rects: msg.rects });
+    // Rect by rect: a message carries many structures' land, and one that overlaps the neighbour's
+    // must not cost the others theirs (it used to refuse the whole message, again on every join).
+    const granted = [];
+    const refused = [];
+    for (const r of rects) {
+      let free = true;
+      await this.eachTile([r], false, (b, off) => {
+        if (b[off] !== "." && b[off] !== mine) { free = false; return false; }
+        return true;
+      });
+      (free ? granted : refused).push(r);
+    }
+    if (granted.length > 0) await this.eachTile(granted, true, (b, off) => { b[off] = mine; return true; });
+    const enc = (list) => list.map((r) => `${r.x},${r.y},${r.w},${r.h}`).join(";");
+    if (refused.length === 0) this.send(ws, { t: "claimed", id, ok: true });
+    else this.send(ws, { t: "claimed", id, ok: false, why: "your neighbor already holds that land", refused: enc(refused) });
+    if (granted.length > 0) {
+      for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "claims", seat: a.seat, rects: enc(granted) });
+    }
   }
 
   async onRelease(ws, a, msg) {
