@@ -455,6 +455,11 @@ void ApplyRoad(const Message& m) {
         if (::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId()))
             if (const MapDescription* md = desc->FindDescription<MapDescription>()) tt = md->_cellType;
     }
+    // The same road already here (a replay after a load, or a re-send after a reconnect): nothing to do.
+    if (type >= 0 && type <= 254 && c.field_0x2A == static_cast<uint8_t>(type) && c.field_0x2B != 0x80) {
+        s_applying = false;
+        return;
+    }
     ComponentEntity* standing = c.blocker.Get();
     const bool ours = standing != nullptr && standing->FindComponent<NaturalResourceComponent>() == nullptr;
     // Not where something of ours stands, not over a road as good, not over one being built.
