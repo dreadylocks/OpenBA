@@ -222,12 +222,111 @@ async function passwordHash(room, pass) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Write-back for a room's busy keys. Storage writes are what a room costs: Cloudflare's free plan allows
+// 100,000 rows written a day for the whole account, and a busy town (a run at 50x spreads and fells
+// thousands of plants a minute) rewrote these keys several times a second, which used the day's allowance
+// up and left every room unable to save a hello. Writes to these keys wait in memory and go together,
+// at most once every kFlushMs (an alarm), one row a key; reads see them at once. Claims, the room's meta,
+// chats and parcels still write through. A room evicted before its alarm loses those last seconds of the
+// buffered record (the live messages were already passed on; a town's structures are sent again on join).
+const kBufferedPrefixes = ["natlog:", "natq:", "roads:", "roadoff:", "roadq:", "mirror:"];
+const kFlushMs = 5000;
+
+class BufferedStore {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.puts = new Map();
+    this.dels = new Set();
+    this.armed = false;
+    this.rowsWritten = 0;
+  }
+
+  buffered(key) {
+    return kBufferedPrefixes.some((p) => key.startsWith(p));
+  }
+
+  async get(key) {
+    if (this.puts.has(key)) return this.puts.get(key);
+    if (this.dels.has(key)) return undefined;
+    return this.ctx.storage.get(key);
+  }
+
+  async put(keyOrEntries, value) {
+    if (typeof keyOrEntries === "string") {
+      if (this.buffered(keyOrEntries)) return this.stage(keyOrEntries, value);
+      this.rowsWritten += 1;
+      return this.ctx.storage.put(keyOrEntries, value);
+    }
+    const direct = {};
+    for (const [k, v] of Object.entries(keyOrEntries)) {
+      if (this.buffered(k)) this.stage(k, v);
+      else direct[k] = v;
+    }
+    const n = Object.keys(direct).length;
+    if (n > 0) {
+      this.rowsWritten += n;
+      await this.ctx.storage.put(direct);
+    }
+  }
+
+  stage(key, value) {
+    this.puts.set(key, value);
+    this.dels.delete(key);
+    this.arm();
+  }
+
+  async delete(keys) {
+    const direct = [];
+    for (const k of Array.isArray(keys) ? keys : [keys]) {
+      if (this.buffered(k)) {
+        this.puts.delete(k);
+        this.dels.add(k);
+        this.arm();
+      } else {
+        direct.push(k);
+      }
+    }
+    if (direct.length > 0) await this.ctx.storage.delete(direct);
+  }
+
+  async list(options) {
+    const out = await this.ctx.storage.list(options);
+    const prefix = (options && options.prefix) || "";
+    for (const k of this.dels) if (k.startsWith(prefix)) out.delete(k);
+    for (const [k, v] of this.puts) if (k.startsWith(prefix)) out.set(k, v);
+    return out;
+  }
+
+  arm() {
+    if (this.armed) return;
+    this.armed = true;
+    this.ctx.storage.setAlarm(Date.now() + kFlushMs);
+  }
+
+  async flush() {
+    this.armed = false;
+    const puts = [...this.puts];
+    const dels = [...this.dels];
+    this.puts.clear();
+    this.dels.clear();
+    for (let i = 0; i < puts.length; i += 100) await this.ctx.storage.put(Object.fromEntries(puts.slice(i, i + 100)));
+    for (let i = 0; i < dels.length; i += 100) await this.ctx.storage.delete(dels.slice(i, i + 100));
+    this.rowsWritten += puts.length + dels.length;
+  }
+}
+
 export class Room {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
+    this.store = new BufferedStore(ctx);
     // Pings are answered without waking the object (the hibernation API's auto-response).
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
+  }
+
+  // The write-back flush (BufferedStore.arm).
+  async alarm() {
+    await this.store.flush();
   }
 
   async fetch(request) {
@@ -246,7 +345,7 @@ export class Room {
   // meta: { passHash, seats: [name|null, name|null], seq }   chats: [{seq, from, seat, text}]
 
   async meta() {
-    return (await this.ctx.storage.get("meta")) || { passHash: null, seats: new Array(kSeats).fill(null), seq: 0 };
+    return (await this.store.get("meta")) || { passHash: null, seats: new Array(kSeats).fill(null), seq: 0 };
   }
 
   directory() {
@@ -380,7 +479,7 @@ export class Room {
     meta.settings = settings;
     meta.createdAt = Date.now();
     meta.passHash = await passwordHash(a.room, msg.pass.slice(0, kMaxPassChars));
-    await this.ctx.storage.put("meta", meta);
+    await this.store.put("meta", meta);
     // Now an ordinary join as the room's first town.
     return this.onHello(ws, a, { ...msg, t: "hello", lastSeq: 0 });
   }
@@ -411,7 +510,7 @@ export class Room {
         for (let x = r.x; x < r.x + r.w; x++) {
           const key = `claims:${Math.floor(x / kClaimBlock)}:${Math.floor(y / kClaimBlock)}`;
           if (!blocks.has(key)) {
-            const v = (await this.ctx.storage.get(key)) || ".".repeat(kClaimBlock * kClaimBlock);
+            const v = (await this.store.get(key)) || ".".repeat(kClaimBlock * kClaimBlock);
             blocks.set(key, v.split(""));
           }
           const off = (y % kClaimBlock) * kClaimBlock + (x % kClaimBlock);
@@ -422,7 +521,7 @@ export class Room {
     if (write) {
       const out = {};
       for (const [k, v] of blocks) out[k] = v.join("");
-      await this.ctx.storage.put(out);
+      await this.store.put(out);
     }
     return true;
   }
@@ -464,7 +563,7 @@ export class Room {
   // Everything the neighbour holds, for a town that just joined: one message per block.
   async sendClaims(ws, seat) {
     const other = String(1 - seat);
-    const all = await this.ctx.storage.list({ prefix: "claims:" });
+    const all = await this.store.list({ prefix: "claims:" });
     for (const [key, v] of all) {
       if (!v.includes(other)) continue;
       const [, bx, by] = key.split(":");
@@ -504,10 +603,10 @@ export class Room {
       }
     }
     const key = `mirror:${a.seat}`;
-    const all = (await this.ctx.storage.get(key)) || {};
+    const all = (await this.store.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
     all[id] = rec;
-    await this.ctx.storage.put(key, all);
+    await this.store.put(key, all);
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "build", ...rec });
   }
 
@@ -515,8 +614,8 @@ export class Room {
     const id = typeof msg.id === "string" && kBuildingId.test(msg.id) ? msg.id : "";
     if (!id) return this.fail(ws, "bad building", false);
     const key = `mirror:${a.seat}`;
-    const all = (await this.ctx.storage.get(key)) || {};
-    if (id in all) { delete all[id]; await this.ctx.storage.put(key, all); }
+    const all = (await this.store.get(key)) || {};
+    if (id in all) { delete all[id]; await this.store.put(key, all); }
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "unbuild", id });
   }
 
@@ -534,7 +633,7 @@ export class Room {
     // The road's material (a mod's road type the neighbour's game may not know the template of).
     const mat = typeof msg.mat === "string" ? msg.mat : "";
     const key = `roads:${a.seat}`;
-    const all = (await this.ctx.storage.get(key)) || {};
+    const all = (await this.store.get(key)) || {};
     if (removed) {
       // Only a town's own road comes up: a town that took up the neighbour's road in its copy (the
       // Remove tool over it) must not take it up in the neighbour's game too.
@@ -544,7 +643,7 @@ export class Room {
       if (!(cell in all) && Object.keys(all).length >= kMaxRoadCells) return this.fail(ws, "too many road tiles", false);
       all[cell] = mat ? [type, tt, msg.tmpl, mat] : [type, tt, msg.tmpl];
     }
-    await this.ctx.storage.put(key, all);
+    await this.store.put(key, all);
     await this.noteRoadsOff(a.seat, [cell], removed);
     const out = removed ? { t: "road", cell, off: true } : { t: "road", cell, type, tt, tmpl: msg.tmpl };
     if (!removed && mat) out.mat = mat;
@@ -559,7 +658,7 @@ export class Room {
   // loads a save older than the removal still has that road in its copy, and gets the removal again.
   async noteRoadsOff(seat, cells, off) {
     const key = `roadoff:${seat}`;
-    const set = new Set((await this.ctx.storage.get(key)) || []);
+    const set = new Set((await this.store.get(key)) || []);
     const before = set.size;
     for (const c of cells) {
       if (off) set.add(c);
@@ -568,14 +667,14 @@ export class Room {
     if (set.size === before) return;
     const list = [...set];
     while (list.length > kMaxRoadCells) list.shift();
-    await this.ctx.storage.put(key, list);
+    await this.store.put(key, list);
   }
 
   // For a town joining with a new game or a loaded save: the neighbour's removed roads (replay: the
   // town's copy may not have them any more), those it has not laid again since.
   async sendRoadsOff(ws, seat) {
-    const removed = (await this.ctx.storage.get(`roadoff:${1 - seat}`)) || [];
-    const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    const removed = (await this.store.get(`roadoff:${1 - seat}`)) || [];
+    const standing = (await this.store.get(`roads:${1 - seat}`)) || {};
     // In batches of cells (one message a tile could run past one call's sends).
     const off = removed.filter((cell) => !(cell in standing));
     for (let i = 0; i < off.length; i += 1800) this.send(ws, { t: "roadsOff", cells: off.slice(i, i + 1800).join(","), replay: true });
@@ -585,7 +684,7 @@ export class Room {
   // `add` true queues the cells, false takes them out of the queue (the road is back).
   async queueRoadOffs(seat, cells, add = true) {
     const key = `roadq:${seat}`;
-    const q = new Set((await this.ctx.storage.get(key)) || []);
+    const q = new Set((await this.store.get(key)) || []);
     const before = q.size;
     for (const c of cells) {
       if (add) q.add(c);
@@ -594,22 +693,22 @@ export class Room {
     if (!add && q.size === before) return;
     const list = [...q];
     while (list.length > kMaxRoadCells) list.shift();
-    await this.ctx.storage.put(key, list);
+    await this.store.put(key, list);
   }
 
   async sendRoadQueue(ws, seat) {
     const key = `roadq:${seat}`;
-    const q = (await this.ctx.storage.get(key)) || [];
+    const q = (await this.store.get(key)) || [];
     if (q.length === 0) return;
     // A road the neighbour holds now (laid again) is not taken up.
-    const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    const standing = (await this.store.get(`roads:${1 - seat}`)) || {};
     const off = q.filter((cell) => !(cell in standing));
     for (let i = 0; i < off.length; i += 1800) this.send(ws, { t: "roadsOff", cells: off.slice(i, i + 1800).join(",") });
-    await this.ctx.storage.delete(key);
+    await this.store.delete(key);
   }
 
   async sendRoads(ws, seat) {
-    const all = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    const all = (await this.store.get(`roads:${1 - seat}`)) || {};
     // In batches ("roadBatch"): the templates and materials once each, then "cell,type,tt,template,material"
     // a tile (material -1: none). 500 tiles keep a batch well under the game's 16 KB frame.
     const rows = Object.entries(all);
@@ -647,17 +746,17 @@ export class Room {
     const peers = this.socketsFor(1 - a.seat);
     if (peers.length > 0) { for (const peer of peers) this.send(peer, ev); return; }
     const key = `natq:${1 - a.seat}`;
-    const q = (await this.ctx.storage.get(key)) || [];
+    const q = (await this.store.get(key)) || [];
     q.push(look ? [ev.op === "rm" ? 0 : 1, cell, ev.tmpl, look[0], look[1]] : [ev.op === "rm" ? 0 : 1, cell, ev.tmpl]);
     while (q.length > kMaxNatQueue) q.shift();
-    await this.ctx.storage.put(key, q);
+    await this.store.put(key, q);
   }
 
   // A tile's record: the op and template as one number (op + 2 * template index), or with a new plant's
   // look [that number, grp, var].
   async logNat(seat, op, cell, tmpl, look = null) {
     const key = `natlog:${seat}:${cell >> kNatShardBits}`;
-    const shard = (await this.ctx.storage.get(key)) || { t: [], c: {} };
+    const shard = (await this.store.get(key)) || { t: [], c: {} };
     let i = shard.t.indexOf(tmpl);
     if (i < 0) {
       shard.t.push(tmpl);
@@ -665,7 +764,7 @@ export class Room {
     }
     const code = (op === "rm" ? 0 : 1) + 2 * i;
     shard.c[cell] = look ? [code, look[0], look[1]] : code;
-    await this.ctx.storage.put(key, shard);
+    await this.store.put(key, shard);
   }
 
   // Resource changes in few messages ("natBatch"): a long record sent one message a tile ran a joining
@@ -695,7 +794,7 @@ export class Room {
   // already as the record says). Returns how many.
   async sendNatLog(ws) {
     const entries = [];
-    for (const [, shard] of await this.ctx.storage.list({ prefix: "natlog:" })) {
+    for (const [, shard] of await this.store.list({ prefix: "natlog:" })) {
       for (const [cell, rec] of Object.entries(shard.c)) {
         const v = Array.isArray(rec) ? rec[0] : rec;
         entries.push(Array.isArray(rec) ? [Number(cell), v & 1, shard.t[v >> 1], rec[1], rec[2]]
@@ -708,9 +807,9 @@ export class Room {
 
   async sendNatQueue(ws, seat) {
     const key = `natq:${seat}`;
-    const q = (await this.ctx.storage.get(key)) || [];
+    const q = (await this.store.get(key)) || [];
     this.sendNatBatches(ws, q.map(([op, cell, tmpl, grp, vr]) => [cell, op, tmpl, grp, vr]), false);
-    if (q.length > 0) await this.ctx.storage.delete(key);
+    if (q.length > 0) await this.store.delete(key);
   }
 
   // A town starting a new game in its seat (hello `fresh`): what its earlier game left goes -- its
@@ -721,13 +820,13 @@ export class Room {
   async resetSeat(seat, keepNatQueue = false) {
     const peers = this.socketsFor(1 - seat);
     const mine = String(seat);
-    const mirror = (await this.ctx.storage.get(`mirror:${seat}`)) || {};
+    const mirror = (await this.store.get(`mirror:${seat}`)) || {};
     for (const id of Object.keys(mirror)) for (const p of peers) this.send(p, { t: "unbuild", id });
-    const roads = (await this.ctx.storage.get(`roads:${seat}`)) || {};
+    const roads = (await this.store.get(`roads:${seat}`)) || {};
     for (const cell of Object.keys(roads)) for (const p of peers) this.send(p, { t: "road", cell: Number(cell), off: true });
     await this.noteRoadsOff(seat, Object.keys(roads).map(Number), true);
     if (peers.length === 0 && Object.keys(roads).length > 0) await this.queueRoadOffs(1 - seat, Object.keys(roads).map(Number));
-    const blocks = await this.ctx.storage.list({ prefix: "claims:" });
+    const blocks = await this.store.list({ prefix: "claims:" });
     let batch = {};
     for (const [key, v] of blocks) {
       if (!v.includes(mine)) continue;
@@ -736,17 +835,17 @@ export class Room {
       const rects = `${Number(bx) * kClaimBlock},${Number(by) * kClaimBlock},${kClaimBlock},${kClaimBlock}`;
       for (const p of peers) this.send(p, { t: "released", seat, rects });
       if (Object.keys(batch).length === 100) {   // storage.put takes at most 128 keys at once
-        await this.ctx.storage.put(batch);
+        await this.store.put(batch);
         batch = {};
       }
     }
-    if (Object.keys(batch).length > 0) await this.ctx.storage.put(batch);
-    await this.ctx.storage.delete(keepNatQueue ? [`mirror:${seat}`, `roads:${seat}`]
+    if (Object.keys(batch).length > 0) await this.store.put(batch);
+    await this.store.delete(keepNatQueue ? [`mirror:${seat}`, `roads:${seat}`]
                                                : [`mirror:${seat}`, `roads:${seat}`, `natq:${1 - seat}`]);
   }
 
   async sendMirror(ws, seat) {
-    const all = (await this.ctx.storage.get(`mirror:${1 - seat}`)) || {};
+    const all = (await this.store.get(`mirror:${1 - seat}`)) || {};
     for (const rec of Object.values(all)) this.send(ws, { t: "build", ...rec });
     this.send(ws, { t: "mirrorEnd", count: Object.keys(all).length });
   }
@@ -766,7 +865,7 @@ export class Room {
         "from the same seed, so nothing shared would line up. This town cannot play in this room.", true);
     }
     meta.hashes[a.seat] = mine;
-    await this.ctx.storage.put("meta", meta);
+    await this.store.put("meta", meta);
     if (!other) return;   // the neighbour has not built its map yet; it will be told when it does
     const same = true;
     const report = (seat) => ({ t: "hashCheck", same, mine: meta.hashes[seat], theirs: meta.hashes[1 - seat] });
@@ -816,7 +915,7 @@ export class Room {
     }
     meta.seats[seat] = name;
     meta.compat[seat] = read.compat;
-    await this.ctx.storage.put("meta", meta);
+    await this.store.put("meta", meta);
 
     // The same town connecting again (a reconnect): the older line goes (a probe leaves the game's be).
     const probe = msg.probe === true;
@@ -855,7 +954,7 @@ export class Room {
     // What it missed: the neighbour's lines newer than the last one it saw.
     const lastSeq = Number.isInteger(msg.lastSeq) && msg.lastSeq > 0 ? msg.lastSeq : 0;
     // At most kReplayChats of them: a long absence must not flood the event log.
-    const chats = (await this.ctx.storage.get("chats")) || [];
+    const chats = (await this.store.get("chats")) || [];
     const missed = chats.filter((c) => c.seq > lastSeq && c.seat !== seat).slice(-kReplayChats);
     for (const c of missed) this.send(ws, { t: "chat", from: c.from, text: c.text, seq: c.seq });
     if (!probe) for (const peer of this.socketsFor(other)) this.send(peer, { t: "peer", name, online: true });
@@ -882,7 +981,7 @@ export class Room {
   // ---- parcels: goods and families. Kept until the receiving town acknowledges them. ----------
 
   async parcels() {
-    return (await this.ctx.storage.get("parcels")) || [];
+    return (await this.store.get("parcels")) || [];
   }
 
   async onParcel(ws, a, msg) {
@@ -901,7 +1000,7 @@ export class Room {
       }
       const entry = { id, kind: msg.kind, body: msg.body, from: a.name, fromSeat: a.seat, to };
       list.push(entry);
-      await this.ctx.storage.put("parcels", list);
+      await this.store.put("parcels", list);
       for (const peer of this.socketsFor(to)) this.send(peer, { t: "parcel", id, kind: entry.kind, body: entry.body, from: a.name });
     }
     this.send(ws, { t: "stored", id });
@@ -911,7 +1010,7 @@ export class Room {
     const id = typeof msg.id === "string" ? msg.id : "";
     const list = await this.parcels();
     const keep = list.filter((p) => !(p.id === id && p.to === a.seat));
-    if (keep.length !== list.length) await this.ctx.storage.put("parcels", keep);
+    if (keep.length !== list.length) await this.store.put("parcels", keep);
   }
 
   async onChat(ws, a, msg) {
@@ -920,10 +1019,10 @@ export class Room {
     const meta = await this.meta();
     meta.seq += 1;
     const entry = { seq: meta.seq, from: a.name, seat: a.seat, text };
-    const chats = (await this.ctx.storage.get("chats")) || [];
+    const chats = (await this.store.get("chats")) || [];
     chats.push(entry);
     while (chats.length > kKeepChats) chats.shift();
-    await this.ctx.storage.put({ meta, chats });
+    await this.store.put({ meta, chats });
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "chat", from: a.name, text, seq: entry.seq });
   }
 
