@@ -33,6 +33,7 @@
 #include "system/String.h"
 #include "system/Value.h"           // System::Time
 #include "application/Application.h"   // Application::Quit, the pause menu's Quit Game
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -55,6 +56,7 @@ enum class Phase {
 
 Phase       s_phase = Phase::Idle;
 const void* s_world = nullptr;   // the GameUpdateLoop whose first frame wrote "running"
+std::atomic<bool> s_attended{false};   // s_world was set: read by the hang watchdog's thread too
 std::chrono::steady_clock::time_point s_nextCheck;
 std::string s_lastRefusal;       // logged once per reason, not every second
 
@@ -124,7 +126,7 @@ std::string StartSave(GameUpdateLoop* gul, Save::SaveLoad* saveLoad) {
 }  // namespace
 
 bool DevLoopHarness_Attended() {
-    return Opt().devloop != nullptr && s_world != nullptr;
+    return Opt().devloop != nullptr && s_attended.load();
 }
 
 // Once per GameUpdateLoop::Update, beside the save harness (gameupdateloop.cpp).
@@ -134,6 +136,7 @@ extern "C" void DevLoopHarness_Tick(GameUpdateLoop* gul) {
 
     if (s_world != gul) {
         s_world = gul;
+        s_attended.store(true);
         s_phase = Phase::Idle;
         s_nextCheck = now;
         WriteState(std::string("running ") + OPENBA_GIT_HASH);

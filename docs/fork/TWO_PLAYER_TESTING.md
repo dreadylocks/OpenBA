@@ -94,3 +94,19 @@ Each row is done when both towns have seen the right thing on screen.
 | 18 | Fresh start | Start over in the same seat | The neighbor's old buildings, roads and land vanish |
 | 19 | Long game | Play an hour at top speed, both towns | No drift: counts of buildings / roads match; no crash or hang |
 | 20 | Continents | Repeat 1-8 on a Continents room | Sea between, both on their own land, traders reach both |
+
+## Results, 2026-11-22 (Mac against Windows, rooms val-1 to val-3)
+
+| # | Result | Notes |
+|---|---|---|
+| 1 | pass | Lobby on both machines through the real UI (front-end shots); the same scatter fingerprint and "the same land" both ways. |
+| 2 | pass | No trees inside the neighbour's start buildings; their ground painted. They draw solid, not see-through: the model material ignores the mirror's opacity (a shader change, not done). |
+| 3 | pass | Both ways once both towns had people (the first failure was a town that had starved: "sending 0 of 0"). Villagers' positions now never wait behind the shared map's queue. |
+| 4 | pass | Each town's Log Cabin and storage barn rose to finished on the other's screen. |
+| 12 | pass | Pause and unpause both ways; a town joining a paused game comes up paused. |
+| 16 | in progress | See below. |
+
+Found and fixed during the run: a dead town sends nothing (pause between steps); villagers starved behind
+a long queue; a reconnect kept structures taken down while away and the neighbour's released land; a tree
+felled or a road taken up after a town's last save came back when that save was loaded (the relay now
+keeps both records and replays them to a town that loads a save or starts again).

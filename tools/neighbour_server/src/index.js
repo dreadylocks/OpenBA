@@ -505,9 +505,12 @@ export class Room {
     if (!Number.isInteger(cell) || cell < 0 || cell >= kMaxCell) return this.fail(ws, "bad road", false);
     const removed = msg.off === true;
     if (!removed && (!Number.isInteger(type) || type < 0 || type > 254 || !Number.isInteger(tt) || tt < 0 || tt > 31 ||
-        typeof msg.tmpl !== "string" || msg.tmpl.length > kMaxPathChars)) {
+        typeof msg.tmpl !== "string" || msg.tmpl.length > kMaxPathChars ||
+        (msg.mat !== undefined && (typeof msg.mat !== "string" || msg.mat.length > kMaxPathChars)))) {
       return this.fail(ws, "bad road", false);
     }
+    // The road's material (a mod's road type the neighbour's game may not know the template of).
+    const mat = typeof msg.mat === "string" ? msg.mat : "";
     const key = `roads:${a.seat}`;
     const all = (await this.ctx.storage.get(key)) || {};
     if (removed) {
@@ -517,11 +520,12 @@ export class Room {
       delete all[cell];
     } else {
       if (!(cell in all) && Object.keys(all).length >= kMaxRoadCells) return this.fail(ws, "too many road tiles", false);
-      all[cell] = [type, tt, msg.tmpl];
+      all[cell] = mat ? [type, tt, msg.tmpl, mat] : [type, tt, msg.tmpl];
     }
     await this.ctx.storage.put(key, all);
     await this.noteRoadsOff(a.seat, [cell], removed);
     const out = removed ? { t: "road", cell, off: true } : { t: "road", cell, type, tt, tmpl: msg.tmpl };
+    if (!removed && mat) out.mat = mat;
     const peers = this.socketsFor(1 - a.seat);
     for (const peer of peers) this.send(peer, out);
     // An absent neighbour keeps our roads in its save as real roads: one taken up while it is away must
@@ -581,7 +585,11 @@ export class Room {
 
   async sendRoads(ws, seat) {
     const all = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
-    for (const [cell, [type, tt, tmpl]] of Object.entries(all)) this.send(ws, { t: "road", cell: Number(cell), type, tt, tmpl });
+    for (const [cell, [type, tt, tmpl, mat]] of Object.entries(all)) {
+      const out = { t: "road", cell: Number(cell), type, tt, tmpl };
+      if (mat) out.mat = mat;
+      this.send(ws, out);
+    }
   }
 
   // ---- shared natural resources (M3) -------------------------------------------------------------

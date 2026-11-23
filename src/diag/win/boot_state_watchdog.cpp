@@ -92,11 +92,19 @@
 #include <cstdarg>
 
 #include "options.h"
+#include "devloop_harness.h"   // DevLoopHarness_Attended: a dev loop game in play is attended
 #include "platform/common/cpu/topology.h"   // CPULIMIT: the [Cpu] facts on the RUNNING line
 
 namespace BootState {
 
 namespace {
+
+// Nobody is watching: an unattended boot, until a dev loop game reaches play (DevLoopHarness_Attended):
+// from then on its window is a player's, and a modal there (a Load that asks about mods) waits for them.
+bool Unattended() {
+    return Opt().unattendedBoot && !DevLoopHarness_Attended();
+}
+
 
 volatile LONG g_startupComplete = 0;
 volatile LONG g_quitting        = 0;
@@ -348,7 +356,7 @@ DWORD WINAPI WatchdogThread(LPVOID) {
                 "frame for %us (budget %us, frame=%d). Writing standalone_hang.log "
                 "(all-thread stacks).%s\n",
                 phase, uptimeSec, staleSec, budget, static_cast<int32_t>(frame),
-                Opt().unattendedBoot ? " Unattended run: terminating with exit code 4."
+                Unattended() ? " Unattended run: terminating with exit code 4."
                                      : " Attended run: NOT terminating.");
             std::fflush(stderr);
 
@@ -356,7 +364,7 @@ DWORD WINAPI WatchdogThread(LPVOID) {
 
             // Self-terminate ONLY when nobody is watching. An attended run may
             // legitimately be sitting in a dialog with a human in front of it.
-            if (Opt().unattendedBoot) {
+            if (Unattended()) {
                 TerminateProcess(GetCurrentProcess(), 4);
             }
         }

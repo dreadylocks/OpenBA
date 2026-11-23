@@ -6,6 +6,7 @@
 
 #include "graphics/Scene.h"
 #include "graphics/Mesh.h"
+#include "graphics/Material.h"   // Graphics::MaterialInstance: a road's material by path
 #include "math/Math.h"
 
 #include "ext/neighbour/shared_map.h"
@@ -115,7 +116,7 @@ std::vector<uint8_t> s_solidRef;            // per cell: how many mirrors hold i
 // M3.
 bool s_live = false;                        // the world is built (the first Tick): changes are news
 bool s_applying = false;                    // applying the neighbour's change: not news
-std::string s_roadTmpl[2];                  // the road tool's template per road type
+std::map<int, std::string> s_roadTmpl;      // the road tool's template per road type (a mod adds types)
 // The game's own road tools, per road type (CreateRoadDescription's bool: 0 stone, 1 dirt): sent when
 // this game has not used the road tool since it was loaded.
 const char* const kRoadTmplDefault[2] = {"Template\\StoneRoad.rsc:resource", "Template\\DirtRoad.rsc:resource"};
@@ -347,9 +348,28 @@ void Queue(const Message& m) {
 // ---- M3: roads ----------------------------------------------------------------------------------
 
 // The template sent with a road of this type: the road tool's, or the game's own road of that type.
+// A road type is CreateRoadDescription's byte, which retail's roads keep at 0 (stone) and 1 (dirt); a mod's
+// roads use more (Colonial Charter's run past a dozen), the same on both sides with the same mods.
 std::string RoadTemplate(uint8_t type) {
-    if (type > 1) return std::string();
-    return s_roadTmpl[type].empty() ? std::string(kRoadTmplDefault[type]) : s_roadTmpl[type];
+    auto it = s_roadTmpl.find(type);
+    if (it != s_roadTmpl.end() && !it->second.empty()) return it->second;
+    return type <= 1 ? std::string(kRoadTmplDefault[type]) : std::string();
+}
+
+// The material the finished road of this type is drawn with (WorldGeometry's batch material, which the
+// save keeps): what the neighbour loads when it does not know the template (a loaded game whose road tool
+// has not been used since).
+std::string RoadMaterial(uint8_t type) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    WorldGeometry* wg = g != nullptr ? g->m_worldGeometry : nullptr;
+    if (wg == nullptr || wg->_batchMaterials.data == nullptr || type >= wg->_batchMaterials.size) return std::string();
+    return PathOf(wg->_batchMaterials.data[type]);
+}
+
+void SetRoadLook(Message& r, uint8_t type) {
+    r.Set("tmpl", RoadTemplate(type));
+    const std::string mat = RoadMaterial(type);
+    if (!mat.empty()) r.Set("mat", mat);
 }
 
 // A loaded game's roads, sent again (ExpectReload): every road tile of this town's -- a road here on land
@@ -369,12 +389,12 @@ void ScanRoads() {
                 if (runStart < 0) runStart = x;
                 ++claimed;
                 const MapCell& c = cells[i];
-                if (c.field_0x2B != 0x80 && c.field_0x2A <= 1) {
+                if (c.field_0x2B != 0x80) {
                     Message r("road");
                     r.SetInt("cell", static_cast<int64_t>(i))
                      .SetInt("type", c.field_0x2A)
-                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f))
-                     .Set("tmpl", RoadTemplate(c.field_0x2A));
+                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f));
+                    SetRoadLook(r, c.field_0x2A);
                     Queue(r);
                     ++sent;
                 }
@@ -447,6 +467,14 @@ void ApplyRoad(const Message& m) {
     if (wg->_batchMaterials.size <= type || wg->_batchMaterials.data == nullptr ||
         wg->_batchMaterials.data[type] == nullptr) {
         Graphics::MaterialInstance* decal = RoadDecal(tmpl);
+        if (decal == nullptr) {   // a template this game does not know: the material itself
+            const std::string mat = m.GetOr("mat", "");
+            ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
+            if (!mat.empty() && mat.size() <= 200 && f != nullptr) {
+                Graphics::MaterialInstance* mi = f->FindOrLoadAs<Graphics::MaterialInstance>(System::Filename(mat.c_str()));
+                if (::Object::IsDerivedFromNullSafe(mi, Graphics::MaterialInstance::TypeId())) decal = mi;
+            }
+        }
         if (decal == nullptr) {
             ++s_applied.refused;
             s_lastRefusal = "a road of a kind this game does not know";
@@ -617,8 +645,7 @@ void End() {
     s_solidRef.clear();
     s_quiet.clear();
     s_pending.clear();
-    s_roadTmpl[0].clear();
-    s_roadTmpl[1].clear();
+    s_roadTmpl.clear();
     s_rescanRoads = false;
     s_applied = Applied();
     s_appliedLogged = Applied();
@@ -739,7 +766,7 @@ void NoteRoadCell(uint32_t cellIdx) {
 }
 
 void NoteRoadTemplate(uint8_t roadType, const ComponentDescription* tool) {
-    if (!s_on || roadType > 1) return;
+    if (!s_on) return;
     s_roadTmpl[roadType] = PathOf(tool);
 }
 
@@ -753,8 +780,9 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
         if (PeerHoldsCell(static_cast<uint32_t>(cellIdx))) return;   // the neighbour's road: not ours to take up
         r.SetBool("off", true);
     } else {
-        if (c.field_0x2A > 1) return;   // not a road type this side knows
-        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f)).Set("tmpl", RoadTemplate(c.field_0x2A));
+        if (c.field_0x2A == 0xFF) return;   // no road here after all
+        r.SetInt("type", c.field_0x2A).SetInt("tt", static_cast<int64_t>(terrainType & 0x1f));
+        SetRoadLook(r, c.field_0x2A);
     }
     Queue(r);
 }

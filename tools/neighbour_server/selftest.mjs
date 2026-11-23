@@ -235,6 +235,10 @@ await new Promise((r) => setTimeout(r, 300));
 check(!creator.inbox.some((m) => m.t === "road" && m.cell === 70000 && m.off === true), "a town cannot take up the neighbour's road");
 creator.ws.send(JSON.stringify({ t: "road", cell: -4, type: 0, tt: 6, tmpl: "" }));
 check(!!(await tryWait(creator.wait((m) => m.t === "error" && /road/.test(m.why)))), "a malformed road is refused");
+// A mod's road type (Colonial Charter's run past a dozen) with its material, kept and passed on.
+creator.ws.send(JSON.stringify({ t: "road", cell: 70100, type: 7, tt: 6, tmpl: "", mat: "CC\\Material\\RoadGravel.rsc" }));
+const modRoad = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70100));
+check(modRoad && modRoad.type === 7 && modRoad.mat === "CC\\Material\\RoadGravel.rsc", "a mod's road type is passed on with its material");
 creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\Tree.rsc" }));
 const nr = await tryWait(rejoin.wait((m) => m.t === "nat" && m.cell === 1234));
 check(nr && nr.op === "rm", "a felled tree is passed on");
@@ -254,6 +258,8 @@ const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999
 check(queued && queued.op === "add", "a resource change waits for a town that is away");
 const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
 check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001 && !m.off), "a town joining gets the neighbour's roads (not removed ones)");
+const keptMod = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70100));
+check(keptMod && keptMod.mat === "CC\\Material\\RoadGravel.rsc", "and a mod road keeps its material");
 const awayOff = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70002 && m.off === true));
 check(!!awayOff, "a road taken up while the town was away is taken up on its return");
 check(!rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70003 && m.off === true), "but not one laid again meanwhile");
