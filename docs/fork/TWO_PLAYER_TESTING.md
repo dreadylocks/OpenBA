@@ -118,3 +118,13 @@ felled or a road taken up after a town's last save came back when that save was 
 keeps both records and replays them to a town that loads a save or starts again); a reload reported the
 removal tool's marks and the goods lying on the ground as buildings (61 for 3); the hang watchdog killed a
 dev loop game sitting in a Load's question.
+
+### Open after this run
+
+- The neighbour's buildings and villagers draw solid, not see-through: the model material ignores the
+  mirror's opacity (a shader change).
+- Goods a receiving game does not know (another mod list) are dropped with an event line, not returned.
+- Saves written on the Windows PC list a mod with an empty display name that DoLoad reports as
+  `modsOutOfDate` (CheckMod 2) when the same PC loads them; not yet traced (needs one such save).
+- The removal tool's preview over the neighbour's road is green (the removal itself skips those tiles).
+- Row 20 (Continents) not run; row 6 checked by solid-tile counts only.
