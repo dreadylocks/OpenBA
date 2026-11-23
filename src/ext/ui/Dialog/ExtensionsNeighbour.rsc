@@ -79,11 +79,13 @@ ButtonDescription buttonSendFamily : "button" { ElementDescription _content = "c
 // Chat: the New Game dialog's name box, longer.
 RibbonDescription chatRow
 {
-	int _cellPad = 6; ElementDescription _elements [ "buttonSend" "editChat" ]	// Send first: the box widens to the right as it fills, and Send stays put
+	int _cellPad = 6; ElementDescription _elements [ "editChat" "buttonSend" ]
 }
 EditDescription editChat : "NewGame.rsc:editName"
 {
-	int _maxLength = 120; int _minWidth = 360; String _text = "";
+	// The box is as wide as a full line (an edit box widens with its text, and the centred panel with
+	// it, moving Send and Cancel under the player's hand): 80 characters fit in 560.
+	int _maxLength = 80; int _minWidth = 560; String _text = "";
 	String _filter = "";		// any character (the name box allows letters only)
 }
 

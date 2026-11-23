@@ -114,7 +114,11 @@ public:
             // or Esc only ends the typing and keeps the text: a half-typed line must not go because
             // the player reached for something else.
             const ::Input::Device* dev = ::Input::Device::_singleton;
-            if (dev != nullptr && dev->_keyboard[kKeyEnter].pressed) SendTyped();
+            // The event can come a frame after the key's press: Enter down, just pressed or just let go.
+            if (dev != nullptr) {
+                const ::Input::Device::State& enter = dev->_keyboard[kKeyEnter];
+                if (enter.pressed || enter.released || enter.value != 0) SendTyped();
+            }
         }
         Object::InternalPtr<UI::Element> copy = *element;
         UI::DialogInstance::OnElementEvent(&copy, msg, id, c, d, e, userData);
