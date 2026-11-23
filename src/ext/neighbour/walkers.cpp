@@ -127,7 +127,7 @@ void SendOurs(Link* link) {
     for (const auto& kv : lists) {
         Message m("walkers");
         m.Set("tmpl", kv.first).Set("list", kv.second);
-        link->Send(m);
+        link->Send(m, /*ephemeral=*/true);   // only the newest positions matter
     }
 }
 

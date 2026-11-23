@@ -676,3 +676,38 @@ UNIT_TEST(ext_neighbour_world_maths_same_bits_everywhere) {
     std::printf("  world maths digest %016llx\n", static_cast<unsigned long long>(h));
     CHECK(h == 0xdddeb20c8806872bull);   // arm64 Mac, clang (2026-10-23)
 }
+
+// A write that fails is not lost: the message goes back to the front of the queue and is the first
+// thing written on the next connection, after its hello. Villager positions (ephemeral) are never
+// queued while offline.
+UNIT_TEST(ext_neighbour_link_failed_write_is_resent) {
+    FakeNet net;
+    net.failFirst = 1000;   // offline for now
+    g_net = &net;
+    Neighbour::Link link(&MakeFake);
+    Neighbour::Link::Options opt;
+    opt.url = "ws://fake";
+    opt.hello = Message("hello");
+    opt.firstRetryMs = 20;
+    opt.maxRetryMs = 40;
+    link.Start(opt);
+    link.Send(Message("road").SetInt("cell", 7));
+    link.Send(Message("walkers").Set("list", "1,2,3"), /*ephemeral=*/true);   // offline: dropped
+    CHECK_EQ(static_cast<int>(link.Queued()), 1);
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        net.failFirst = 0;   // the line comes back
+    }
+    for (int i = 0; i < 300 && SentCount() < 2; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        CHECK_EQ(static_cast<int>(net.sent.size()), 2);
+        if (net.sent.size() == 2) {
+            CHECK_STREQ(net.sent[0].c_str(), "{\"t\":\"hello\"}");
+            CHECK_STREQ(net.sent[1].c_str(), "{\"t\":\"road\",\"cell\":7}");
+        }
+    }
+    CHECK_EQ(static_cast<int>(link.Dropped()), 0);
+    link.Stop();
+    g_net = nullptr;
+}

@@ -75,6 +75,7 @@
 #include "Game/WorkSchedulerNodes.h"
 #include "Game/cell_stamp.h"   // AMBMEMO: CellStamp::NoteWrite after a cell store
 #include "cell_trace.h"   // red square: BANISHED_CELL_TRACE (src/diag/cell_trace.h)
+#include "ext/neighbour/shared_map.h"   // EXT SEAM: ext.neighbour, the neighbour's roads (NOT RETAIL)
 
 // (The removal-eligibility checks are RemovalTool members: tool_base_path.cpp.)
 
@@ -699,7 +700,10 @@ bool RemovalTool::CalcPath(int param_2, int param_3) {
 
                     // ---- road removal (flag desc+0x40) ----
                     Map* piVar15 = GameUpdateLoop::_singleton->m_game;
-                    if (removalDesc->_b40) {
+                    // EXT SEAM (NOT RETAIL, ext.neighbour): a road on the neighbour's land is theirs:
+                    // this town's Remove tool leaves it. Never true otherwise.
+                    if (removalDesc->_b40 &&
+                        !Neighbour::SharedMap::PeerHoldsCell(static_cast<uint32_t>(piVar15->size * iRow + iCol))) {
                         int cid = piVar15->size * iRow + iCol;
                         const MapCell* cl = &piVar15->cells.GetData()[cid];
                         uint32_t mask = 1u << (cl->terrainType & 0x1f);

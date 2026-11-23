@@ -57,7 +57,10 @@ public:
         Message     hello;               // sent first on every (re)connect
         uint32_t    firstRetryMs = 2000;
         uint32_t    maxRetryMs   = 30000;
-        size_t      maxQueued    = 64;   // outgoing messages kept while offline; oldest dropped
+        // Outgoing messages kept (while offline, or while the line is slower than the game): a
+        // generous bound, so nothing that matters is lost; the shared map stops handing over more while
+        // Queued() is high (backpressure), and keeps its own backlog, which the save holds.
+        size_t      maxQueued    = 20000;
         uint32_t    pingMs       = 25000; // a {"t":"ping"} after this long with nothing sent
     };
 
@@ -73,7 +76,14 @@ public:
 
     // Main thread. The hello for the NEXT connect (e.g. a newer lastSeq).
     void SetHello(const Message& hello);
-    void Send(const Message& message);
+    // `ephemeral`: a message that only matters now (the villagers' positions): not queued while offline
+    // or while the queue is backed up (kEphemeralQueue), and the first to go when it is full.
+    void Send(const Message& message, bool ephemeral = false);
+    // Messages waiting to be written (any thread).
+    size_t Queued();
+    // Messages dropped because the queue was full since Start (any thread).
+    uint64_t Dropped() const { return dropped_.load(); }
+    static constexpr size_t kEphemeralQueue = 16;
     // Main thread: move everything that arrived into `out` (appended).
     void Poll(std::vector<Incoming>& out);
 
@@ -88,6 +98,7 @@ private:
     std::thread           worker_;
     std::atomic<bool>     stop_{false};
     std::atomic<bool>     connected_{false};
+    std::atomic<uint64_t> dropped_{0};
 
     std::mutex              mu_;          // guards everything below
     std::condition_variable cv_;

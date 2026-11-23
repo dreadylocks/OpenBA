@@ -495,14 +495,48 @@ export class Room {
     }
     const key = `roads:${a.seat}`;
     const all = (await this.ctx.storage.get(key)) || {};
-    if (removed) delete all[cell];
-    else {
+    if (removed) {
+      // Only a town's own road comes up: a town that took up the neighbour's road in its copy (the
+      // Remove tool over it) must not take it up in the neighbour's game too.
+      if (!(cell in all)) return;
+      delete all[cell];
+    } else {
       if (!(cell in all) && Object.keys(all).length >= kMaxRoadCells) return this.fail(ws, "too many road tiles", false);
       all[cell] = [type, tt, msg.tmpl];
     }
     await this.ctx.storage.put(key, all);
     const out = removed ? { t: "road", cell, off: true } : { t: "road", cell, type, tt, tmpl: msg.tmpl };
-    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, out);
+    const peers = this.socketsFor(1 - a.seat);
+    for (const peer of peers) this.send(peer, out);
+    // An absent neighbour keeps our roads in its save as real roads: one taken up while it is away must
+    // reach it when it comes back (a road laid again meanwhile cancels that).
+    if (peers.length === 0) await this.queueRoadOffs(1 - a.seat, [cell], removed);
+  }
+
+  // The road tiles taken up while `seat` was away, sent to it on joining after the roads that stand.
+  // `add` true queues the cells, false takes them out of the queue (the road is back).
+  async queueRoadOffs(seat, cells, add = true) {
+    const key = `roadq:${seat}`;
+    const q = new Set((await this.ctx.storage.get(key)) || []);
+    const before = q.size;
+    for (const c of cells) {
+      if (add) q.add(c);
+      else q.delete(c);
+    }
+    if (!add && q.size === before) return;
+    const list = [...q];
+    while (list.length > kMaxRoadCells) list.shift();
+    await this.ctx.storage.put(key, list);
+  }
+
+  async sendRoadQueue(ws, seat) {
+    const key = `roadq:${seat}`;
+    const q = (await this.ctx.storage.get(key)) || [];
+    if (q.length === 0) return;
+    // A road the neighbour holds now (laid again) is not taken up.
+    const standing = (await this.ctx.storage.get(`roads:${1 - seat}`)) || {};
+    for (const cell of q) if (!(cell in standing)) this.send(ws, { t: "road", cell, off: true });
+    await this.ctx.storage.delete(key);
   }
 
   async sendRoads(ws, seat) {
@@ -547,6 +581,7 @@ export class Room {
     for (const id of Object.keys(mirror)) for (const p of peers) this.send(p, { t: "unbuild", id });
     const roads = (await this.ctx.storage.get(`roads:${seat}`)) || {};
     for (const cell of Object.keys(roads)) for (const p of peers) this.send(p, { t: "road", cell: Number(cell), off: true });
+    if (peers.length === 0 && Object.keys(roads).length > 0) await this.queueRoadOffs(1 - seat, Object.keys(roads).map(Number));
     const blocks = await this.ctx.storage.list({ prefix: "claims:" });
     let batch = {};
     for (const [key, v] of blocks) {
@@ -685,6 +720,7 @@ export class Room {
       await this.sendClaims(ws, seat);
       await this.sendMirror(ws, seat);
       await this.sendRoads(ws, seat);
+      await this.sendRoadQueue(ws, seat);
       await this.sendNatQueue(ws, seat);
     }
   }

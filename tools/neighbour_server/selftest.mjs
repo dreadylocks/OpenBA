@@ -228,6 +228,11 @@ creator.ws.send(JSON.stringify({ t: "road", cell: 70001, type: 1, tt: 7, tmpl: "
 await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001));
 creator.ws.send(JSON.stringify({ t: "road", cell: 70001, off: true }));
 check(!!(await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70001 && m.off === true))), "a removed road tile is passed on");
+// A town taking up the NEIGHBOUR's road in its own copy (the Remove tool over it) never takes it up in
+// the neighbour's game: the relay passes on only a town's own road removals.
+rejoin.ws.send(JSON.stringify({ t: "road", cell: 70000, off: true }));
+await new Promise((r) => setTimeout(r, 300));
+check(!creator.inbox.some((m) => m.t === "road" && m.cell === 70000 && m.off === true), "a town cannot take up the neighbour's road");
 creator.ws.send(JSON.stringify({ t: "road", cell: -4, type: 0, tt: 6, tmpl: "" }));
 check(!!(await tryWait(creator.wait((m) => m.t === "error" && /road/.test(m.why)))), "a malformed road is refused");
 creator.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 1234, tmpl: "Template\Tree.rsc" }));
@@ -236,12 +241,22 @@ check(nr && nr.op === "rm", "a felled tree is passed on");
 rejoin.ws.close();
 await new Promise((r) => setTimeout(r, 300));
 creator.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 999, tmpl: "Template\Tree.rsc" }));
+// Roads taken up while the neighbour is away reach it when it comes back (it holds them in its save);
+// one laid again meanwhile does not.
+creator.ws.send(JSON.stringify({ t: "road", cell: 70002, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70002, off: true }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, off: true }));
+creator.ws.send(JSON.stringify({ t: "road", cell: 70003, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
 await new Promise((r) => setTimeout(r, 300));
 const rejoin2 = opener(lobbyRoom, { t: "hello", pass: "pw2", name: "Joinham", join: true, lastSeq: 99 });
 const queued = await tryWait(rejoin2.wait((m) => m.t === "nat" && m.cell === 999));
 check(queued && queued.op === "add", "a resource change waits for a town that is away");
 const roads = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70000));
-check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001), "a town joining gets the neighbour's roads (not removed ones)");
+check(roads && !rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70001 && !m.off), "a town joining gets the neighbour's roads (not removed ones)");
+const awayOff = await tryWait(rejoin2.wait((m) => m.t === "road" && m.cell === 70002 && m.off === true));
+check(!!awayOff, "a road taken up while the town was away is taken up on its return");
+check(!rejoin2.inbox.some((m) => m.t === "road" && m.cell === 70003 && m.off === true), "but not one laid again meanwhile");
 rejoin2.ws.close();
 
 creator.ws.close(); joiner.ws.close(); dup.ws.close(); missing.ws.close();

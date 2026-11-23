@@ -37,13 +37,22 @@ void Link::SetHello(const Message& hello) {
     options_.hello = hello;
 }
 
-void Link::Send(const Message& message) {
+void Link::Send(const Message& message, bool ephemeral) {
     {
         std::lock_guard<std::mutex> lock(mu_);
+        if (ephemeral && (!connected_.load() || outgoing_.size() >= kEphemeralQueue)) return;
         outgoing_.push_back(message.Encode());
-        while (outgoing_.size() > options_.maxQueued) outgoing_.pop_front();
+        while (outgoing_.size() > options_.maxQueued) {
+            outgoing_.pop_front();
+            dropped_.fetch_add(1);
+        }
     }
     cv_.notify_all();
+}
+
+size_t Link::Queued() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return outgoing_.size();
 }
 
 void Link::Poll(std::vector<Incoming>& out) {
@@ -122,6 +131,7 @@ void Link::WorkerMain() {
         bool ok = t->Send(hello);
         while (ok) {
             std::string next;
+            bool queued = false;   // `next` came off the queue (a ping did not)
             {
                 std::unique_lock<std::mutex> lock(mu_);
                 const bool woke = cv_.wait_for(lock, std::chrono::milliseconds(options_.pingMs), [this] {
@@ -131,11 +141,16 @@ void Link::WorkerMain() {
                 if (woke) {
                     next = std::move(outgoing_.front());
                     outgoing_.pop_front();
+                    queued = true;
                 } else {
                     next = Message("ping").Encode();
                 }
             }
             ok = t->Send(next);
+            if (!ok && queued) {   // not written: first in line again for the next connection
+                std::lock_guard<std::mutex> lock(mu_);
+                outgoing_.push_front(std::move(next));
+            }
         }
 
         {

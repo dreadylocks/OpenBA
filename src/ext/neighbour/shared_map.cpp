@@ -59,6 +59,8 @@ constexpr size_t   kMaxPending = 20000;     // road / resource messages waiting 
 // at most kSendRate a second, kSendBurst at once; what does not fit waits for the next frame.
 constexpr double   kSendRate = 40.0;
 constexpr double   kSendBurst = 120.0;
+// The link's queue length under which the shared map hands it more (see Tick's backpressure).
+constexpr size_t   kLinkLowWater = 8;
 
 bool s_on = false;
 int  s_dim = 0;
@@ -143,9 +145,9 @@ bool EnsureGrid() {
 
 void MarkPeer(const std::vector<TileRect>& rects, uint8_t v) {
     if (!EnsureGrid()) return;
-    for (const TileRect& r : rects)
-        for (int y = r.y; y < r.y + r.h && y < s_dim; ++y)
-            for (int x = r.x; x < r.x + r.w && x < s_dim; ++x)
+    for (const TileRect& r : rects)   // clipped to the map: a bad rect from the wire never writes outside
+        for (int y = std::max(r.y, 0); y < r.y + r.h && y < s_dim; ++y)
+            for (int x = std::max(r.x, 0); x < r.x + r.w && x < s_dim; ++x)
                 s_peer[static_cast<size_t>(y) * s_dim + x] = v;
 }
 
@@ -206,8 +208,8 @@ void ClearNatureUnder(const TileRect& r) {
     Map* map = TheMap();
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr) return;
     std::vector<ComponentEntity*> doomed;
-    for (int y = r.y; y < r.y + r.h && y < map->size; ++y) {
-        for (int x = r.x; x < r.x + r.w && x < map->size; ++x) {
+    for (int y = std::max(r.y, 0); y < r.y + r.h && y < map->size; ++y) {
+        for (int x = std::max(r.x, 0); x < r.x + r.w && x < map->size; ++x) {
             const MapCell& cell = map->cells.GetData()[static_cast<size_t>(y) * map->size + x];
             for (ComponentEntity* e : {cell.occupant.Get(), cell.blocker.Get()}) {
                 if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
@@ -615,11 +617,13 @@ void NoteStructure(ComponentEntity* entity) {
     if (!s_on || entity == nullptr || entity->_description == nullptr) return;
     MapComponent* mc = entity->FindComponent<MapComponent>();
     if (mc == nullptr || mc->tileX1 <= 0 || mc->tileY1 <= 0) return;
-    TileRect r{mc->tileX0, mc->tileY0, mc->tileX1, mc->tileY1};
+    // MapComponent holds the footprint as it lies on the map: tileX1 / tileY1 are its width and height
+    // after the rotation (the tile tool stores x1 - x0 + 1, the start town the swapped size, and the
+    // game's own unmark walks w x h as stored). No second swap here: one turned a 90 / 270 degree
+    // structure's claim, solid tiles and tree clearing on their side.
+    const TileRect r{mc->tileX0, mc->tileY0, mc->tileX1, mc->tileY1};
     if (r.x < 0 || r.y < 0) return;
-    // The footprint's axes swap at 90 / 270 degrees (as the placement and start-town code do).
     const int rot = ((mc->extraField % 360) + 360) % 360;
-    if (rot == 90 || rot == 270) std::swap(r.w, r.h);
     const std::string tmpl = PathOf(entity->_description);
     if (tmpl.empty()) return;
     // The id: the footprint origin and the template (a fence's corner post and the fence itself
@@ -718,6 +722,7 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
     Message r("road");
     r.SetInt("cell", cellIdx);
     if (terrainType == 2) {
+        if (PeerHoldsCell(static_cast<uint32_t>(cellIdx))) return;   // the neighbour's road: not ours to take up
         r.SetBool("off", true);
     } else {
         if (c.field_0x2A > 1) return;   // not a road type this side knows
@@ -799,6 +804,10 @@ void Tick(Link* link, uint64_t frame) {
         }
     }
     if (!link->Connected()) return;   // the queues wait; OnJoined sends the structures again
+    // Backpressure: the link writes one message at a time, and a slow line (the Mac's waits for each
+    // write) fell behind and once dropped what it held. Hand it more only when it is nearly empty; the
+    // backlog stays in these queues, which the save keeps.
+    if (link->Queued() > kLinkLowWater) return;
     const auto now = std::chrono::steady_clock::now();
     const double dt = std::chrono::duration<double>(now - s_tokensAt).count();
     s_tokensAt = now;
