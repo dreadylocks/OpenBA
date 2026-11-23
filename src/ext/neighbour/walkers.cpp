@@ -315,7 +315,14 @@ bool OnMessage(const Message& m) {
     if (m.type != "walkers") return false;
     if (!s_on) return true;
     std::string tmpl, list;
-    if (!m.Get("tmpl", tmpl) || !m.Get("list", list) || tmpl.empty() || tmpl.size() > 160) return true;
+    if (!m.Get("tmpl", tmpl) || !m.Get("list", list) || tmpl.empty() || tmpl.size() > 160) {
+        if (s_received == 0 && s_refusedTmpl.empty()) {
+            s_refusedTmpl = "?";   // said once
+            fprintf(stderr, "[Neighbour] villagers: a sample from the neighbour without a usable template (%zu chars) "
+                            "or list; ignored\n", tmpl.size());
+        }
+        return true;
+    }
     if (++s_received == 1)
         fprintf(stderr, "[Neighbour] villagers: the neighbour's first sample arrived (%s, %zu chars)\n", tmpl.c_str(),
                 list.size());

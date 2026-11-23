@@ -800,10 +800,16 @@ void Tick(Link* link, uint64_t frame) {
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
             a.solid != l.solid || a.refused != l.refused || a.grounds != l.grounds) {
+            // Structures, solid tiles and grounds as they stand now (a rejoin re-sends the same buildings,
+            // which replace their mirrors: a running total would count them again).
+            size_t solidNow = 0, groundsNow = 0;
+            for (uint8_t ref : s_solidRef) solidNow += ref > 0 ? 1 : 0;
+            for (const auto& kv : s_mirrors) groundsNow += kv.second.decalId >= 0 ? 1 : 0;
             fprintf(stderr, "[Neighbour] shared map: from the neighbor so far: %d road tile(s) laid, %d taken up, "
-                            "%d resource(s) gone, %d planted, %d tile(s) solid, %d ground(s) painted; %d not applied%s%s\n",
-                    a.roads, a.unroads, a.removed, a.planted, a.solid, a.grounds, a.refused, a.refused > 0 ? " (last: " : "",
-                    a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
+                            "%d resource(s) gone, %d planted; now %zu of their structure(s) drawn, %zu tile(s) solid, "
+                            "%zu ground(s) painted; %d not applied%s%s\n",
+                    a.roads, a.unroads, a.removed, a.planted, s_mirrors.size(), solidNow, groundsNow, a.refused,
+                    a.refused > 0 ? " (last: " : "", a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
             s_appliedLogged = s_applied;
         }
         for (auto it = s_mine.begin(); it != s_mine.end();) {
