@@ -481,6 +481,20 @@ export class Room {
     if (typeof msg.bm === "string" && msg.bm.length === rec.tw * rec.th && msg.bm.length <= 4096 && /^[01]*$/.test(msg.bm)) rec.bm = msg.bm;
     // Its ground (a stockpile's yard, a field's soil): the footprint as the game holds it, rotation, decal state.
     if (typeof msg.dec === "string" && /^-?\d{1,7}(,-?\d{1,7}){5}$/.test(msg.dec)) rec.dec = msg.dec;
+    // Not on the neighbour's land: the town's claim for it (sent just before) was refused, so both towns
+    // placed there at once and the neighbour won. Mirrored, it would stand inside the neighbour's own.
+    if (rec.tw > 0 && rec.th > 0 && rec.tw * rec.th <= 4096) {
+      const theirs = String(1 - a.seat);
+      let clear = true;
+      await this.eachTile([{ x: rec.tx, y: rec.ty, w: rec.tw, h: rec.th }], false, (b, off) => {
+        if (b[off] === theirs) { clear = false; return false; }
+        return true;
+      });
+      if (!clear) {
+        this.send(ws, { t: "buildRefused", id, why: "your neighbor holds that land" });
+        return;
+      }
+    }
     const key = `mirror:${a.seat}`;
     const all = (await this.ctx.storage.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);

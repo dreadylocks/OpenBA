@@ -35,6 +35,7 @@
 #include "Component/ClearAreaComponent.h"
 #include "Component/RawMaterialComponent.h"     // goods dropped on the ground
 #include "Component/AnimalComponent.h"
+#include "Component/BuildComponent.h"        // a structure still being built (a refused one is taken back)
 #include "Action/PathSearch.h"
 #include "Game/PathfinderThread.h"
 #include "Game/WorldGeometry.h"
@@ -1000,8 +1001,29 @@ bool OnMessage(const Message& m, std::string* notice) {
     if (m.type == "claimed") {
         bool ok = true;
         m.GetBool("ok", ok);
-        if (!ok && notice != nullptr)
-            *notice = "Some land you built on was already your neighbor's; the two towns overlap there.";
+        if (!ok)
+            fprintf(stderr, "[Neighbour] shared map: the relay refused land this town claimed (%s): the neighbor holds it\n",
+                    m.GetOr("refused", "?").c_str());
+        return true;
+    }
+    if (m.type == "buildRefused") {
+        // Both towns placed on the same land at once and the neighbour's claim came first: the relay does
+        // not mirror ours. A site not yet started is taken back (nothing is lost: no material is in it),
+        // so neither map has two buildings in one place; one already rising stays, and the player is told.
+        const std::string id = m.GetOr("id", "");
+        auto it = s_mine.find(id);
+        ComponentEntity* e = it != s_mine.end() ? it->second.entity.Get() : nullptr;
+        GameUpdateLoop* g = GameUpdateLoop::_singleton;
+        const bool fresh = e != nullptr && e->FindComponent<BuildComponent>() != nullptr && BuiltPercent(e) <= it->second.built &&
+                           it->second.built < 100;
+        if (fresh && g != nullptr && g->m_entityList != nullptr && !((e->_entityFlags >> 10) & 1)) {
+            g->m_entityList->QueueDestroy(&e);
+            fprintf(stderr, "[Neighbour] shared map: %s taken back: the neighbor got that land first\n", id.c_str());
+            if (notice != nullptr) *notice = "Your neighbor got that land first: the building you placed there is taken back.";
+        } else if (e != nullptr) {
+            fprintf(stderr, "[Neighbour] shared map: %s stands on the neighbor's land (already being built)\n", id.c_str());
+            if (notice != nullptr) *notice = "A building of yours stands on your neighbor's land; your neighbor does not see it.";
+        }
         return true;
     }
     if (m.type == "build") { AddMirror(m); return true; }

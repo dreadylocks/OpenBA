@@ -187,6 +187,11 @@ check(told && told.seat === 0, "the neighbour is told about the claim");
 joiner.ws.send(JSON.stringify({ t: "claim", id: "cl2", rects: "11,11,2,2" }));
 const cl2 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl2"));
 check(cl2 && cl2.ok === false, "a claim overlapping the neighbour's land is refused");
+// The building that claim was for (both towns placed there at once; the neighbour won): not mirrored.
+joiner.ws.send(JSON.stringify({ t: "build", id: "lost1", tmpl: "Template\\WoodHouse.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 11, ty: 11, tw: 2, th: 2, built: 25 }));
+const br = await tryWait(joiner.wait((m) => m.t === "buildRefused" && m.id === "lost1"));
+await new Promise((r) => setTimeout(r, 300));
+check(br && !creator.inbox.some((m) => m.t === "build" && m.id === "lost1"), "a building on the neighbour's land is refused, not mirrored");
 joiner.ws.send(JSON.stringify({ t: "claim", id: "cl3", rects: "40,40,2,2;50,50,1,1" }));
 const cl3 = await tryWait(joiner.wait((m) => m.t === "claimed" && m.id === "cl3"));
 check(cl3 && cl3.ok === true, "a claim elsewhere is granted");
@@ -217,10 +222,10 @@ const cl5 = await tryWait(rejoin.wait((m) => m.t === "claimed" && m.id === "cl5"
 check(cl5 && cl5.ok === true, "released land can be claimed by the neighbour");
 
 // M3: solid tiles, shared roads and resource changes.
-creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 50, ty: 50, tw: 2, th: 2, built: 100, bm: "1101", dec: "50,50,2,2,90,0" }));
+creator.ws.send(JSON.stringify({ t: "build", id: "b2", tmpl: "Template\Barn.rsc", x: 0, y: 0, z: 0, rot: 0, tx: 60, ty: 60, tw: 2, th: 2, built: 100, bm: "1101", dec: "60,60,2,2,90,0" }));
 const bb2 = await tryWait(rejoin.wait((m) => m.t === "build" && m.id === "b2"));
 check(bb2 && bb2.bm === "1101", "a building's solid tiles are passed on");
-check(bb2 && bb2.dec === "50,50,2,2,90,0", "and its ground (footprint, rotation, decal state)");
+check(bb2 && bb2.dec === "60,60,2,2,90,0", "and its ground (footprint, rotation, decal state)");
 creator.ws.send(JSON.stringify({ t: "road", cell: 70000, type: 0, tt: 6, tmpl: "Template\RoadDirt.rsc" }));
 const rd = await tryWait(rejoin.wait((m) => m.t === "road" && m.cell === 70000));
 check(rd && rd.type === 0 && rd.tt === 6 && rd.tmpl === "Template\RoadDirt.rsc", "a finished road tile is passed on");
