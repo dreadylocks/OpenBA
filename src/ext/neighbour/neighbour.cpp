@@ -179,6 +179,7 @@ void SendPause(bool on) {
     Message m("pause");
     m.SetBool("on", on);
     s_link->Send(m);
+    fprintf(stderr, "[Neighbour] this town %s the game (sent to the neighbor)\n", on ? "paused" : "carried on with");
 }
 
 void PollPause() {
@@ -222,6 +223,7 @@ void SendSpeed(int32_t speed) {
     Message m("speed");
     m.SetInt("x", speed);
     s_link->Send(m);
+    fprintf(stderr, "[Neighbour] this town set the game speed to %dx (sent to the neighbor)\n", static_cast<int>(speed));
 }
 
 // Read with the pause (s_pauseKnown covers both: a game's first frame reads them).
