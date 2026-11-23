@@ -1,0 +1,44 @@
+# tools/devloop.cfg.example -- every key tools/devloop.sh reads, with its default.
+# Copy to ~/.config/openba/devloop.cfg (one per machine, never in the tree) and set what differs.
+# Shell syntax: KEY="value". Environment variables of the same name are overridden by this file.
+
+# --- what to follow ---------------------------------------------------------------------------
+#REMOTE="origin"
+#BRANCH="claude/devloop"
+# "." (or empty) = build in this checkout. A path = a separate worktree on $BRANCH, so a dirty
+# working copy you edit in never blocks the watcher (git worktree add ../OpenBA-devloop $BRANCH).
+#DEVLOOP_WORKTREE="."
+
+# --- where the game is --------------------------------------------------------------------------
+# Windows: the Banished install that holds OpenBA.exe (default $BANISHED_DIR, else C:/GOG Games/Banished)
+#GAME_DIR="C:/Program Files (x86)/Steam/steamapps/common/Banished"
+# Mac: the Banished (or WinData) folder passed to tools/macos/run_openba.sh --game-dir. Required.
+#GAME_DIR="$HOME/Games/Banished"
+# The folder holding Auto.sav. Windows: <Documents>/Banished/Save (OneDrive-redirected Documents
+# are found); Mac: ~/Documents/Banished/Save.
+#SAVE_DIR=""
+# The harness mailbox (request / state). Windows: ~/.openba-devloop; Mac: ~/Library/Application Support/OpenBA/DevLoop
+#DEVLOOP_DIR=""
+# standalone_*.log. Windows: $GAME_DIR; Mac: ~/Library/Application Support/OpenBA/Run
+#LOG_DIR=""
+
+# --- build --------------------------------------------------------------------------------------
+# Windows: debug (tools/build.sh flavours). Mac: release (tools/macos/make_app.sh's FLAVOUR).
+#FLAVOUR=""
+#BUILD_JOBS=8
+
+# --- the game's command line and environment ----------------------------------------------------
+# No /profile:faithful by default: the loop runs your own settings.cfg, extensions as you set them.
+#EXTRA_ARGS=""
+# Extra KEY=value words for the game. BANISHED_MODAL_ANSWER=2 answers the save/load dialog's
+# modals (e.g. "mods out of date") during the autoload -- and for the rest of that run.
+#EXTRA_ENV=""
+
+# --- timing -------------------------------------------------------------------------------------
+#POLL_SECONDS=10       # git fetch interval in `watch`
+#REQUEST_TIMEOUT=30    # request written -> the game must say "saving", else it is killed
+#SAVE_TIMEOUT=60       # "saving" -> the process must have exited, else it is killed
+#BOOT_WAIT=300         # relaunch -> the game must say "running <commit>"
+
+# 0 = no OS notifications (balloon tip / Notification Center)
+#NOTIFY=1

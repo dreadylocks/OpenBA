@@ -188,3 +188,37 @@ the next launch) killed. Building into a staging bundle and renaming whole bundl
   iterating on faithful code.
 - **What it costs per change.** Unmeasured. It is the incremental build and link plus one save
   load. Measure both once stage 0 runs before deciding whether anything faster is worth chasing.
+
+## 7. Running it (`tools/devloop.sh`)
+
+Built 2026-11-22: stages 0, 1 and 2 in one script, bash, the same file on the PC (MSYS2 or Git
+Bash) and the Mac. Settings are per machine in `~/.config/openba/devloop.cfg`;
+`tools/devloop.cfg.example` lists every key.
+
+```bash
+tools/devloop.sh watch     # leave running: follows origin/claude/devloop, builds, restarts the game
+tools/devloop.sh build     # local edit: build + stamp; a running watch restarts the game into it
+tools/devloop.sh restart   # one restart without a watcher
+tools/devloop.sh launch | stop | status | config
+```
+
+**What one push does.** Every watcher polls `git fetch` (10 s). When `origin/<branch>` differs from
+the commit in `build/devloop.stamp`, it fast-forwards the checkout (only when that is clean, or
+already at that commit because this machine pushed it), builds, writes the stamp, and restarts:
+`request` -> the game saves and quits -> the exe (PC) or the whole `.app` (Mac, built into
+`dist/OpenBA.staging.app`) is swapped -> relaunch with `BANISHED_DEVLOOP` + `BANISHED_AUTOLOAD=1`
+-> wait for `state` = `running <commit>`. A failed build is reported once and leaves the old game
+running until the next push.
+
+**What it does not hide.** A crash (exit 3), a hang, any exit nobody asked for, or a relaunch that
+does not reach `running` is printed with the log's first lines and an OS notification, and is not
+relaunched over. A game that does not answer `request` in 30 s (a menu, a modal, an exe without the
+harness) is killed, and `Auto.sav` is restored from the copy taken before the request.
+
+**Measured on the PC** (debug, the user's own 5 MB town): save and quit 3 s, relaunch to
+`running` 32 s; a one-file rebuild about 60 s.
+
+**Windows notes.** Git Bash puts its own `/mingw64/bin` first and the UCRT64 GCC then fails with no
+message; the script puts `/c/msys64/ucrt64/bin` first itself. The game is started from bash in the
+background (not `start`), so the watcher reads its exit code. An autoload can stop at a save/load
+modal (`modsOutOfDate` with an old modded save): `EXTRA_ENV="BANISHED_MODAL_ANSWER=2"` answers it.
