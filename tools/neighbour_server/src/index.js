@@ -238,6 +238,7 @@ class BufferedStore {
     this.ctx = ctx;
     this.puts = new Map();
     this.dels = new Set();
+    this.version = new Map();   // key -> a count bumped on every buffered put or delete (flush's "unchanged since")
     this.armed = false;
     this.rowsWritten = 0;
   }
@@ -273,6 +274,7 @@ class BufferedStore {
   stage(key, value) {
     this.puts.set(key, value);
     this.dels.delete(key);
+    this.version.set(key, (this.version.get(key) || 0) + 1);
     this.arm();
   }
 
@@ -282,6 +284,7 @@ class BufferedStore {
       if (this.buffered(k)) {
         this.puts.delete(k);
         this.dels.add(k);
+        this.version.set(k, (this.version.get(k) || 0) + 1);
         this.arm();
       } else {
         direct.push(k);
@@ -305,24 +308,31 @@ class BufferedStore {
     this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { this.armed = false; });
   }
 
-  // Writes what waits, chunk by chunk; an entry leaves the buffer only once written and only if nothing
-  // newer replaced it meanwhile, so a failed write (a refused quota) keeps the rest for the next alarm.
+  // Writes what waits, chunk by chunk; an entry leaves the buffer only once written and only if it was
+  // not put or deleted again meanwhile (its version unchanged: callers change a cached object in place and
+  // put the same object back, so the value itself cannot tell), so a failed write (a refused quota) keeps
+  // the rest for the next alarm.
   async flush() {
     this.armed = false;
-    const puts = [...this.puts];
-    const dels = [...this.dels];
+    const puts = [...this.puts].map(([k, v]) => [k, v, this.version.get(k)]);
+    const dels = [...this.dels].map((k) => [k, this.version.get(k)]);
+    const done = (k, ver) => {
+      if (this.version.get(k) !== ver) return false;
+      this.version.delete(k);
+      return true;
+    };
     let failed = false;
     try {
       for (let i = 0; i < puts.length; i += 100) {
         const chunk = puts.slice(i, i + 100);
-        await this.ctx.storage.put(Object.fromEntries(chunk));
-        for (const [k, v] of chunk) if (this.puts.get(k) === v) this.puts.delete(k);
+        await this.ctx.storage.put(Object.fromEntries(chunk.map(([k, v]) => [k, v])));
+        for (const [k, , ver] of chunk) if (done(k, ver)) this.puts.delete(k);
         this.rowsWritten += chunk.length;
       }
       for (let i = 0; i < dels.length; i += 100) {
         const chunk = dels.slice(i, i + 100);
-        await this.ctx.storage.delete(chunk);
-        for (const k of chunk) if (!this.puts.has(k)) this.dels.delete(k);
+        await this.ctx.storage.delete(chunk.map(([k]) => k));
+        for (const [k, ver] of chunk) if (done(k, ver)) this.dels.delete(k);
         this.rowsWritten += chunk.length;
       }
     } catch {
