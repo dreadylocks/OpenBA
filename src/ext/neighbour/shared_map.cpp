@@ -350,10 +350,43 @@ void AddMirror(const Message& m) {
     }
 }
 
+// Nature traffic, for the log (LogNature): what this town sent and what came of the neighbour's.
+struct NatStats {
+    uint64_t sentAdds = 0, sentRms = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
+    std::map<std::string, int> missByTmpl;
+};
+NatStats s_nat;
+std::string s_natLogged;
+
 void Queue(const Message& m) {
-    if (s_pending.size() >= kMaxPending) s_pending.erase(s_pending.begin());
+    if (s_pending.size() >= kMaxPending) {
+        s_pending.erase(s_pending.begin());
+        ++s_nat.dropped;
+    }
+    if (m.type == "nat") {
+        if (m.GetOr("op", "") == "add") ++s_nat.sentAdds;
+        else ++s_nat.sentRms;
+    }
     s_pending.push_back(m);
     ++s_waitingAdds;
+}
+
+void LogNature() {
+    std::string top;
+    std::vector<std::pair<int, std::string>> misses;
+    for (const auto& kv : s_nat.missByTmpl) misses.emplace_back(kv.second, kv.first);
+    std::sort(misses.rbegin(), misses.rend());
+    for (size_t i = 0; i < misses.size() && i < 4; ++i)
+        top += (i ? ", " : "") + misses[i].second + " x" + std::to_string(misses[i].first);
+    char line[600];
+    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s), %llu dropped (queue full); of the neighbor's "
+             "removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
+             static_cast<unsigned long long>(s_nat.sentAdds), static_cast<unsigned long long>(s_nat.sentRms),
+             static_cast<unsigned long long>(s_nat.dropped), static_cast<unsigned long long>(s_nat.rmByScan),
+             static_cast<unsigned long long>(s_nat.rmMiss), top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
+    if (line == s_natLogged) return;
+    s_natLogged = line;
+    fprintf(stderr, "[Neighbour] nature: %s\n", line);
 }
 
 // ---- M3: roads ----------------------------------------------------------------------------------
@@ -543,6 +576,24 @@ void ApplyNat(const Message& m) {
             g->m_entityList->QueueDestroy(&e);
             ++s_applied.removed;
             return;
+        }
+        // Not in the tile's occupant / blocker slots (a plant that does not hold its tile, a wild herb):
+        // look for it among the natural resources.
+        const auto& all = g->m_entityList->masterArray;
+        for (int i = 0; i < all._size; ++i) {
+            ComponentEntity* e = all._data[i].Get();
+            if (e == nullptr || ((e->_entityFlags >> 10) & 1) || e->FindComponent<NaturalResourceComponent>() == nullptr)
+                continue;
+            if (CellOf(e) != cell || PathOf(e->_description) != tmpl) continue;
+            s_quiet.insert(e);
+            g->m_entityList->QueueDestroy(&e);
+            ++s_applied.removed;
+            if (!replay) ++s_nat.rmByScan;
+            return;
+        }
+        if (!replay) {
+            ++s_nat.rmMiss;
+            if (s_nat.missByTmpl.size() < 64 || s_nat.missByTmpl.count(tmpl)) ++s_nat.missByTmpl[tmpl];
         }
         return;
     }
@@ -910,8 +961,8 @@ void LogFingerprint() {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
     if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
-    uint64_t natSum = 0, roadSum = 0;
-    size_t nat = 0, roads = 0;
+    uint64_t natSum = 0, roadSum = 0, halfSum[2] = {0, 0};
+    size_t nat = 0, roads = 0, half[2] = {0, 0};
     const auto& all = g->m_entityList->masterArray;
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
@@ -921,8 +972,12 @@ void LogFingerprint() {
         if (cell < 0) continue;
         uint64_t th = 1469598103934665603ull;
         for (unsigned char c : PathOf(e->_description)) th = (th ^ c) * 1099511628211ull;
-        natSum += Mix(th ^ (static_cast<uint64_t>(cell) << 1));
+        const uint64_t h = Mix(th ^ (static_cast<uint64_t>(cell) << 1));
+        natSum += h;
         ++nat;
+        const int side = (cell % map->size) < map->size / 2 ? 0 : 1;
+        halfSum[side] += h;
+        ++half[side];
     }
     const MapCell* cells = map->cells.GetData();
     const int n = map->size * map->size;
@@ -931,9 +986,10 @@ void LogFingerprint() {
         roadSum += Mix((static_cast<uint64_t>(i) << 8) | cells[i].field_0x2A);
         ++roads;
     }
-    char line[160];
-    snprintf(line, sizeof line, "nature %zu (%016llx), roads %zu (%016llx)", nat,
-             static_cast<unsigned long long>(natSum), roads, static_cast<unsigned long long>(roadSum));
+    char line[240];
+    snprintf(line, sizeof line, "nature %zu (%016llx) [west %zu %08llx, east %zu %08llx], roads %zu (%016llx)", nat,
+             static_cast<unsigned long long>(natSum), half[0], static_cast<unsigned long long>(halfSum[0] >> 32), half[1],
+             static_cast<unsigned long long>(halfSum[1] >> 32), roads, static_cast<unsigned long long>(roadSum));
     if (line == s_fingerprintLogged) return;
     s_fingerprintLogged = line;
     fprintf(stderr, "[Neighbour] map fingerprint: %s\n", line);
@@ -943,7 +999,10 @@ void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
     EnsureGrid();
     s_live = true;   // from the first frame of play on, a change is news
-    if (frame % kFingerprintFrames == 0) LogFingerprint();
+    if (frame % kFingerprintFrames == 0) {
+        LogFingerprint();
+        LogNature();
+    }
     // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
     // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {
