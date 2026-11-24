@@ -29,7 +29,7 @@
 #include "Player/PlacementTool.h"
 #include "Player/RotationSetting.h"
 #include "Player/exe_bodies.h"
-#include "Player/edittool_funcs.h"   // PlacementTool_Factory_SA: a PlacementTool built as the reflected create builds it
+#include "Player/edittool_funcs.h"   // PlacementTool_Factory_SA: the reflected create's PlacementTool
 #include "ext/neighbour/shared_map.h"
 #include "ext/copy_move/place.h"
 
@@ -41,8 +41,14 @@ namespace CopyMove {
 
 namespace {
 
-constexpr float kHeightTolerance = 1000.0f;   // DAT_140172248: the tolerance PlacementTool tests a footprint with
-constexpr uint32_t kRoadForbidden = 0x5e0;   // RoadTool::CalcPath's end-cell terrain mask (roadtool_calcpath.cpp)
+// DAT_140172248: the height tolerance PlacementTool tests a footprint with.
+constexpr float kHeightTolerance = 1000.0f;
+// RoadTool::CalcPath's end-cell terrain mask (roadtool_calcpath.cpp).
+constexpr uint32_t kRoadForbidden = 0x5e0;
+
+ComponentDescription* TemplateOf(const Item& item) {
+    return const_cast<ComponentDescription*>(static_cast<const ComponentDescription*>(item.tmpl));
+}
 
 const ModelMeshGroup* GroupFor(const ModelDescription* model, int variant) {
     if (model == nullptr || model->_meshGroups == nullptr || model->_meshGroupCount <= 0) {
@@ -75,7 +81,7 @@ int TurnOfDegrees(int degrees) {
 }
 
 Placer::Placer(const Item& item, PlayerToolManager* manager) : _manager(manager) {
-    ComponentDescription* tmpl = const_cast<ComponentDescription*>(static_cast<const ComponentDescription*>(item.tmpl));
+    ComponentDescription* tmpl = TemplateOf(item);
     switch (item.kind) {
         case Kind::Building: {
             _placed = tmpl->FindDescription<CreatePlacedDescription>();
@@ -86,7 +92,8 @@ Placer::Placer(const Item& item, PlayerToolManager* manager) : _manager(manager)
                 void* mem = System::MemoryAllocator::MemAlloc(sizeof(Graphics::MeshInstance), 8);
                 if (mem != nullptr) {
                     _ghost = ::new (mem) Graphics::MeshInstance();
-                    _ghost->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(group->meshes[group->meshCount - 1]));
+                    Graphics::GraphicsMesh* finished = group->meshes[group->meshCount - 1];
+                    _ghost->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(finished));
                     _ghost->UpdateHierarchy();
                 }
             }
@@ -94,7 +101,8 @@ Placer::Placer(const Item& item, PlayerToolManager* manager) : _manager(manager)
         }
         case Kind::Field:
         case Kind::Pasture: {
-            const uint32_t type = item.kind == Kind::Field ? DragPlacementTool::TypeId() : FencedTool::TypeId();
+            const uint32_t type =
+                item.kind == Kind::Field ? DragPlacementTool::TypeId() : FencedTool::TypeId();
             ::Object::Base* obj = ::Object::Factory::_singleton->CreateObject(type);
             if (!::Object::IsDerivedFromNullSafe(obj, DragTool::TypeId())) {
                 std::fprintf(stderr, "[CopyMove] the area tool (type %u) did not build\n", type);
@@ -153,12 +161,13 @@ bool Placer::Check(const Item& item, const Rect& rect, const MoveSet* moving, st
         case Kind::Pasture:
             return CheckArea(item, rect, tiles);
         case Kind::Road:
-            return CheckRoad(item, rect, moving, tiles);
+            return CheckRoad(rect, moving, tiles);
     }
     return false;
 }
 
-bool Placer::CheckBuilding(const Item& item, const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles) {
+bool Placer::CheckBuilding(const Item& item, const Rect& rect, const MoveSet* moving,
+                           std::vector<Tile>* tiles) {
     Map* map = TheMap();
     if (_placed == nullptr || _map == nullptr) {
         return false;
@@ -172,7 +181,8 @@ bool Placer::CheckBuilding(const Item& item, const Rect& rect, const MoveSet* mo
     const char* footprint = _map->_footprint._data;
     const bool hasFootprint = footprint != nullptr && _map->_footprint.GetLength() != 0;
     const char* codeMap = _placed->_name._data;
-    const bool hasCodes = _placed->_placeArray._size > 0 && codeMap != nullptr && _placed->_name.GetLength() != 0;
+    const bool hasCodes =
+        _placed->_placeArray._size > 0 && codeMap != nullptr && _placed->_name.GetLength() != 0;
     bool all = true;
     for (int row = rect.row; row <= rowEnd; ++row) {
         for (int col = rect.col; col <= colEnd; ++col) {
@@ -248,7 +258,7 @@ bool Placer::CheckArea(const Item& item, const Rect& rect, std::vector<Tile>* ti
     return ok;
 }
 
-bool Placer::CheckRoad(const Item& item, const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles) {
+bool Placer::CheckRoad(const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles) {
     Map* map = TheMap();
     const int cell = rect.row * map->size + rect.col;
     const MapCell& c = map->cells.GetData()[cell];
@@ -283,7 +293,8 @@ void Placer::Ghost(const Item& item, const Rect& rect, bool show) {
     }
     Math::Vector3 pos;
     RectCentre(rect, &pos);
-    _ghost->SetTransform(Math::Transform::FromYawPitchOffset(static_cast<float>((item.turn & 3) * 90), 0.0f, pos));
+    const float yaw = static_cast<float>((item.turn & 3) * 90);
+    _ghost->SetTransform(Math::Transform::FromYawPitchOffset(yaw, 0.0f, pos));
     _ghost->UpdateHierarchy();
 }
 
@@ -304,7 +315,7 @@ bool Placer::Paste(const Item& item, const Rect& rect) {
             if (t == nullptr) {
                 return false;
             }
-            ComponentDescription* tmpl = const_cast<ComponentDescription*>(static_cast<const ComponentDescription*>(item.tmpl));
+            ComponentDescription* tmpl = TemplateOf(item);
             t->dialogPtr = _manager;
             t->descriptionPtr = tmpl;
             t->descComponent = const_cast<CreatePlacedDescription*>(_placed);
@@ -315,9 +326,9 @@ bool Placer::Paste(const Item& item, const Rect& rect) {
             Math::Vector3 pos;
             RectCentre(rect, &pos);
             const float yaw = static_cast<float>((item.turn & 3) * 90);
-            const bool placed = (t->CreateAt(rect.col, rect.row, rect.col + rect.w - 1, rect.row + rect.h - 1, &pos,
-                                             yaw) &
-                                 0xff) != 0;
+            const int endCol = rect.col + rect.w - 1;
+            const int endRow = rect.row + rect.h - 1;
+            const bool placed = (t->CreateAt(rect.col, rect.row, endCol, endRow, &pos, yaw) & 0xff) != 0;
             delete t;
             return placed;
         }
@@ -348,13 +359,15 @@ bool Placer::Paste(const Item& item, const Rect& rect) {
         // then one Map::PlaceRoadCell per cell.
             GameUpdateLoop* g = GameUpdateLoop::_singleton;
             const DecalDescription* decal = _roadTmpl->FindDescription<DecalDescription>();
-            if (g->m_worldGeometry != nullptr && decal != nullptr && decal->_materials != nullptr && decal->_materialCount > 0) {
-                g->m_worldGeometry->StoreBatchMaterial(static_cast<int>(static_cast<uint8_t>(road->_b20)), decal->_materials[0]);
+            const uint8_t type = static_cast<uint8_t>(road->_b20);
+            if (g->m_worldGeometry != nullptr && decal != nullptr && decal->_materials != nullptr &&
+                decal->_materialCount > 0) {
+                g->m_worldGeometry->StoreBatchMaterial(static_cast<int>(type), decal->_materials[0]);
             }
-            Neighbour::SharedMap::NoteRoadTemplate(static_cast<uint8_t>(road->_b20), _roadTmpl);
+            Neighbour::SharedMap::NoteRoadTemplate(type, _roadTmpl);
             const int cell = rect.row * map->size + rect.col;
-            map->PlaceRoadCell(static_cast<uint32_t>(cell), static_cast<uint8_t>(road->_b20), static_cast<uint64_t>(cell),
-                               md->_cellType, road->_created);
+            map->PlaceRoadCell(static_cast<uint32_t>(cell), type, static_cast<uint64_t>(cell), md->_cellType,
+                               road->_created);
             return true;
         }
     }

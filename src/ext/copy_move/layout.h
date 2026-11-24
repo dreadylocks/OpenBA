@@ -42,8 +42,9 @@ struct Rect {
 Cell TurnCell(const Cell& c, int boxW, int boxH);
 Rect TurnRect(const Rect& r, int boxW, int boxH);
 
-// A footprint of `dim` cells centred on `cursor` starts at cursor - (dim - 1) / 2: PlacementTool::GetPlacement's
-// rule (tool_base_ray.cpp), which writes the even and odd cases apart but gives this for both.
+// A footprint of `dim` cells centred on `cursor` starts at cursor - (dim - 1) / 2:
+// PlacementTool::GetPlacement's rule (tool_base_ray.cpp), which writes the even and odd cases apart but gives
+// this for both.
 int CentredStart(int cursor, int dim);
 
 // What a copied thing is. The placement path differs for each (copy_move_place.cpp).

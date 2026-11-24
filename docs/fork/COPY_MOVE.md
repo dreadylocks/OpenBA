@@ -28,7 +28,7 @@ user on 2026-11-24.
 | select | Ctrl+V | the last copy again |
 | copy / move | R / T | turn the group a quarter (the keys that turn one building) |
 | copy | click | places a copy of everything that fits (green); red is skipped. The copy stays in hand |
-| move | click | moves everything at once, or nothing when one part does not fit |
+| move | click | moves everything at once, or nothing when one part does not fit (the selection stays as it was) |
 | any | right-click | back one step: out of copy / move, then the selection clears, then the tool closes |
 
 Ctrl+C, X and V are taken from retail's camera views (plain C, X and V still jump to them): a frame whose

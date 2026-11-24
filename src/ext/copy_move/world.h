@@ -33,6 +33,7 @@ struct EntityRef {
     ComponentEntity* entity = nullptr;
     int hint = -1;
 };
+// Only for an entity known to be alive now (it reads the entity's master-array index).
 EntityRef Remember(ComponentEntity* entity);
 // Whether the entity is still in the world and not marked for removal; refreshes the hint. Never reads the
 // entity before finding it in the master array (a freed entity is never touched).

@@ -1,13 +1,15 @@
 // ============================================================================
 // src/ext/copy_move/place.h -- one copied thing, placed (docs/fork/COPY_MOVE.md)
 // ============================================================================
-// NOT RETAIL. A Placer is built for each item of the clipboard while the tool pastes or moves it, and
-// gone when the tool leaves that mode. It knows where the item may go (the retail placement tests, cell
-// by cell), shows a building's ghost, and pastes a copy the way the player's own tool would:
+// NOT RETAIL. A Placer is built for each item of the clipboard while the tool pastes or moves it, and gone
+// when the tool leaves that mode. It knows where the item may go (the retail placement tests, cell by cell),
+// shows a building's ghost, and pastes a copy the way the player's own tool would:
 //   building  PlacementTool::CreateAt (tool_base_tile.cpp) with the item's template, rotation and mesh group
 //   field     DragPlacementTool::CalcPath over the item's rect (dragplacementtool.cpp)
-//   pasture   FencedTool::CalcPath, its RotationSetting set to the item's shelter side (fencedtool_calcpath.cpp)
-//   road      Map::PlaceRoadCell with the road tool's template for the item's road type (roadtool_calcpath.cpp)
+//   pasture   FencedTool::CalcPath, its RotationSetting set to the item's shelter side
+//     (fencedtool_calcpath.cpp)
+//   road      Map::PlaceRoadCell with the road tool's template for the item's road type
+//     (roadtool_calcpath.cpp)
 // so a copy is new construction: builders put it up and it costs what the retail tool charges.
 // ============================================================================
 #pragma once
@@ -61,7 +63,7 @@ public:
 private:
     bool CheckBuilding(const Item& item, const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles);
     bool CheckArea(const Item& item, const Rect& rect, std::vector<Tile>* tiles);
-    bool CheckRoad(const Item& item, const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles);
+    bool CheckRoad(const Rect& rect, const MoveSet* moving, std::vector<Tile>* tiles);
 
     PlayerToolManager* _manager = nullptr;
     // building

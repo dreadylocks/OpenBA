@@ -243,7 +243,8 @@ ComponentEntity* EntityUnderCursor(int cursorCell) {
         if (id >= 0) {
             // The picking component stores the entity a pick answers (a pasture's shelter answers its
             // pasture): retail's void* user data.
-            ComponentEntity* e = static_cast<ComponentEntity*>(g->m_pickingScene->GetUserData(static_cast<uint32_t>(id)));
+            void* user = g->m_pickingScene->GetUserData(static_cast<uint32_t>(id));
+            ComponentEntity* e = static_cast<ComponentEntity*>(user);
             Kind kind;
             if (e != nullptr && KindOf(e->_description, &kind)) {
                 return MasterOf(e);
@@ -320,7 +321,8 @@ ComponentDescription* RoadTemplate(uint8_t type) {
             if (!::Object::IsDerivedFromNullSafe(ext, tid)) {
                 continue;
             }
-            ComponentDescription* d = const_cast<ComponentDescription*>(static_cast<const ComponentDescription*>(ext));
+            ComponentDescription* d =
+                const_cast<ComponentDescription*>(static_cast<const ComponentDescription*>(ext));
             const CreateRoadDescription* road = d->FindDescription<CreateRoadDescription>();
             if (road != nullptr && static_cast<uint8_t>(road->_b20) == type) {
                 found = d;
@@ -329,7 +331,8 @@ ComponentDescription* RoadTemplate(uint8_t type) {
         if (found == nullptr && type <= 1) {
             const char* path = type == 0 ? "Template\\StoneRoad.rsc" : "Template\\DirtRoad.rsc";
             ComponentDescription* d = f->FindOrLoadAs<ComponentDescription>(System::Filename(path));
-            if (::Object::IsDerivedFromNullSafe(d, tid) && d->FindDescription<CreateRoadDescription>() != nullptr) {
+            const bool isRoad = d != nullptr && d->FindDescription<CreateRoadDescription>() != nullptr;
+            if (::Object::IsDerivedFromNullSafe(d, tid) && isRoad) {
                 found = d;
             }
         }
@@ -349,7 +352,8 @@ void RectCentre(const Rect& r, Math::Vector3* out) {
     }
     const float centreOff = static_cast<float>(map->size >> 1) - 0.5f;
     float inA[3] = { static_cast<float>(r.col) - centreOff, static_cast<float>(r.row) - centreOff, 0.0f };
-    float inB[3] = { static_cast<float>(r.col + r.w - 1) - centreOff, static_cast<float>(r.row + r.h - 1) - centreOff,
+    float inB[3] = { static_cast<float>(r.col + r.w - 1) - centreOff,
+                     static_cast<float>(r.row + r.h - 1) - centreOff,
                      0.0f };
     float a[3] = { 0.0f, 0.0f, 0.0f };
     float b[3] = { 0.0f, 0.0f, 0.0f };

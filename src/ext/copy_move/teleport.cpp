@@ -145,7 +145,8 @@ void SetDown(const Lifted& l, const Motion& m, bool master) {
         ModelComponent* model = static_cast<ModelComponent*>(c);
         float dx = 0.0f;
         float dy = 0.0f;
-        Spin(model->transform.translation.x - m.from.x, model->transform.translation.y - m.from.y, m.turns, &dx, &dy);
+        const Math::Vector3& at = model->transform.translation;
+        Spin(at.x - m.from.x, at.y - m.from.y, m.turns, &dx, &dy);
         Math::Vector3 pos(m.to.x + dx, m.to.y + dy, model->transform.translation.z);
         model->SetTransformFromYaw(&pos, model->yaw + 90.0f * static_cast<float>(m.turns & 3));
         model->OnAdded();
@@ -189,7 +190,6 @@ struct Moving {
     Lifted master;
     std::vector<Lifted> children;
     Rect oldRect;
-    int oldDegrees = 0;
 };
 
 // One moving road cell, lifted.
@@ -261,6 +261,9 @@ bool PendingIndexed(const Map* map, int cell) {
     return false;
 }
 
+// A planned road is lifted by cancelling its BuildRoad job (Map::RemovePendingRoad) and set down by planning
+// it again, so a move -- or a move put back because a new place did not fit -- starts its job afresh: a
+// builder already at work on that cell drops it, as when the player removes a planned road.
 void LiftRoad(MovingRoad* r) {
     Map* map = TheMap();
     MapCell& c = map->cells.GetData()[r->from];
@@ -271,8 +274,9 @@ void LiftRoad(MovingRoad* r) {
     if (r->pending) {
         // Map::RemovePendingRoad finds the planned cell in the map's pending-road set (+0xE8) before it
         // cancels its BuildRoad job and restores the cell. A game loaded from a save comes back without that
-        // set (the BuildRoad jobs are loaded, the set is not rebuilt: docs/known_port_issues.md row 1334), and the removal then does nothing. The cell goes back into the set the way
-        // Map::PlaceRoadCell puts it there, so the removal is retail's.
+        // set (the BuildRoad jobs are loaded, the set is not rebuilt: docs/known_port_issues.md row 1334),
+        // and the removal then does nothing. The cell goes back into the set the way Map::PlaceRoadCell puts
+        // it there, so the removal is retail's.
         if (!PendingIndexed(map, r->from)) {
             AvlNode28* inserted = nullptr;
             const int32_t key = r->from;
@@ -300,7 +304,10 @@ void ClearNature(int cell) {
     ComponentEntity* found[2] = { c.occupant.Get(), c.blocker.Get() };
     for (int i = 0; i < 2; ++i) {
         ComponentEntity* e = found[i];
-        if (e == nullptr || (i == 1 && e == found[0]) || e->FindComponent<NaturalResourceComponent>() == nullptr) {
+        if (e == nullptr || (i == 1 && e == found[0])) {
+            continue;
+        }
+        if (e->FindComponent<NaturalResourceComponent>() == nullptr) {
             continue;
         }
         g->m_entityList->QueueDestroy(&e);
@@ -327,7 +334,8 @@ void SetDownRoadCell(const MovingRoad& r, int cell) {
     }
     if (r.pending) {
         ComponentDescription* tmpl = RoadTemplate(r.type);
-        const CreateRoadDescription* road = tmpl != nullptr ? tmpl->FindDescription<CreateRoadDescription>() : nullptr;
+        const CreateRoadDescription* road =
+            tmpl != nullptr ? tmpl->FindDescription<CreateRoadDescription>() : nullptr;
         const MapDescription* md = tmpl != nullptr ? tmpl->FindDescription<MapDescription>() : nullptr;
         if (road != nullptr && md != nullptr) {
             map->PlaceRoadCell(static_cast<uint32_t>(cell), r.type, static_cast<uint64_t>(cell), md->_cellType,
@@ -398,7 +406,7 @@ bool Teleport(const Layout& layout, const Cell& origin, const std::vector<std::u
             Moving mv;
             mv.item = &it;
             mv.entity = e;
-            if (!RectOf(e, &mv.oldRect, &mv.oldDegrees)) {
+            if (!RectOf(e, &mv.oldRect, nullptr)) {
                 continue;
             }
             buildings.push_back(mv);

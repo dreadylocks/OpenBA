@@ -177,8 +177,9 @@ public:
         _selected.erase(std::remove_if(_selected.begin(), _selected.end(),
                                        [gone](const EntityRef& r) { return r.entity == gone; }),
                         _selected.end());
-        _boxPreview.erase(std::remove(_boxPreview.begin(), _boxPreview.end(), gone), _boxPreview.end());
-        _stays.erase(std::remove(_stays.begin(), _stays.end(), gone), _stays.end());
+        auto isGone = [gone](const EntityRef& r) { return r.entity == gone; };
+        _boxPreview.erase(std::remove_if(_boxPreview.begin(), _boxPreview.end(), isGone), _boxPreview.end());
+        _stays.erase(std::remove_if(_stays.begin(), _stays.end(), isGone), _stays.end());
         if (_mode == Mode::Move && _moving.entities.count(gone) != 0) {
             std::fprintf(stderr, "[CopyMove] a building being moved was removed: the move is cancelled\n");
             EndPlacing();
@@ -205,6 +206,7 @@ private:
     void RemoveEntity(ComponentEntity* e);
     bool Holds(ComponentEntity* e) const;
     void ClearSelection();
+    void ClearBoxPreview();
     void DropDead();
     void ClickAt(int cell);
     void BoxSelect(const Rect& box, bool additive);
@@ -219,11 +221,13 @@ private:
     bool _dragging = false;
     Cell _dragStart;
     Cell _dragEnd;
-    std::vector<ComponentEntity*> _boxPreview;   // outlined while the box is dragged
+    // Every entity list below is of EntityRefs taken while the entity was alive: a list is read through
+    // Alive (world.h), which never touches an entity it cannot find in the master array.
+    std::vector<EntityRef> _boxPreview;           // outlined while the box is dragged
 
     Layout _hand;                                 // what follows the cursor (a copy, or what moves)
     std::vector<std::unique_ptr<Placer>> _placers;
-    std::vector<ComponentEntity*> _stays;         // a move's selected things that do not move
+    std::vector<EntityRef> _stays;                // a move's selected things that do not move
     MoveSet _moving;
     bool _onMap = false;
     Cell _origin;
@@ -269,10 +273,13 @@ void CopyMoveTool::ClearSelection() {
     }
     _selected.clear();
     _roads.clear();
-    for (ComponentEntity* e : _boxPreview) {
-        EntityRef r = Remember(e);
-        if (Alive(r) && !Holds(e)) {
-            SetOutline(e, false);
+    ClearBoxPreview();
+}
+
+void CopyMoveTool::ClearBoxPreview() {
+    for (EntityRef& r : _boxPreview) {
+        if (Alive(r) && !Holds(r.entity)) {
+            SetOutline(r.entity, false);
         }
     }
     _boxPreview.clear();
@@ -323,7 +330,8 @@ void CopyMoveTool::BoxSelect(const Rect& box, bool additive) {
             }
         }
     }
-    std::fprintf(stderr, "[CopyMove] box %dx%d at (%d,%d): %zu thing(s), %zu road cell(s) selected\n", box.w, box.h,
+    std::fprintf(stderr, "[CopyMove] box %dx%d at (%d,%d): %zu thing(s), %zu road cell(s) selected\n", box.w,
+                 box.h,
                  box.col, box.row, _selected.size(), _roads.size());
 }
 
@@ -358,13 +366,13 @@ void CopyMoveTool::Copy() {
 void CopyMoveTool::Cut() {
     DropDead();
     Layout l;
-    _stays.clear();
+    std::vector<EntityRef> stays;
     for (EntityRef& r : _selected) {
         Item it;
         if (CanTeleport(r.entity) && ItemOf(r.entity, &it)) {
             l.Add(it);
         } else {
-            _stays.push_back(r.entity);
+            stays.push_back(r);
         }
     }
     Map* map = TheMap();
@@ -378,18 +386,18 @@ void CopyMoveTool::Cut() {
     }
     l.End();
     if (l.Empty()) {
-        std::fprintf(stderr, "[CopyMove] nothing selected can be moved (%zu thing(s) stay)\n", _stays.size());
+        std::fprintf(stderr, "[CopyMove] nothing selected can be moved (%zu thing(s) stay)\n", stays.size());
         DragTool_PlayErrorSound_100140(this);
-        _stays.clear();
         return;
     }
-    if (!_stays.empty()) {
+    if (!stays.empty()) {
         std::fprintf(stderr,
                      "[CopyMove] %zu selected thing(s) cannot move yet (unfinished, or a field, pasture "
                      "or orchard) and stay\n",
-                     _stays.size());
+                     stays.size());
     }
     BeginPlacing(Mode::Move, l);
+    _stays = stays;   // after BeginPlacing, whose EndPlacing empties the list
 }
 
 void CopyMoveTool::PasteClipboard() {
@@ -457,7 +465,8 @@ void CopyMoveTool::Commit() {
                 } else if (_placers[i]->Paste(items[i], r)) {
                     ++placed;
                 } else {
-                    std::fprintf(stderr, "[CopyMove]   item %zu (kind %d) at (%d,%d) %dx%d: the retail tool refused it\n",
+                    std::fprintf(stderr,
+                                 "[CopyMove]   item %zu (kind %d) at (%d,%d) %dx%d: the retail tool refused it\n",
                                  i, static_cast<int>(items[i].kind), r.col, r.row, r.w, r.h);
                 }
             }
@@ -483,7 +492,10 @@ void CopyMoveTool::Commit() {
     std::vector<ComponentEntity*> moved;
     const Layout hand = _hand;
     const Cell origin = _origin;
-    // The selection's outlines come off first; the moved things are selected again where they now are.
+    // The selection's outlines come off first; the moved things are selected again where they now are, or,
+    // when the move was refused (Teleport put everything back), the selection is what it was.
+    std::vector<EntityRef> before = _selected;
+    const std::set<int> roadsBefore = _roads;
     ClearSelection();
     const bool ok = Teleport(hand, origin, _placers, &moved);
     std::vector<int> roads;
@@ -497,11 +509,20 @@ void CopyMoveTool::Commit() {
         }
     }
     EndPlacing();
-    for (ComponentEntity* e : moved) {
-        AddEntity(e);
-    }
-    for (int cell : roads) {
-        _roads.insert(cell);
+    if (ok) {
+        for (ComponentEntity* e : moved) {
+            AddEntity(e);
+        }
+        for (int cell : roads) {
+            _roads.insert(cell);
+        }
+    } else {
+        for (EntityRef& r : before) {
+            if (Alive(r)) {
+                AddEntity(r.entity);
+            }
+        }
+        _roads = roadsBefore;
     }
     if (ok) {
         DragTool_PlayPlaceSound_1000f0(this);
@@ -539,13 +560,7 @@ char CopyMoveTool::OnKey(char active) {
     if (_mode == Mode::Select) {
         if (_dragging && keys->Released(0, kActionLeft)) {
             _dragging = false;
-            for (ComponentEntity* e : _boxPreview) {
-                EntityRef r = Remember(e);
-                if (Alive(r) && !Holds(e)) {
-                    SetOutline(e, false);
-                }
-            }
-            _boxPreview.clear();
+            ClearBoxPreview();
             if (_dragStart.col == _dragEnd.col && _dragStart.row == _dragEnd.row) {
                 Map* map = TheMap();
                 ClickAt(_dragStart.row * map->size + _dragStart.col);
@@ -590,15 +605,17 @@ void CopyMoveTool::Update(const System::Time* /*time*/, char active) {
                     dialogPtr->PlayTickSound();
                     // What the box would take, outlined as it is dragged.
                     std::vector<ComponentEntity*> now = EntitiesIn(DragRect(_dragStart, _dragEnd));
-                    for (ComponentEntity* e : _boxPreview) {
-                        if (std::find(now.begin(), now.end(), e) == now.end() && !Holds(e)) {
-                            SetOutline(e, false);
+                    for (EntityRef& r : _boxPreview) {
+                        if (std::find(now.begin(), now.end(), r.entity) == now.end() && Alive(r) &&
+                            !Holds(r.entity)) {
+                            SetOutline(r.entity, false);
                         }
                     }
+                    _boxPreview.clear();
                     for (ComponentEntity* e : now) {
                         SetOutline(e, true);
+                        _boxPreview.push_back(Remember(e));
                     }
-                    _boxPreview = now;
                 }
             }
         }
@@ -679,10 +696,9 @@ void CopyMoveTool::Draw(Video::Context* context, char flag) {
             }
         }
     } else {
-        for (ComponentEntity* e : _stays) {
+        for (EntityRef& r : _stays) {
             Rect rect;
-            EntityRef r = Remember(e);
-            if (Alive(r) && RectOf(e, &rect, nullptr)) {
+            if (Alive(r) && RectOf(r.entity, &rect, nullptr)) {
                 addRect(rect, kColourStays);
             }
         }
@@ -772,6 +788,7 @@ bool PollHotkeys(PlayerToolManager* manager, bool inputFlag) {
         if (shown != nullptr && !KindOf(shown->_description, &kind)) {
             shown = nullptr;
         }
+        shown = shown != nullptr ? MasterOf(shown) : nullptr;   // a fence piece stands for its pasture
     }
     CopyMoveTool* tool = Start(manager);
     if (tool == nullptr) {
