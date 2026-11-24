@@ -566,7 +566,7 @@ int CellOf(ComponentEntity* e) {
     return mc->tileY0 * map->size + mc->tileX0;
 }
 
-enum class Planted { kYes, kTaken, kNoTemplate, kNotAPlant };
+enum class Planted { kYes, kTaken, kTakenByNature, kNoTemplate, kNotAPlant };
 
 // A plant of `tmpl` on a free tile, as the game's spreading puts a sapling there
 // (GrowthComponent::SpawnSubResource): grown to `progress` (0 a sapling, 1 full size), with the model
@@ -577,8 +577,13 @@ Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, flo
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr || cell < 0 || cell >= map->size * map->size)
         return Planted::kNoTemplate;
     const MapCell& c = map->cells.GetData()[cell];
-    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF)
-        return Planted::kTaken;
+    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF) {
+        // Held by another natural resource (and nothing else): it may be on its way out.
+        ComponentEntity* holder = c.occupant.Get() != nullptr ? c.occupant.Get() : c.blocker.Get();
+        const bool nature = holder != nullptr && holder->FindComponent<NaturalResourceComponent>() != nullptr &&
+                            c.footprintCount == 0 && c.field_0x2A == 0xFF;
+        return nature ? Planted::kTakenByNature : Planted::kTaken;
+    }
     ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
     if (f == nullptr) return Planted::kNoTemplate;
     ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(tmpl.c_str()));
@@ -663,6 +668,7 @@ void ApplyNat(const Message& m) {
         ++s_applied.planted;
         break;
     case Planted::kTaken:
+    case Planted::kTakenByNature:
         if (replay) return;   // most likely the sapling itself, grown or not
         ++s_applied.refused;
         s_lastRefusal = "a sapling on a tile that is taken";
@@ -1111,12 +1117,13 @@ void LogFingerprint() {
 // asks for the blocks that differ (natBlockReq) and makes them match the owner's lists (natBlock). Its
 // requests go in the same queue as its own changes and the owner answers in the same queue as its own,
 // so each side has the other's earlier changes before it counts; a block this town changes after it
-// asks is left for the next round.
+// asks, or holds a resource of its own on the way out (felled, not yet freed), waits for the next round.
 namespace {
 
 constexpr double kSyncFirstSeconds = 20.0;    // after the neighbour arrives: its replays land first
 constexpr double kSyncEverySeconds = 45.0;
 constexpr double kSyncGiveUpSeconds = 180.0;  // an answer that never comes (the neighbour left)
+constexpr double kSyncAnswerSeconds = 5.0;    // the owner answers one round at most this often
 constexpr size_t kSyncChars = 11000;          // a sync message's lists, well under kMaxMessageBytes
 
 struct SyncRound {
@@ -1124,18 +1131,32 @@ struct SyncRound {
     int     stage = 0;   // 0 none, 1 waiting for the digest, 2 waiting for the blocks
     std::chrono::steady_clock::time_point sentAt;
     std::map<int, NatureSync::BlockSum> digest;   // the owner's, as its lists come
+    std::map<int, NatureSync::BlockSum> ownerSums;   // the owner's sum of each block asked for
     std::set<int> asked;                          // blocks still to come
     std::map<int, std::vector<NatureSync::Plant>> partial;
-    int blocks = 0, differed = 0, skipped = 0, added = 0, removed = 0, blocked = 0;
+    int blocks = 0, differed = 0, skipped = 0, added = 0, removed = 0, waiting = 0, blocked = 0;
     std::map<std::string, int> blockedByTmpl;
 };
 SyncRound s_round;
 std::set<int> s_syncDirty;   // blocks of the neighbour's half this town changed since its last request
+// Blocks this copy cannot make match (a rock or deposit it has lost cannot be put back; a tile under one
+// of this town's structures takes no plant): the owner's sum and this copy's when it was settled. Not
+// asked for again while both stay so.
+struct Settled {
+    NatureSync::BlockSum owner;
+    NatureSync::BlockSum here;
+    bool                 hereKnown = false;
+};
+std::map<int, Settled> s_syncSettled;
 int64_t s_syncSerial = 0;
 bool s_peerOnline = false;
 std::chrono::steady_clock::time_point s_syncNext;
 bool s_syncScheduled = false;
 std::string s_syncLogged;
+// The owner's side: when it last answered a round, and which.
+std::chrono::steady_clock::time_point s_syncAnsweredAt;
+int64_t s_syncAnsweredId = -1;
+int64_t s_syncBlocksAnsweredId = -1;
 
 const char* HalfName(int half) {
     return half == 0 ? "west" : "east";
@@ -1158,20 +1179,25 @@ NatureSync::Plant PlantOf(ComponentEntity* e, int cell) {
     return p;
 }
 
-// This copy's natural resources on one half: its digest, and the plants and entities of `blocks`.
+// This copy's natural resources on one half: its digest, the plants and entities of `blocks`, and the
+// blocks holding a resource this town's own game is taking away (flagged, not yet freed: its removal
+// is not sent yet).
 void CollectHalf(int half, std::map<int, NatureSync::BlockSum>* sums, const std::set<int>* blocks,
                  std::map<int, std::vector<NatureSync::Plant>>* plants,
-                 std::map<int, std::vector<ComponentEntity*>>* ents) {
+                 std::map<int, std::vector<ComponentEntity*>>* ents, std::set<int>* busy) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
     if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
     const auto& all = g->m_entityList->masterArray;
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
-        if (e == nullptr || ((e->_entityFlags >> 10) & 1) || e->FindComponent<NaturalResourceComponent>() == nullptr)
-            continue;
+        if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
         const int cell = CellOf(e);
         if (cell < 0 || NatureSync::HalfOf(cell, map->size) != half) continue;
+        if ((e->_entityFlags >> 10) & 1) {
+            if (busy != nullptr && s_quiet.count(e) == 0) busy->insert(NatureSync::BlockOf(cell, map->size));
+            continue;
+        }
         if (sums != nullptr) NatureSync::AddTo(*sums, map->size, cell, PathOf(e->_description));
         if (blocks == nullptr) continue;
         const int block = NatureSync::BlockOf(cell, map->size);
@@ -1190,9 +1216,17 @@ void MarkSyncDirty(int cell) {
 void ResetSync() {
     s_round = SyncRound();
     s_syncDirty.clear();
+    s_syncSettled.clear();
     s_peerOnline = false;
     s_syncScheduled = false;
     s_syncLogged.clear();
+    s_syncAnsweredId = -1;
+    s_syncBlocksAnsweredId = -1;
+    // Round ids from the clock: an owner's answer to a round of an earlier run of this game never
+    // matches one of this run.
+    s_syncSerial = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::system_clock::now().time_since_epoch()).count() &
+                                        0x3FFFFFFFFFll) << 8;
 }
 
 void ScheduleSync(double seconds) {
@@ -1211,7 +1245,9 @@ void FinishRound() {
     const int half = 1 - s_seat;
     if (r.differed == 0 && r.skipped == 0) {
         LogSync(std::string("the neighbor's ") + HalfName(half) + " half matches here (" + std::to_string(r.blocks) +
-                " block(s) with nature)");
+                " block(s) with nature" +
+                (s_syncSettled.empty() ? "" : ", " + std::to_string(s_syncSettled.size()) + " settled as they are") +
+                ")");
     } else {
         std::string top;
         std::vector<std::pair<int, std::string>> worst;
@@ -1219,11 +1255,12 @@ void FinishRound() {
         std::sort(worst.rbegin(), worst.rend());
         for (size_t i = 0; i < worst.size() && i < 3; ++i)
             top += (i ? ", " : "") + worst[i].second + " x" + std::to_string(worst[i].first);
-        char line[700];
+        char line[800];
         snprintf(line, sizeof line,
                  "the neighbor's %s half differed here in %d of %d block(s) (%d left for the next round: changed "
-                 "here meanwhile); mended: %d plant(s) added, %d removed, %d could not be added%s%s%s",
-                 HalfName(half), r.differed + r.skipped, r.blocks, r.skipped, r.added, r.removed, r.blocked,
+                 "here meanwhile); mended: %d plant(s) added, %d removed, %d wait for their tile to clear, %d cannot "
+                 "be put here%s%s%s",
+                 HalfName(half), r.differed + r.skipped, r.blocks, r.skipped, r.added, r.removed, r.waiting, r.blocked,
                  top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
         LogSync(line);
     }
@@ -1231,11 +1268,25 @@ void FinishRound() {
     ScheduleSync(kSyncEverySeconds);
 }
 
+// A request of this round still waiting in the queue (a long backlog): not yet unanswered.
+bool RequestQueued() {
+    for (const Message& m : s_pending) {
+        if (m.type != "natSyncReq" && m.type != "natBlockReq") continue;
+        int64_t id = 0;
+        if (m.GetInt("id", id) && id == s_round.id) return true;
+    }
+    return false;
+}
+
 void SyncTick(Link* link) {
     if (s_seat < 0 || !s_peerOnline || link == nullptr || !link->Connected()) return;
     const auto now = std::chrono::steady_clock::now();
     if (s_round.stage != 0) {
         if (std::chrono::duration<double>(now - s_round.sentAt).count() > kSyncGiveUpSeconds) {
+            if (RequestQueued()) {
+                s_round.sentAt = now;
+                return;
+            }
             LogSync("no answer from the neighbor (an older game, or it left); asking again later");
             s_round = SyncRound();
             ScheduleSync(kSyncEverySeconds);
@@ -1252,15 +1303,20 @@ void SyncTick(Link* link) {
     Message q("natSyncReq");
     q.SetInt("id", s_round.id).SetInt("half", 1 - s_seat);
     Queue(q);
-    ScheduleSync(kSyncGiveUpSeconds);
 }
 
-// The owner's side: this town's half as it stands, to the neighbour that asked.
+// The owner's side: this town's half as it stands, to the neighbour that asked (one round at most every
+// kSyncAnswerSeconds: each answer walks every entity and fills the queue).
 void AnswerDigest(const Message& m) {
     int64_t id = 0, half = -1;
     if (s_seat < 0 || !m.GetInt("id", id) || !m.GetInt("half", half) || half != s_seat) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (s_syncAnsweredId >= 0 && std::chrono::duration<double>(now - s_syncAnsweredAt).count() < kSyncAnswerSeconds)
+        return;
+    s_syncAnsweredAt = now;
+    s_syncAnsweredId = id;
     std::map<int, NatureSync::BlockSum> sums;
-    CollectHalf(s_seat, &sums, nullptr, nullptr, nullptr);
+    CollectHalf(s_seat, &sums, nullptr, nullptr, nullptr, nullptr);
     const std::vector<std::string> lists = NatureSync::EncodeDigest(sums, kSyncChars);
     for (size_t i = 0; i < lists.size(); ++i) {
         Message d("natDigest");
@@ -1270,15 +1326,22 @@ void AnswerDigest(const Message& m) {
 }
 
 void AnswerBlocks(const Message& m) {
+    Map* map = TheMap();
     int64_t id = 0, half = -1;
     std::vector<int> blocks;
-    if (s_seat < 0 || !m.GetInt("id", id) || !m.GetInt("half", half) || half != s_seat ||
-        !NatureSync::ParseInts(m.GetOr("blocks", ""), blocks))
+    // Only for the round this town last sent a digest for (a long list of blocks comes in several asks).
+    if (map == nullptr || s_seat < 0 || !m.GetInt("id", id) || id != s_syncAnsweredId || !m.GetInt("half", half) ||
+        half != s_seat || !NatureSync::ParseInts(m.GetOr("blocks", ""), blocks))
         return;
-    const std::set<int> want(blocks.begin(), blocks.end());
+    const int perRow = (map->size + NatureSync::kBlock - 1) / NatureSync::kBlock;
+    std::set<int> want;
+    std::vector<int> order;
+    for (int b : blocks)
+        if (b >= 0 && b < perRow * perRow && want.insert(b).second) order.push_back(b);
     std::map<int, std::vector<NatureSync::Plant>> plants;
-    CollectHalf(s_seat, nullptr, &want, &plants, nullptr);
-    for (const NatureSync::BlockMessage& b : NatureSync::PackBlocks(blocks, plants, kSyncChars)) {
+    CollectHalf(s_seat, nullptr, &want, &plants, nullptr, nullptr);
+    s_syncBlocksAnsweredId = id;
+    for (const NatureSync::BlockMessage& b : NatureSync::PackBlocks(order, plants, kSyncChars)) {
         Message out("natBlock");
         out.SetInt("id", id).SetInt("half", half).Set("tmpls", b.tmpls).Set("list", b.list).Set("done", b.done);
         Queue(out);
@@ -1301,12 +1364,38 @@ void TakeDigest(const Message& m) {
     }
     if (!end) return;
     std::map<int, NatureSync::BlockSum> here;
-    CollectHalf(static_cast<int>(half), &here, nullptr, nullptr, nullptr);
+    std::set<int> busy;
+    CollectHalf(static_cast<int>(half), &here, nullptr, nullptr, nullptr, &busy);
     std::set<int> withNature;
     for (const auto& kv : s_round.digest) withNature.insert(kv.first);
     for (const auto& kv : here) withNature.insert(kv.first);
     s_round.blocks = static_cast<int>(withNature.size());
-    const std::vector<int> differ = NatureSync::Differing(s_round.digest, here, s_syncDirty, &s_round.skipped);
+    // Settled blocks stay out while neither copy of them changed.
+    const NatureSync::BlockSum none;
+    std::set<int> settledNow;
+    for (auto it = s_syncSettled.begin(); it != s_syncSettled.end();) {
+        const auto o = s_round.digest.find(it->first);
+        const auto h = here.find(it->first);
+        const NatureSync::BlockSum& ownerSum = o == s_round.digest.end() ? none : o->second;
+        const NatureSync::BlockSum& hereSum = h == here.end() ? none : h->second;
+        if (ownerSum != it->second.owner || (it->second.hereKnown && hereSum != it->second.here)) {
+            it = s_syncSettled.erase(it);
+            continue;
+        }
+        it->second.here = hereSum;
+        it->second.hereKnown = true;
+        settledNow.insert(it->first);
+        ++it;
+    }
+    std::set<int> skip = s_syncDirty;
+    skip.insert(busy.begin(), busy.end());
+    std::vector<int> differ;
+    for (int b : NatureSync::Differing(s_round.digest, here, skip, &s_round.skipped))
+        if (settledNow.count(b) == 0) differ.push_back(b);
+    for (int b : differ) {
+        const auto o = s_round.digest.find(b);
+        s_round.ownerSums[b] = o == s_round.digest.end() ? none : o->second;
+    }
     s_round.digest.clear();
     if (differ.empty()) {
         FinishRound();
@@ -1344,24 +1433,34 @@ void TakeBlocks(const Message& m) {
     b.tmpls = m.GetOr("tmpls", "");
     b.list = m.GetOr("list", "");
     b.done = m.GetOr("done", "");
+    std::map<int, std::vector<NatureSync::Plant>> got;
     std::vector<int> done;
-    if (!NatureSync::UnpackBlocks(b, map->size, s_round.partial, done)) {
+    if (!NatureSync::UnpackBlocks(b, map->size, got, done)) {
         LogSync("a block list from the neighbor is malformed; asking again later");
         s_round = SyncRound();
         ScheduleSync(kSyncEverySeconds);
         return;
+    }
+    // Only what was asked for, on the half that was asked about.
+    for (auto& kv : got) {
+        if (s_round.asked.count(kv.first) == 0) continue;
+        std::vector<NatureSync::Plant>& into = s_round.partial[kv.first];
+        for (NatureSync::Plant& p : kv.second)
+            if (NatureSync::HalfOf(p.cell, map->size) == half) into.push_back(std::move(p));
     }
     std::set<int> ready;
     for (int block : done)
         if (s_round.asked.count(block)) ready.insert(block);
     std::map<int, std::vector<NatureSync::Plant>> herePlants;
     std::map<int, std::vector<ComponentEntity*>> hereEnts;
-    if (!ready.empty()) CollectHalf(static_cast<int>(half), nullptr, &ready, &herePlants, &hereEnts);
+    std::set<int> busy;
+    if (!ready.empty()) CollectHalf(static_cast<int>(half), nullptr, &ready, &herePlants, &hereEnts, &busy);
     for (int block : ready) {
         s_round.asked.erase(block);
         const std::vector<NatureSync::Plant> owner = std::move(s_round.partial[block]);
         s_round.partial.erase(block);
-        if (s_syncDirty.count(block)) {   // changed here since the request: the next round looks again
+        // Changed here since the request, or a resource of this town's on its way out: the next round.
+        if (s_syncDirty.count(block) || busy.count(block)) {
             ++s_round.skipped;
             --s_round.differed;
             continue;
@@ -1374,14 +1473,30 @@ void TakeBlocks(const Message& m) {
             g->m_entityList->QueueDestroy(&e);
             ++s_round.removed;
         }
+        bool cannot = false;
         for (const NatureSync::Plant& p : mend.add) {
             const float progress = p.prog >= 0 ? static_cast<float>(p.prog) / 1000.0f : 0.0f;
-            if (PlantAt(p.cell, p.tmpl, p.grp, p.var, progress) == Planted::kYes) {
+            switch (PlantAt(p.cell, p.tmpl, p.grp, p.var, progress)) {
+            case Planted::kYes:
                 ++s_round.added;
                 continue;
+            case Planted::kTakenByNature:   // another resource there, perhaps one just removed: next round
+                ++s_round.waiting;
+                continue;
+            case Planted::kTaken:
+            case Planted::kNotAPlant:
+            case Planted::kNoTemplate:
+                break;
             }
+            cannot = true;
             ++s_round.blocked;
             if (s_round.blockedByTmpl.size() < 32 || s_round.blockedByTmpl.count(p.tmpl)) ++s_round.blockedByTmpl[p.tmpl];
+        }
+        // What cannot be put here stays as it is until either copy of the block changes.
+        if (cannot) {
+            Settled st;
+            st.owner = s_round.ownerSums[block];
+            s_syncSettled[block] = st;
         }
     }
     if (s_round.asked.empty()) FinishRound();
@@ -1504,7 +1619,8 @@ uint64_t WaitingGeneration() {
 void SaveWaiting(SavedState& s) {
     s.mapWaiting.clear();
     s.mapWaiting.reserve(s_pending.size());
-    for (const Message& m : s_pending) s.mapWaiting.push_back(m.Encode());
+    for (const Message& m : s_pending)
+        if (m.type == "road" || m.type == "nat") s.mapWaiting.push_back(m.Encode());   // not the sync's
     s.mapUnbuilds = s_unbuildQueue;
     s.mapClaims = s_claimQueue;
     s.mapReleases = s_releaseQueue;

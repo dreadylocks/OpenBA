@@ -41,6 +41,8 @@ const kMaxMods = 256;
 const kMaxModsChars = 12 * 1024;
 const kMaxFrameBytes = 16 * 1024;
 const kMaxSyncChars = 15000;   // a nature sync message's list (the game keeps them under 11,000)
+const kSyncWindowMs = 5000;    // at most kSyncPerWindow sync requests from a town in this long
+const kSyncPerWindow = 8;
 const kMaxNameChars = 24;
 const kMaxRoomChars = 64;
 const kMaxPassChars = 128;
@@ -483,6 +485,14 @@ export class Room {
   onNatSync(ws, a, msg) {
     if (!Number.isInteger(msg.id) || msg.id < 0 || (msg.half !== 0 && msg.half !== 1)) {
       return this.fail(ws, "bad nature sync", false);
+    }
+    // Each request makes the neighbour's game walk its whole map: a few a round, a round every ~45 s.
+    if (msg.t === "natSyncReq" || msg.t === "natBlockReq") {
+      const now = Date.now();
+      if (!a.syncWindow || now - a.syncWindow > kSyncWindowMs) { a.syncWindow = now; a.syncCount = 0; }
+      a.syncCount = (a.syncCount || 0) + 1;
+      ws.serializeAttachment(a);
+      if (a.syncCount > kSyncPerWindow) return;   // dropped: the game asks again later
     }
     const ev = { t: msg.t, id: msg.id, half: msg.half };
     for (const k of ["list", "blocks", "tmpls", "done"]) {

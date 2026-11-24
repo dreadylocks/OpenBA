@@ -61,8 +61,9 @@ std::vector<int> Differing(const std::map<int, BlockSum>& owner, const std::map<
                            const std::set<int>& skip, int* skipped);
 
 // The owner's answer, in messages of at most about maxChars. Each carries its own template table, its
-// entries "cell,template,grp,var,prog" and the blocks it completes: a block is complete in the message
-// with its last entry (an empty block, in the message it falls in), so a full block may span messages.
+// entries "cell,template,grp,var,prog" and the blocks it completes: a block is named done in the message
+// with its last entry or a later one (never an earlier one), so a full block may span messages and the
+// receiver applies a block only once it is named done.
 struct BlockMessage {
     std::string tmpls;   // '\n'-joined
     std::string list;    // ';'-joined entries
