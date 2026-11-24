@@ -902,12 +902,19 @@ ToolbarDialog::ToolbarDialog(UI::UserInterface* userInterface, const UI::Dialog*
         }
     }
 
-    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension window's one button
-    // (src/ext/toolbar) in the Reports group. A null entry in the item list marks its slot; the readers of
-    // toolbarItems below and in UpdateButtons / OnUpdateLayout / OnElementEvent skip it.
+    // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md, docs/fork/COPY_MOVE.md): our buttons
+    // (src/ext/toolbar): the extension window's in the Reports group, the fork's tool buttons in theirs. A
+    // null entry in the item list marks each slot; the readers of toolbarItems below and in UpdateButtons /
+    // OnUpdateLayout / OnElementEvent skip it. Inserted from the last slot back, so the earlier slots stay put.
     {
-        const int extSlot = Ext::Toolbar::InsertAt(group, itemList, itemListCount);
-        if (extSlot >= 0 && extSlot <= itemListCount) {
+        int extSlots[Ext::Toolbar::kMaxButtons];
+        const int extCount = Ext::Toolbar::InsertAt(group, itemList, itemListCount, extSlots,
+                                                    Ext::Toolbar::kMaxButtons);
+        for (int k = extCount - 1; k >= 0; --k) {
+            const int extSlot = extSlots[k];
+            if (extSlot < 0 || extSlot > itemListCount) {
+                continue;
+            }
             DynArray_Push(&itemList, &itemListCount, &itemListCap, static_cast<const Toolbar*>(nullptr));
             for (int i = itemListCount - 1; i > extSlot; --i) {
                 itemList[i] = itemList[i - 1];
@@ -955,8 +962,8 @@ ToolbarDialog::ToolbarDialog(UI::UserInterface* userInterface, const UI::Dialog*
     for (int i = 0; i < itemListCount; i++) {
         const Toolbar* item = itemList[i];
         if (item == nullptr) {
-            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button, a
-            // utility-style button (template 3) with no Toolbar item behind it.
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md, docs/fork/COPY_MOVE.md): one of
+            // our buttons, a utility-style button (template 3) with no Toolbar item behind it.
             const UI::ElementDescription* extTemplate = dialog->GetTemplate(3).Get();
             Object::InternalPtr<UI::Element> extClone;
             extTemplate->CreateInstance(&extClone, dialog);
@@ -1303,9 +1310,10 @@ void ToolbarDialog::OnElementEvent(Object::InternalPtr<UI::Element>* element, in
         UI::CheckElement* checkElem = isDerived ? static_cast<UI::CheckElement*>(elemObj) : nullptr;
 
         if (item == nullptr) {
-            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md): the extension button. Like a
-            // utility button: it opens the window or closes it. The button is released at once (the window's
-            // own close button can close it too); any open sub-toolbar closes as for every non-Tool button.
+            // EXT SEAM (NOT RETAIL, docs/extensions/handins/RESTRICTEDFOODS.md, docs/fork/COPY_MOVE.md): one of
+            // our buttons. Like a utility button: the extension window's opens or closes the window, a tool
+            // button starts its tool. The button is released at once; any open sub-toolbar closes as for every
+            // non-Tool button.
             if (subDialog.Get() != nullptr) {
                 Object::InternalPtr<UI::DialogInstance> closeRef = subDialog;
                 _ui->CloseDialog(&closeRef);
@@ -1315,7 +1323,7 @@ void ToolbarDialog::OnElementEvent(Object::InternalPtr<UI::Element>* element, in
             if (checkElem != nullptr) {
                 checkElem->_checked = 0;
             }
-            Ext::Toolbar::Toggle(_ui);   // open, or close when open
+            Ext::Toolbar::Click(_ui, elemObj);   // told apart by the button's name
             return;
         }
 

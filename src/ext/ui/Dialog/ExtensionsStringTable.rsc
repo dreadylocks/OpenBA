@@ -39,6 +39,7 @@ StringTable resource
 		// the in-game extension window (ExtensionsWindow.rsc) and ext.restricted_foods's page in it (RestrictedFoodsPage.rsc)
 		{ String _name = "ExtensionsWindowTitle";	String _text = "Game extensions"; }
 		{ String _name = "ExtensionsWindowTip";		String _text = "Game extensions: the pages of the extensions active in this town."; }
+		{ String _name = "CopyMoveTip";		String _text = "Copy and move (Ctrl+C, Ctrl+X): click or drag a box to select buildings, roads and fields. Ctrl+C copies, Ctrl+X moves, Ctrl+V pastes again. R and T turn, click places, right-click goes back."; }
 		{ String _name = "RestrictedFoodsTab";			String _text = "Foods"; }
 		{ String _name = "RestrictedFoodsHint";			String _text = "Check a food to stop citizens eating it. It can still be stored, sold and cooked."; }
 		{ String _name = "RestrictedFoodsParam";			String _text = "@0"; }

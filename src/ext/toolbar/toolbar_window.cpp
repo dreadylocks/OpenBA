@@ -409,45 +409,103 @@ void Toggle(UI::UserInterface* ui) {
 }
 
 // ===========================================================================
-// The toolbar button (EXT SEAMS in ToolbarDialog)
+// Our toolbar buttons (EXT SEAMS in ToolbarDialog)
 // ===========================================================================
-int InsertAt(const ::Toolbar* group, const ::Toolbar* const* items, int n) {
-    if (GroupName(group) != "reports") {
-        return -1;
+namespace {
+
+constexpr const char* kWindowButtonName = "extensions";
+
+// The fork's tool buttons, in no particular order (each carries its own group and priority).
+const ToolButton* const* ToolButtons(int* n) {
+    static const ToolButton* const kButtons[] = {
+        &CopyMoveButton(),
+    };
+    *n = static_cast<int>(sizeof(kButtons) / sizeof(kButtons[0]));
+    return kButtons;
+}
+
+// What the last InsertAt placed, in slot order: null = the window's button. Style takes them in turn.
+std::vector<const ToolButton*> g_plan;
+size_t g_planNext = 0;
+
+}  // namespace
+
+int InsertAt(const ::Toolbar* group, const ::Toolbar* const* items, int n, int* slots, int capacity) {
+    g_plan.clear();
+    g_planNext = 0;
+    if (GameUpdateLoop::_singleton == nullptr || GateProfileForced()) {
+        return 0;
     }
-    if (GameUpdateLoop::_singleton == nullptr) {
-        return -1;
+    struct Want {
+        int32_t priority;
+        const ToolButton* tool;
+    };
+    std::vector<Want> wants;
+    const std::string name = GroupName(group);
+    if (name == "reports" && Offered()) {
+        wants.push_back({ kToolbarSortPriority, nullptr });
     }
-    if (!Offered()) {
-        return -1;
+    int toolCount = 0;
+    const ToolButton* const* tools = ToolButtons(&toolCount);
+    for (int t = 0; t < toolCount; ++t) {
+        if (name == tools[t]->group && tools[t]->offered()) {
+            wants.push_back({ tools[t]->sortPriority, tools[t] });
+        }
+    }
+    if (wants.empty()) {
+        return 0;
     }
     if (OurStringTable() == nullptr || OurSpriteSheet() == nullptr) {
         std::fprintf(stderr, "[ExtToolbar] ExtensionsStringTable / ExtensionsSprites did not load: "
-                     "no extension button\n");
-        return -1;
+                     "no extension buttons\n");
+        return 0;
     }
-    int at = n;
-    for (int i = 0; i < n; ++i) {
-        if (items[i] != nullptr && items[i]->_field50 > kToolbarSortPriority) {
-            at = i;
+    // Ascending priority gives ascending slots; equal priorities keep the order above.
+    for (size_t i = 1; i < wants.size(); ++i) {
+        Want key = wants[i];
+        size_t j = i;
+        while (j > 0 && wants[j - 1].priority > key.priority) {
+            wants[j] = wants[j - 1];
+            --j;
+        }
+        wants[j] = key;
+    }
+    int count = 0;
+    for (const Want& w : wants) {
+        if (count >= capacity) {
             break;
         }
+        int at = n;
+        for (int i = 0; i < n; ++i) {
+            if (items[i] != nullptr && items[i]->_field50 > w.priority) {
+                at = i;
+                break;
+            }
+        }
+        slots[count] = at;
+        g_plan.push_back(w.tool);
+        ++count;
+        std::fprintf(stderr, "[ExtToolbar] button '%s' goes at slot %d of %d in group '%s'\n",
+                     w.tool != nullptr ? w.tool->name : kWindowButtonName, at, n, name.c_str());
     }
-    std::fprintf(stderr, "[ExtToolbar] the extension button goes at slot %d of %d in the Reports group\n",
-                 at, n);
-    return at;
+    return count;
 }
 
 void Style(UI::Element* button, int32_t index) {
+    const ToolButton* tool = nullptr;
+    if (g_planNext < g_plan.size()) {
+        tool = g_plan[g_planNext];
+        ++g_planNext;
+    }
     if (!::Object::IsDerivedFromNullSafe(button, UI::ButtonElement::TypeId())) {
         std::fprintf(stderr, "[ExtToolbar] template 3 clone is not a ButtonElement\n");
         return;
     }
     UI::ButtonElement* b = static_cast<UI::ButtonElement*>(button);
-    button->SetName(System::String("extensions"));
+    button->SetName(System::String(tool != nullptr ? tool->name : kWindowButtonName));
     b->SetElementId(index);
     b->SetUserData(nullptr);
-    b->SetToolTip(OurString("ExtensionsWindowTip"));
+    b->SetToolTip(OurString(tool != nullptr ? tool->tooltip : "ExtensionsWindowTip"));
     b->SetFlagsOnOff(0x10000, 0);
     UI::SpriteSheet* sheet = OurSpriteSheet();
     if (sheet == nullptr) {
@@ -459,11 +517,25 @@ void Style(UI::Element* button, int32_t index) {
         if (!::Object::IsDerivedFromNullSafe(child, UI::ImageElement::TypeId())) {
             continue;
         }
-        UI::Sprite sprite(Object::ExternalPtr<UI::SpriteSheet>(sheet), System::String("ToolbarExtensions"));
+        UI::Sprite sprite(Object::ExternalPtr<UI::SpriteSheet>(sheet),
+                          System::String(tool != nullptr ? tool->sprite : "ToolbarExtensions"));
         if (sprite.IsValid()) {
             static_cast<UI::ImageElement*>(child)->SetSprite(&sprite);
         }
     }
+}
+
+void Click(UI::UserInterface* ui, UI::Element* button) {
+    const std::string name = (button != nullptr && button->_name != nullptr) ? button->_name : "";
+    int toolCount = 0;
+    const ToolButton* const* tools = ToolButtons(&toolCount);
+    for (int t = 0; t < toolCount; ++t) {
+        if (name == tools[t]->name) {
+            tools[t]->click();
+            return;
+        }
+    }
+    Toggle(ui);   // the window's button
 }
 
 }  // namespace Toolbar

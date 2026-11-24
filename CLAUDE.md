@@ -20,7 +20,8 @@ function with no body yet is a `// PORT GAP 0x<addr> <name>` comment at its call
 
 **This fork** (`dreadylocks/OpenBA`) also builds a two-player "neighbour towns" mode and island
 maps as class B/C extensions in `src/ext` (off by default; the faithful path stays untouched).
-Plan, decisions and next steps: `docs/fork/NEIGHBOUR_TOWNS.md`. If a rule here blocks a fork
+Plan, decisions and next steps: `docs/fork/NEIGHBOUR_TOWNS.md`. New fork features are always on (no
+Extensions row; the user, 2026-11-24), e.g. `docs/fork/COPY_MOVE.md`. If a rule here blocks a fork
 goal, ask the user rather than working around it.
 
 ## Current work — read these, don't restate them here

@@ -68,6 +68,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/high_limits/high_limits.cpp             # ext_high_limits_test.cpp (HIGHLIMITS)
   ${CMAKE_SOURCE_DIR}/src/ext/restricted_foods/restricted_foods.cpp            # ext_restricted_foods_test.cpp (RESTRICTEDFOODS)
   ${CMAKE_SOURCE_DIR}/src/ext/restricted_foods/save_state.cpp             #   its class C codec
+  ${CMAKE_SOURCE_DIR}/src/ext/copy_move/layout.cpp                 # ext_copy_move_test.cpp (docs/fork/COPY_MOVE.md)
   ${CMAKE_SOURCE_DIR}/src/ext/toolbar/toolbar.cpp                    # ext_toolbar_test.cpp (the page list; the page is stubbed there)
   ${CMAKE_SOURCE_DIR}/src/ext/state_codecs.cpp                       # savetail.cpp's FindCodec (the class C codec table)
   ${CMAKE_SOURCE_DIR}/src/ext/host_codecs.cpp                        # savetail.cpp's FindHostCodec (the host codec table, EXTHOSTS)

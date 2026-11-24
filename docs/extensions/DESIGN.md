@@ -163,6 +163,7 @@ separate axis, a *surface*, and every surface is built once as a host that exten
 | Extensions dialog (front end) | `src/game/Dialog/ExtensionsDialog.*` | its registry row (mandatory) |
 | Enhanced tab (Options dialog) | `src/ext/enhanced_tab/` | rows for its class A values (`EnhancedTab::Contribution`: open / apply / close) |
 | In-game toolbar window | one extension button on the toolbar opening a window of pages, built with the first extension that needs it | a page, offered only while the extension is active for the town |
+| Toolbar tool button (this fork) | the same host's `Ext::Toolbar::ToolButton` list (`src/ext/toolbar/toolbar.h`): a button in a toolbar group that starts a tool | a button for a baked-in fork feature that is a tool, not a page (the user, 2026-11-24: `docs/fork/COPY_MOVE.md`) |
 
 A new window is never a new class and never a button per feature: the toolbar gets ONE extension
 button, the window shows one page per active contributing extension, and with no active contributor
