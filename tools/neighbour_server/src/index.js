@@ -79,9 +79,11 @@ const kBuildingId = /^[0-9a-z_-]{1,40}$/;
 const kMaxRoadCells = 200_000;
 const kMaxNatQueue = 20_000;
 // Every resource change is also kept for good, the newest per tile (natlog:<seat>:<shard>, kNatShard
-// tiles a shard, its template paths numbered within it). A town that starts again in its seat or loads a
-// save gets both towns' whole record: the changes after that save reached the neighbour live and sit in
-// no queue, and a tree felled in one copy of the land must be gone in the other.
+// tiles a shard, its template paths numbered within it), stamped with when it came. A town that starts
+// again in its seat or loads a save gets the newest change per tile and template across both towns'
+// records: the changes after that save reached the neighbour live and sit in no queue, a tree felled in
+// one copy of the land must be gone in the other, and a plant one town spread and the other felled must
+// not come back from the older record.
 const kNatShardBits = 12;
 const kMaxCell = kMaxMapDim * kMaxMapDim;
 // Flood guard: at most this many messages per socket in kWindowMs.
@@ -812,8 +814,9 @@ export class Room {
     await this.store.put(key, q);
   }
 
-  // A tile's record: the op and template as one number (op + 2 * template index), or with a new plant's
-  // look [that number, grp, var].
+  // A tile's record: [code, grp, var, stamp]: the op and template as one number (op + 2 * template
+  // index), a new plant's look (-1 none) and when the change came (natStamp). Records from before stamps
+  // are the code alone or [code, grp, var] and count as oldest.
   async logNat(seat, op, cell, tmpl, look = null) {
     const key = `natlog:${seat}:${cell >> kNatShardBits}`;
     const shard = (await this.store.get(key)) || { t: [], c: {} };
@@ -823,8 +826,17 @@ export class Room {
       i = shard.t.length - 1;
     }
     const code = (op === "rm" ? 0 : 1) + 2 * i;
-    shard.c[cell] = look ? [code, look[0], look[1]] : code;
+    shard.c[cell] = [code, look ? look[0] : -1, look ? look[1] : -1, this.natStamp()];
     await this.store.put(key, shard);
+  }
+
+  // When a change came, in microseconds: increasing within this object's life (a Worker's clock stands
+  // still between I/O, so changes in one millisecond count up from it) and past every stamp of an earlier
+  // life (its clock has moved on).
+  natStamp() {
+    const now = Date.now() * 1000;
+    this.lastNatStamp = now > (this.lastNatStamp || 0) ? now : this.lastNatStamp + 1;
+    return this.lastNatStamp;
   }
 
   // (natBatch, roadBatch and roadsOff are newer than protocol 2's one-a-tile messages: a game older than
@@ -866,13 +878,26 @@ export class Room {
   // Both towns' whole record of resource changes (replay: the game counts no refusal for a tile that is
   // already as the record says). Returns how many.
   async sendNatLog(ws) {
-    const entries = [];
+    // The newest change per tile and template, whichever town made it. On a tie (records from before
+    // stamps) the removal: a plant is spread or planted before it is felled, far more often than felled
+    // and planted again on the same tile.
+    const newest = new Map();
     for (const [, shard] of await this.store.list({ prefix: "natlog:" })) {
       for (const [cell, rec] of Object.entries(shard.c)) {
-        const v = Array.isArray(rec) ? rec[0] : rec;
-        entries.push(Array.isArray(rec) ? [Number(cell), v & 1, shard.t[v >> 1], rec[1], rec[2]]
-                                        : [Number(cell), v & 1, shard.t[v >> 1]]);
+        const r = Array.isArray(rec) ? rec : [rec];
+        const tmpl = shard.t[r[0] >> 1];
+        if (typeof tmpl !== "string") continue;
+        const stamp = Number.isFinite(r[3]) ? r[3] : 0;
+        const key = `${cell}\n${tmpl}`;
+        const had = newest.get(key);
+        if (had && (had.stamp > stamp || (had.stamp === stamp && had.op === 0))) continue;
+        newest.set(key, { cell: Number(cell), op: r[0] & 1, tmpl, grp: r[1], vr: r[2], stamp });
       }
+    }
+    const entries = [];
+    for (const e of newest.values()) {
+      const look = Number.isInteger(e.grp) && e.grp >= 0 && Number.isInteger(e.vr) && e.vr >= 0;
+      entries.push(look ? [e.cell, e.op, e.tmpl, e.grp, e.vr] : [e.cell, e.op, e.tmpl]);
     }
     this.sendNatBatches(ws, entries, true);
     return entries.length;

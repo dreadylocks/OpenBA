@@ -424,6 +424,16 @@ fb2.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 4097, tmpl: "Template\\Tr
 const live = await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 4097 && !m.replay));
 fa3.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 12, tmpl: "Template\\Rock.rsc" }));
 await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 12));
+// A plant one town spread and the other felled later: the replay has the felling only, whichever seat's
+// record the relay reads first.
+fb2.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 9001, tmpl: "Template\\Tree.rsc", grp: 0, var: 2 }));
+await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 9001));
+fa3.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 9001, tmpl: "Template\\Tree.rsc" }));
+await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 9001 && m.op === "rm"));
+fa3.ws.send(JSON.stringify({ t: "nat", op: "add", cell: 9002, tmpl: "Template\\Tree.rsc" }));
+await tryWait(fb2.wait((m) => m.t === "nat" && m.cell === 9002));
+fb2.ws.send(JSON.stringify({ t: "nat", op: "rm", cell: 9002, tmpl: "Template\\Tree.rsc" }));
+await tryWait(fa3.wait((m) => m.t === "nat" && m.cell === 9002 && m.op === "rm"));
 fa3.ws.close(1000, "bye");
 await fa3.closed;
 // A road the neighbour laid and took up again while this town was here (so in no queue) is taken up
@@ -440,6 +450,13 @@ const own = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 12 && m.re
 const latest = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 777 && m.replay === true));
 check(!!live && again && again.op === "rm" && again.tmpl === "Template\\Tree.rsc" && own && own.op === "rm" &&
       latest && latest.op === "add" && latest.var === 4, "a town loading a save gets both towns' resource changes again");
+{
+  const felled = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 9001 && m.replay === true));
+  const felled2 = await tryWait(fa4.wait((m) => m.t === "nat" && m.cell === 9002 && m.replay === true));
+  const back = fa4.inbox.filter((m) => m.t === "nat" && (m.cell === 9001 || m.cell === 9002) && m.op === "add");
+  check(felled && felled.op === "rm" && felled2 && felled2.op === "rm" && back.length === 0,
+        "a plant one town spread and the other felled is not planted again by the replay");
+}
 const roadAgain = await tryWait(fa4.wait((m) => m.t === "road" && m.cell === 5555 && m.off === true && m.replay === true));
 check(!!roadAgain && !fa4.inbox.some((m) => m.t === "road" && m.cell === 5556 && m.off === true),
       "a town loading a save gets the neighbour's road removals again (not a road laid again since)");

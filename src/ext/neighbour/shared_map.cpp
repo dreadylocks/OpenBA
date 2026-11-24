@@ -571,7 +571,8 @@ enum class Planted { kYes, kTaken, kTakenByNature, kNoTemplate, kNotAPlant };
 // A plant of `tmpl` on a free tile, as the game's spreading puts a sapling there
 // (GrowthComponent::SpawnSubResource): grown to `progress` (0 a sapling, 1 full size), with the model
 // variant grp / var when they are known (-1: the template's own roll).
-Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, float progress) {
+Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, float progress,
+                ComponentEntity** made = nullptr) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
     if (g == nullptr || map == nullptr || g->m_entityList == nullptr || cell < 0 || cell >= map->size * map->size)
@@ -603,7 +604,35 @@ Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, flo
             model->SelectMesh(static_cast<uint16_t>(grp), static_cast<int16_t>(var));
     g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
     s_applying = false;
+    if (made != nullptr) *made = ibp.Get();
     return Planted::kYes;
+}
+
+// The natural resources by their tile, built once a frame when needed (a load's replay brings thousands of
+// changes at once) and kept up to date with what this frame plants.
+void EnsureNatIndex() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    if (s_natIndexFrame == s_frame || g == nullptr || g->m_entityList == nullptr) return;
+    s_natIndexFrame = s_frame;
+    s_natIndex.clear();
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+        const int at = CellOf(e);
+        if (at >= 0) s_natIndex.emplace(at, e);
+    }
+}
+
+// A natural resource of `tmpl` whose origin is `cell`, not on its way out.
+ComponentEntity* StandingNatural(int cell, const std::string& tmpl) {
+    EnsureNatIndex();
+    const auto range = s_natIndex.equal_range(cell);
+    for (auto it = range.first; it != range.second; ++it) {
+        ComponentEntity* e = it->second;
+        if (!((e->_entityFlags >> 10) & 1) && PathOf(e->_description) == tmpl) return e;
+    }
+    return nullptr;
 }
 
 void ApplyNat(const Message& m) {
@@ -632,17 +661,7 @@ void ApplyNat(const Message& m) {
         // Not in the tile's occupant / blocker slots (a plant that does not hold its tile, a wild herb):
         // look for it among the natural resources, indexed by tile once a frame (a load's replay brings
         // thousands of removals at once, most of them for plants this copy no longer has).
-        if (s_natIndexFrame != s_frame) {
-            s_natIndexFrame = s_frame;
-            s_natIndex.clear();
-            const auto& all = g->m_entityList->masterArray;
-            for (int i = 0; i < all._size; ++i) {
-                ComponentEntity* e = all._data[i].Get();
-                if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
-                const int at = CellOf(e);
-                if (at >= 0) s_natIndex.emplace(at, e);
-            }
-        }
+        EnsureNatIndex();
         const auto range = s_natIndex.equal_range(static_cast<int>(cell));
         for (auto it = range.first; it != range.second; ++it) {
             ComponentEntity* e = it->second;
@@ -660,12 +679,18 @@ void ApplyNat(const Message& m) {
         return;
     }
     if (op != "add") return;
+    // A replay onto a save that has the plant already: nothing to do, or a herb (which does not hold its
+    // tile, so the slots cannot tell) would grow there twice. (Live, a plant is new; one that came twice
+    // is the nature sync's to mend, and the index costs a walk of every entity.)
+    if (replay && StandingNatural(static_cast<int>(cell), tmpl) != nullptr) return;
     int64_t grp = -1, var = -1;
     m.GetInt("grp", grp);
     m.GetInt("var", var);
-    switch (PlantAt(static_cast<int>(cell), tmpl, grp, var, 0.0f)) {
+    ComponentEntity* made = nullptr;
+    switch (PlantAt(static_cast<int>(cell), tmpl, grp, var, 0.0f, &made)) {
     case Planted::kYes:
         ++s_applied.planted;
+        if (made != nullptr && s_natIndexFrame == s_frame) s_natIndex.emplace(static_cast<int>(cell), made);
         break;
     case Planted::kTaken:
     case Planted::kTakenByNature:
@@ -1499,6 +1524,7 @@ void TakeBlocks(const Message& m) {
             s_syncSettled[block] = st;
         }
     }
+    s_natIndexFrame = ~0ull;   // the mend planted and removed: ApplyNat's index is built again
     if (s_round.asked.empty()) FinishRound();
 }
 
