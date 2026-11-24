@@ -1225,6 +1225,23 @@ NatureSync::Plant PlantOf(ComponentEntity* e, int cell) {
     return p;
 }
 
+// The tiles this town's structures claim, built once a frame for CollectHalf.
+const std::vector<uint8_t>& OwnHeld(Map* map) {
+    static std::vector<uint8_t> grid;
+    static uint64_t builtFrame = ~0ull;
+    const size_t n = static_cast<size_t>(map->size) * map->size;
+    if (builtFrame == s_frame && grid.size() == n) return grid;
+    builtFrame = s_frame;
+    grid.assign(n, 0);
+    for (const auto& kv : s_mine) {
+        const TileRect& r = kv.second.rect;
+        for (int y = std::max(0, r.y); y < std::min(map->size, r.y + r.h); ++y)
+            for (int x = std::max(0, r.x); x < std::min(map->size, r.x + r.w); ++x)
+                grid[static_cast<size_t>(y) * map->size + x] = 1;
+    }
+    return grid;
+}
+
 // This copy's natural resources on one half, outside structures: its digest, the plants and entities of
 // `blocks`, and the blocks holding a resource this town's own game is taking away (flagged, not yet
 // freed: its removal is not sent yet).
@@ -1234,13 +1251,7 @@ void CollectHalf(int half, std::map<int, NatureSync::BlockSum>* sums, const std:
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
     if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
-    std::vector<uint8_t> ownHeld(static_cast<size_t>(map->size) * map->size, 0);
-    for (const auto& kv : s_mine) {
-        const TileRect& r = kv.second.rect;
-        for (int y = std::max(0, r.y); y < std::min(map->size, r.y + r.h); ++y)
-            for (int x = std::max(0, r.x); x < std::min(map->size, r.x + r.w); ++x)
-                ownHeld[static_cast<size_t>(y) * map->size + x] = 1;
-    }
+    const std::vector<uint8_t>& ownHeld = OwnHeld(map);
     const auto& all = g->m_entityList->masterArray;
     for (int i = 0; i < all._size; ++i) {
         ComponentEntity* e = all._data[i].Get();
@@ -1248,8 +1259,9 @@ void CollectHalf(int half, std::map<int, NatureSync::BlockSum>* sums, const std:
         const int cell = CellOf(e);
         if (cell < 0 || NatureSync::HalfOf(cell, map->size) != half) continue;
         // A tile either town's structure claims (a field's crops, an orchard's trees) is that town's to
-        // keep, by its own changes, not the half's owner's: left out of the sync on both sides (the same
-        // rectangles: this town's claims are the neighbour's PeerHolds).
+        // keep, by its own changes, not the half's owner's: left out of the sync on both sides (this
+        // town's structures' rectangles are what the neighbour holds as PeerHolds, with its roads, which
+        // grow nothing; a claim on its way may differ for a round).
         if (ownHeld[static_cast<size_t>(cell)] || PeerHoldsCell(static_cast<uint32_t>(cell))) continue;
         if ((e->_entityFlags >> 10) & 1) {
             if (busy != nullptr && s_quiet.count(e) == 0) busy->insert(NatureSync::BlockOf(cell, map->size));
@@ -1550,9 +1562,11 @@ void TakeBlocks(const Message& m) {
 }  // namespace
 
 void SetPeerOnline(bool online) {
-    if (online && !s_peerOnline) ScheduleSync(kSyncFirstSeconds);
+    // Arrived (perhaps again, on a new line while its old one was still counted) or gone: a round in
+    // flight went with the old line. The next one starts a little after the arrival.
+    s_round = SyncRound();
+    if (online) ScheduleSync(kSyncFirstSeconds);
     s_peerOnline = online;
-    if (!online) s_round = SyncRound();
 }
 
 void Tick(Link* link, uint64_t frame) {

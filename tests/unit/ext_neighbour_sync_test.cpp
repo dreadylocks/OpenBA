@@ -219,3 +219,15 @@ UNIT_TEST(ext_neighbour_sync_settled_blocks) {
     CHECK(still.empty());
     CHECK(settled.empty());
 }
+
+UNIT_TEST(ext_neighbour_sync_settled_block_emptied_at_the_owner) {
+    // A settled block whose plants are all gone at the owner (its digest no longer lists it): asked again.
+    std::map<int, NS::BlockSum> owner, here;
+    NS::AddTo(owner, 384, 3, "Rock");
+    std::map<int, NS::Settled> settled;
+    settled[0].owner = owner[0];
+    CHECK(NS::StillSettled(settled, owner, here).count(0) == 1);
+    const std::map<int, NS::BlockSum> emptied;
+    CHECK(NS::StillSettled(settled, emptied, here).empty());
+    CHECK(settled.empty());
+}
