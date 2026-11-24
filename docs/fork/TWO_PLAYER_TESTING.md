@@ -177,9 +177,12 @@ that print the same nature hash hold the same natural resources, tile and templa
 
 - Loading MacTown's own val-4 save from the lobby asked "The following mod is out of date ...
   [RKEditorChoiceEdition.pkm] Saved with version 0 (0.0.0)" (`modsOutOfDate`, CheckMod 2): the save
-  records that mod's header version (`Mod::i18`, the package's `_version`) as 0. Not traced: whether the
-  package header really says 0 (then retail asks the same) or the port reads it wrong. Probably the same
-  family as the PC's nameless mod entry above.
+  records that mod's header version (`Mod::i18`, the package's `_version`) as 0. The PC's nameless mod
+  is the same package: its DoLoad lines list the save's mods as "CC: 1.76 Journey" (0), "American City
+  Living V3.0" (0), "" (CheckMod 2) and the neighbour pseudo-mod, and RKEditorChoiceEdition.pkm is the
+  third enabled mod. So the package's compressed header gives an empty name and version 0 on both
+  platforms; whether retail reads the same (and so asks the same) is not checked. A load on the PC also
+  asks `extensionTurnedOff` for ext.neighbour (off in its settings, turned on by the save).
 - The drive mailbox's front-end `shot` does not show a modal question opened inside a dialog pump (the
   question above stayed invisible in shots; the real window showed it), and the boot watchdog reports
   HUNG while such a question waits on the front end (attended runs are not killed).

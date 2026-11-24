@@ -149,7 +149,8 @@ std::vector<BlockMessage> PackBlocks(const std::vector<int>& blocks,
                 char entry[96];
                 const int idx = newTmpl ? static_cast<int>(tmplIndex.size()) : tmplIndex[p.tmpl];
                 std::snprintf(entry, sizeof entry, "%d,%d,%d,%d,%d", p.cell, idx, p.grp, p.var, p.prog);
-                const size_t need = std::char_traits<char>::length(entry) + 1 + (newTmpl ? p.tmpl.size() + 1 : 0);
+                const size_t need =
+                    std::char_traits<char>::length(entry) + 1 + (newTmpl ? p.tmpl.size() + 1 : 0);
                 if (!m.list.empty() && chars + need > maxChars) {
                     flush();
                     // The template table starts again in the next message.
@@ -224,6 +225,27 @@ Mend PlanMend(const std::vector<Plant>& here, const std::vector<Plant>& owner) {
         for (size_t i = have; i < kv.second.size(); ++i) mend.add.push_back(owner[kv.second[i]]);
     }
     return mend;
+}
+
+std::set<int> StillSettled(std::map<int, Settled>& settled, const std::map<int, BlockSum>& owner,
+                           const std::map<int, BlockSum>& here) {
+    std::set<int> still;
+    const BlockSum none;
+    for (auto it = settled.begin(); it != settled.end();) {
+        const auto o = owner.find(it->first);
+        const auto h = here.find(it->first);
+        const BlockSum& ownerSum = o == owner.end() ? none : o->second;
+        const BlockSum& hereSum = h == here.end() ? none : h->second;
+        if (ownerSum != it->second.owner || (it->second.hereKnown && hereSum != it->second.here)) {
+            it = settled.erase(it);
+            continue;
+        }
+        it->second.here = hereSum;
+        it->second.hereKnown = true;
+        still.insert(it->first);
+        ++it;
+    }
+    return still;
 }
 
 bool ParseInts(const std::string& s, std::vector<int>& out) {

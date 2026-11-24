@@ -150,7 +150,8 @@ UNIT_TEST(ext_neighbour_sync_blocks_pack_and_unpack) {
 
 UNIT_TEST(ext_neighbour_sync_plan_mend) {
     const std::vector<NS::Plant> here = {P(1, "T"), P(2, "T"), P(2, "T"), P(3, "Onion"), P(4, "T")};
-    const std::vector<NS::Plant> owner = {P(1, "T"), P(2, "T"), P(3, "Mushroom"), P(4, "T"), P(5, "T", 7, 2, 900)};
+    const std::vector<NS::Plant> owner = {P(1, "T"), P(2, "T"), P(3, "Mushroom"), P(4, "T"),
+                                          P(5, "T", 7, 2, 900)};
     const NS::Mend m = NS::PlanMend(here, owner);
     // Goes: one of the two trees on tile 2, the onion on 3. Comes: the mushroom on 3, the tree on 5.
     CHECK_EQ(m.remove.size(), static_cast<size_t>(2));
@@ -186,4 +187,35 @@ UNIT_TEST(ext_neighbour_sync_ints) {
     CHECK(!NS::ParseInts("1,,2", w));
     CHECK(!NS::ParseInts("1,a", w));
     CHECK(w.empty());
+}
+
+UNIT_TEST(ext_neighbour_sync_settled_blocks) {
+    // Block 7 could not be made to match (a lost rock): settled with the owner's sum at the time.
+    std::map<int, NS::BlockSum> owner, here;
+    NS::AddTo(owner, 384, 7 * 16, "Rock");
+    NS::AddTo(owner, 384, 7 * 16 + 1, "Tree");
+    NS::AddTo(here, 384, 7 * 16 + 1, "Tree");
+    std::map<int, NS::Settled> settled;
+    settled[7].owner = owner[7];
+    // The next digest: the same owner sum; this copy's sum is learnt and the block stays out.
+    std::set<int> still = NS::StillSettled(settled, owner, here);
+    CHECK(still.count(7) == 1);
+    CHECK(settled[7].hereKnown);
+    CHECK(settled[7].here == here[7]);
+    // Neither copy changed: still settled.
+    still = NS::StillSettled(settled, owner, here);
+    CHECK(still.count(7) == 1);
+    // This copy changed (a plant spread there): asked for again.
+    std::map<int, NS::BlockSum> here2 = here;
+    NS::AddTo(here2, 384, 7 * 16 + 2, "Onion");
+    still = NS::StillSettled(settled, owner, here2);
+    CHECK(still.empty());
+    CHECK(settled.empty());
+    // The owner's copy changed: asked for again too.
+    settled[7].owner = owner[7];
+    std::map<int, NS::BlockSum> owner2 = owner;
+    NS::AddTo(owner2, 384, 7 * 16 + 3, "Tree");
+    still = NS::StillSettled(settled, owner2, here);
+    CHECK(still.empty());
+    CHECK(settled.empty());
 }

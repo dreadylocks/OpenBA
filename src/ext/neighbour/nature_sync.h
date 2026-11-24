@@ -84,6 +84,19 @@ struct Mend {
 };
 Mend PlanMend(const std::vector<Plant>& here, const std::vector<Plant>& owner);
 
+// A block this copy cannot make match (a rock it lost cannot be put back; a tile under one of its own
+// structures takes no plant) is settled as it stands: the owner's sum when it was settled, and this
+// copy's as the next digest finds it. It is not asked for again while neither copy of it changes.
+struct Settled {
+    BlockSum owner;
+    BlockSum here;
+    bool     hereKnown = false;
+};
+// The settled blocks that still stand against this digest (to leave out of Differing's result). A
+// block whose owner sum, or whose copy here, changed since it was settled is no longer settled.
+std::set<int> StillSettled(std::map<int, Settled>& settled, const std::map<int, BlockSum>& owner,
+                           const std::map<int, BlockSum>& here);
+
 // "1,2,3" <-> {1, 2, 3}. ParseInts: false on anything but integers (an empty string is an empty list).
 bool ParseInts(const std::string& s, std::vector<int>& out);
 std::string JoinInts(const std::vector<int>& v);

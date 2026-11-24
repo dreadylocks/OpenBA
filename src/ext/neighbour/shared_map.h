@@ -94,7 +94,9 @@ bool SpreadsHere(int x, int y);
 // orchard) this town's, on a tile the neighbour holds the neighbour's, elsewhere the half's owner's.
 // Each copy rolls each plant's threshold and has its own weather, so two copies deciding alone let
 // every plant die at the earlier of two times, in both. False where this copy waits for the other's
-// removal; always true outside a shared map and before play.
+// removal; always true outside a shared map and before play. Like spreading, a half whose owner is not
+// in the room (or a loaded game before the relay's welcome) does not end its plants here: that half
+// stands still until its town plays.
 bool DecidesNature(int x, int y);
 // This town's seat in the room (the relay's welcome), for SpreadsHere.
 void SetSeat(int seat);

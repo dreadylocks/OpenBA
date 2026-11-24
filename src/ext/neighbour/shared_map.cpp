@@ -399,8 +399,9 @@ void LogNature() {
     for (size_t i = 0; i < misses.size() && i < 4; ++i)
         top += (i ? ", " : "") + misses[i].second + " x" + std::to_string(misses[i].first);
     char line[600];
-    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s) (%llu on the neighbor's half), %llu dropped "
-             "(queue full); of the neighbor's removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
+    snprintf(line, sizeof line,
+             "sent %llu plant(s) and %llu removal(s) (%llu on the neighbor's half), %llu dropped (queue full); "
+             "of the neighbor's removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
              static_cast<unsigned long long>(s_nat.sentAdds), static_cast<unsigned long long>(s_nat.sentRms),
              static_cast<unsigned long long>(s_nat.sentRmsThere),
              static_cast<unsigned long long>(s_nat.dropped), static_cast<unsigned long long>(s_nat.rmByScan),
@@ -584,14 +585,20 @@ Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, flo
                 ComponentEntity** made = nullptr) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
-    if (g == nullptr || map == nullptr || g->m_entityList == nullptr || cell < 0 || cell >= map->size * map->size)
+    if (g == nullptr || map == nullptr || g->m_entityList == nullptr || cell < 0 ||
+        cell >= map->size * map->size)
         return Planted::kNoTemplate;
     const MapCell& c = map->cells.GetData()[cell];
-    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF) {
-        // Held by another natural resource (and nothing else): it may be on its way out.
-        ComponentEntity* holder = c.occupant.Get() != nullptr ? c.occupant.Get() : c.blocker.Get();
-        const bool nature = holder != nullptr && holder->FindComponent<NaturalResourceComponent>() != nullptr &&
-                            c.footprintCount == 0 && c.field_0x2A == 0xFF;
+    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 ||
+        c.field_0x2A != 0xFF) {
+        // Held by natural resources and nothing else: one may be on its way out.
+        ComponentEntity* occupant = c.occupant.Get();
+        ComponentEntity* blocker = c.blocker.Get();
+        const bool occupantNature =
+            occupant == nullptr || occupant->FindComponent<NaturalResourceComponent>() != nullptr;
+        const bool blockerNature =
+            blocker == nullptr || blocker->FindComponent<NaturalResourceComponent>() != nullptr;
+        const bool nature = occupantNature && blockerNature && c.footprintCount == 0 && c.field_0x2A == 0xFF;
         return nature ? Planted::kTakenByNature : Planted::kTaken;
     }
     ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
@@ -1167,7 +1174,7 @@ namespace {
 
 constexpr double kSyncFirstSeconds = 20.0;    // after the neighbour arrives: its replays land first
 constexpr double kSyncEverySeconds = 45.0;
-constexpr double kSyncGiveUpSeconds = 180.0;  // an answer that never comes (the neighbour left)
+constexpr double kSyncGiveUpSeconds = 90.0;   // an answer that never comes (the neighbour left, a throttle)
 constexpr double kSyncAnswerSeconds = 5.0;    // the owner answers one round at most this often
 constexpr size_t kSyncChars = 11000;          // a sync message's lists, well under kMaxMessageBytes
 
@@ -1187,12 +1194,7 @@ std::set<int> s_syncDirty;   // blocks of the neighbour's half this town changed
 // Blocks this copy cannot make match (a rock or deposit it has lost cannot be put back; a tile under one
 // of this town's structures takes no plant): the owner's sum and this copy's when it was settled. Not
 // asked for again while both stay so.
-struct Settled {
-    NatureSync::BlockSum owner;
-    NatureSync::BlockSum here;
-    bool                 hereKnown = false;
-};
-std::map<int, Settled> s_syncSettled;
+std::map<int, NatureSync::Settled> s_syncSettled;
 int64_t s_syncSerial = 0;
 bool s_peerOnline = false;
 std::chrono::steady_clock::time_point s_syncNext;
@@ -1201,7 +1203,6 @@ std::string s_syncLogged;
 // The owner's side: when it last answered a round, and which.
 std::chrono::steady_clock::time_point s_syncAnsweredAt;
 int64_t s_syncAnsweredId = -1;
-int64_t s_syncBlocksAnsweredId = -1;
 
 const char* HalfName(int half) {
     return half == 0 ? "west" : "east";
@@ -1277,7 +1278,6 @@ void ResetSync() {
     s_syncScheduled = false;
     s_syncLogged.clear();
     s_syncAnsweredId = -1;
-    s_syncBlocksAnsweredId = -1;
     // Round ids from the clock: an owner's answer to a round of an earlier run of this game never
     // matches one of this run.
     s_syncSerial = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1286,7 +1286,8 @@ void ResetSync() {
 }
 
 void ScheduleSync(double seconds) {
-    s_syncNext = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000.0));
+    const auto wait = std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000.0));
+    s_syncNext = std::chrono::steady_clock::now() + wait;
     s_syncScheduled = true;
 }
 
@@ -1300,10 +1301,10 @@ void FinishRound() {
     const SyncRound& r = s_round;
     const int half = 1 - s_seat;
     if (r.differed == 0 && r.skipped == 0) {
-        LogSync(std::string("the neighbor's ") + HalfName(half) + " half matches here (" + std::to_string(r.blocks) +
-                " block(s) with nature" +
-                (s_syncSettled.empty() ? "" : ", " + std::to_string(s_syncSettled.size()) + " settled as they are") +
-                ")");
+        const std::string settled =
+            s_syncSettled.empty() ? "" : ", " + std::to_string(s_syncSettled.size()) + " settled as they are";
+        LogSync(std::string("the neighbor's ") + HalfName(half) + " half matches here (" +
+                std::to_string(r.blocks) + " block(s) with nature" + settled + ")");
     } else {
         std::string top;
         std::vector<std::pair<int, std::string>> worst;
@@ -1313,10 +1314,11 @@ void FinishRound() {
             top += (i ? ", " : "") + worst[i].second + " x" + std::to_string(worst[i].first);
         char line[800];
         snprintf(line, sizeof line,
-                 "the neighbor's %s half differed here in %d of %d block(s) (%d left for the next round: changed "
-                 "here meanwhile); mended: %d plant(s) added, %d removed, %d wait for their tile to clear, %d cannot "
-                 "be put here%s%s%s",
-                 HalfName(half), r.differed + r.skipped, r.blocks, r.skipped, r.added, r.removed, r.waiting, r.blocked,
+                 "the neighbor's %s half differed here in %d of %d block(s) (%d left for the next round: "
+                 "changed here meanwhile); mended: %d plant(s) added, %d removed, %d wait for their tile to "
+                 "clear, %d cannot be put here%s%s%s",
+                 HalfName(half), r.differed + r.skipped, r.blocks, r.skipped, r.added, r.removed, r.waiting,
+                 r.blocked,
                  top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
         LogSync(line);
     }
@@ -1367,8 +1369,8 @@ void AnswerDigest(const Message& m) {
     int64_t id = 0, half = -1;
     if (s_seat < 0 || !m.GetInt("id", id) || !m.GetInt("half", half) || half != s_seat) return;
     const auto now = std::chrono::steady_clock::now();
-    if (s_syncAnsweredId >= 0 && std::chrono::duration<double>(now - s_syncAnsweredAt).count() < kSyncAnswerSeconds)
-        return;
+    const double sinceLast = std::chrono::duration<double>(now - s_syncAnsweredAt).count();
+    if (s_syncAnsweredId >= 0 && sinceLast < kSyncAnswerSeconds) return;
     s_syncAnsweredAt = now;
     s_syncAnsweredId = id;
     std::map<int, NatureSync::BlockSum> sums;
@@ -1386,8 +1388,8 @@ void AnswerBlocks(const Message& m) {
     int64_t id = 0, half = -1;
     std::vector<int> blocks;
     // Only for the round this town last sent a digest for (a long list of blocks comes in several asks).
-    if (map == nullptr || s_seat < 0 || !m.GetInt("id", id) || id != s_syncAnsweredId || !m.GetInt("half", half) ||
-        half != s_seat || !NatureSync::ParseInts(m.GetOr("blocks", ""), blocks))
+    if (map == nullptr || s_seat < 0 || !m.GetInt("id", id) || id != s_syncAnsweredId ||
+        !m.GetInt("half", half) || half != s_seat || !NatureSync::ParseInts(m.GetOr("blocks", ""), blocks))
         return;
     const int perRow = (map->size + NatureSync::kBlock - 1) / NatureSync::kBlock;
     std::set<int> want;
@@ -1396,7 +1398,6 @@ void AnswerBlocks(const Message& m) {
         if (b >= 0 && b < perRow * perRow && want.insert(b).second) order.push_back(b);
     std::map<int, std::vector<NatureSync::Plant>> plants;
     CollectHalf(s_seat, nullptr, &want, &plants, nullptr, nullptr);
-    s_syncBlocksAnsweredId = id;
     for (const NatureSync::BlockMessage& b : NatureSync::PackBlocks(order, plants, kSyncChars)) {
         Message out("natBlock");
         out.SetInt("id", id).SetInt("half", half).Set("tmpls", b.tmpls).Set("list", b.list).Set("done", b.done);
@@ -1427,22 +1428,8 @@ void TakeDigest(const Message& m) {
     for (const auto& kv : here) withNature.insert(kv.first);
     s_round.blocks = static_cast<int>(withNature.size());
     // Settled blocks stay out while neither copy of them changed.
+    const std::set<int> settledNow = NatureSync::StillSettled(s_syncSettled, s_round.digest, here);
     const NatureSync::BlockSum none;
-    std::set<int> settledNow;
-    for (auto it = s_syncSettled.begin(); it != s_syncSettled.end();) {
-        const auto o = s_round.digest.find(it->first);
-        const auto h = here.find(it->first);
-        const NatureSync::BlockSum& ownerSum = o == s_round.digest.end() ? none : o->second;
-        const NatureSync::BlockSum& hereSum = h == here.end() ? none : h->second;
-        if (ownerSum != it->second.owner || (it->second.hereKnown && hereSum != it->second.here)) {
-            it = s_syncSettled.erase(it);
-            continue;
-        }
-        it->second.here = hereSum;
-        it->second.hereKnown = true;
-        settledNow.insert(it->first);
-        ++it;
-    }
     std::set<int> skip = s_syncDirty;
     skip.insert(busy.begin(), busy.end());
     std::vector<int> differ;
@@ -1482,8 +1469,8 @@ void TakeBlocks(const Message& m) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
     int64_t id = 0, half = -1;
-    if (g == nullptr || g->m_entityList == nullptr || map == nullptr || s_round.stage != 2 || !m.GetInt("id", id) ||
-        id != s_round.id || !m.GetInt("half", half) || half != 1 - s_seat)
+    if (g == nullptr || g->m_entityList == nullptr || map == nullptr || s_round.stage != 2 ||
+        !m.GetInt("id", id) || id != s_round.id || !m.GetInt("half", half) || half != 1 - s_seat)
         return;
     NatureSync::BlockMessage b;
     b.tmpls = m.GetOr("tmpls", "");
@@ -1546,11 +1533,12 @@ void TakeBlocks(const Message& m) {
             }
             cannot = true;
             ++s_round.blocked;
-            if (s_round.blockedByTmpl.size() < 32 || s_round.blockedByTmpl.count(p.tmpl)) ++s_round.blockedByTmpl[p.tmpl];
+            if (s_round.blockedByTmpl.size() < 32 || s_round.blockedByTmpl.count(p.tmpl))
+                ++s_round.blockedByTmpl[p.tmpl];
         }
         // What cannot be put here stays as it is until either copy of the block changes.
         if (cannot) {
-            Settled st;
+            NatureSync::Settled st;
             st.owner = s_round.ownerSums[block];
             s_syncSettled[block] = st;
         }
