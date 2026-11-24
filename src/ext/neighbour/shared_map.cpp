@@ -359,7 +359,7 @@ std::unordered_multimap<int, ComponentEntity*> s_natIndex;
 
 // Nature traffic, for the log (LogNature): what this town sent and what came of the neighbour's.
 struct NatStats {
-    uint64_t sentAdds = 0, sentRms = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
+    uint64_t sentAdds = 0, sentRms = 0, sentRmsThere = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
     std::map<std::string, int> missByTmpl;
 };
 NatStats s_nat;
@@ -376,8 +376,16 @@ void Queue(const Message& m) {
         ++s_nat.dropped;
     }
     if (m.type == "nat") {
-        if (m.GetOr("op", "") == "add") ++s_nat.sentAdds;
-        else ++s_nat.sentRms;
+        if (m.GetOr("op", "") == "add") {
+            ++s_nat.sentAdds;
+        } else {
+            ++s_nat.sentRms;
+            int64_t cell = -1;
+            Map* map = TheMap();
+            if (map != nullptr && s_seat >= 0 && m.GetInt("cell", cell) && cell >= 0 &&
+                ((cell % map->size) < map->size / 2 ? 0 : 1) != s_seat)
+                ++s_nat.sentRmsThere;
+        }
     }
     s_pending.push_back(m);
     ++s_waitingAdds;
@@ -391,9 +399,10 @@ void LogNature() {
     for (size_t i = 0; i < misses.size() && i < 4; ++i)
         top += (i ? ", " : "") + misses[i].second + " x" + std::to_string(misses[i].first);
     char line[600];
-    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s), %llu dropped (queue full); of the neighbor's "
-             "removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
+    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s) (%llu on the neighbor's half), %llu dropped "
+             "(queue full); of the neighbor's removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
              static_cast<unsigned long long>(s_nat.sentAdds), static_cast<unsigned long long>(s_nat.sentRms),
+             static_cast<unsigned long long>(s_nat.sentRmsThere),
              static_cast<unsigned long long>(s_nat.dropped), static_cast<unsigned long long>(s_nat.rmByScan),
              static_cast<unsigned long long>(s_nat.rmMiss), top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
     if (line == s_natLogged) return;
@@ -1069,6 +1078,17 @@ void NotePlanted(ComponentEntity* entity) {
         n.SetInt("grp", model->meshGroup).SetInt("var", model->meshIndex);
     Queue(n);
     MarkSyncDirty(cell);
+}
+
+bool DecidesNature(int x, int y) {
+    if (!s_on || !s_live) return true;
+    Map* map = TheMap();
+    if (map == nullptr || x < 0 || y < 0 || x >= map->size || y >= map->size) return true;
+    const uint32_t cell = static_cast<uint32_t>(y * map->size + x);
+    if (PeerHoldsCell(cell)) return false;                                // the neighbour's land: its crops
+    if (map->cells.GetData()[cell].footprintCount != 0) return true;   // this town's own structure
+    if (s_seat < 0) return false;
+    return (x < map->size / 2 ? 0 : 1) == s_seat;
 }
 
 void SetSeat(int seat) {

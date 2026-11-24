@@ -89,6 +89,13 @@ void NotePlanted(ComponentEntity* entity);
 // (a loaded game before the relay's welcome). Always true outside a shared map and before play (world
 // generation must stay the same in both games).
 bool SpreadsHere(int x, int y);
+// A plant's end by itself (past its growth threshold, or frozen below nothing: GrowthComponent::Update)
+// is decided by the same game: on a tile under one of this town's own structures (its field, its
+// orchard) this town's, on a tile the neighbour holds the neighbour's, elsewhere the half's owner's.
+// Each copy rolls each plant's threshold and has its own weather, so two copies deciding alone let
+// every plant die at the earlier of two times, in both. False where this copy waits for the other's
+// removal; always true outside a shared map and before play.
+bool DecidesNature(int x, int y);
 // This town's seat in the room (the relay's welcome), for SpreadsHere.
 void SetSeat(int seat);
 // Whether the neighbour's game is in the room (the welcome, then "peer"): the nature sync asks it, now
