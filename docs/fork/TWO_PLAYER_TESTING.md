@@ -133,3 +133,58 @@ dev loop game sitting in a Load's question.
   played alone, since its random numbers are drawn differently after the first skipped spread. A
   town's half spreads only while that town plays. The shared map sends at most 40 changes a second and
   holds 20,000 waiting, so a huge burst of spreading can drop plants; the map fingerprint line shows it.
+
+## Results, 2026-11-24 (Mac against Windows, rooms val-4 and val-5, test relay)
+
+Row 19 (no drift) was the subject of this run. The map fingerprint line is the check: two paused games
+that print the same nature hash hold the same natural resources, tile and template, on both halves.
+
+- **val-4 had drifted.** Rejoined after the Cloudflare quota reset, both towns paused: each owner's half
+  held 1.2-1.6k more plants than the neighbour's copy of it (west Mac 19916 / PC 18357, east PC 15062 /
+  Mac 13838). Cause: the night before, the free tier's daily row writes ran out during a 50x run, and the
+  relay of that time wrote each change to storage before passing it on, so a failed write lost the change
+  for good. Nothing could mend it: the replay on rejoin only resends what the relay recorded.
+- **val-5, a fresh room, 25 minutes at 1x-5x, did not drift.** Both towns started with the same
+  fingerprint, played (the Mac's villagers felled a forest across the middle line, the PC's foresters
+  reached onto the Mac's half), paused, and printed the same `34164 (abd729ef1eb69ff7)`. 0 dropped.
+- **The nature sync** (`nature_sync.{h,cpp}`, NEIGHBOUR_TOWNS.md): each town checks its copy of the
+  neighbour's half against the owner's every 45 s and mends the blocks that differ. On val-4's rejoin the
+  first round mended 1858 plants on the PC's copy of the west half and 1322 on the Mac's copy of the east,
+  the second round said "matches" on both, and both printed `34879 (19830fdb187beadb)`. Then 5 minutes at
+  5x: every round matched.
+- **Found and fixed: the replay on rejoin brought felled plants back.** The relay kept one record a tile a
+  seat and replayed seat 0's records, then seat 1's; a plant one town spread and the other felled came
+  back from the older record (the PC's half grew by 489 on a reload with nothing simulated), and the sync
+  then copied the owner's swollen half to the neighbour, as it should. The relay now stamps each record and
+  replays only the newest change per tile and template (a removal wins a tie between unstamped records);
+  the game ignores a replayed plant that already stands on its tile (a herb does not hold its tile, so it
+  grew twice). After both towns reloaded: both printed `34176 (9bf374eca15cb582)`, the sync matched.
+- **Found and fixed: plants died faster on a shared map.** In val-4 (no villagers on either side) both
+  copies kept ending plants on both halves and sending the removals: a wild plant's life ends when its
+  growth passes a threshold each copy rolls at random, or when it freezes under that game's own weather,
+  so every plant died at the earlier of two times. Now a plant's end is decided by one game, as its
+  spreading: the half's owner, or the town whose structure (field, orchard) holds the tile
+  (`SharedMap::DecidesNature`, an EXT SEAM in `GrowthComponent::Update`). 5 minutes at 5x afterwards:
+  each town sent 0 removals for the neighbour's half (the nature line now counts them), the winter
+  die-off hit each half from its owner's game, and both towns ended on `33594 (17f1c5465f382d34)`.
+- Reviewed by a Sonnet subagent before it reached the two machines: nothing blocking; its notes (rocks
+  that cannot be put back asked for every round, a request stuck behind a long queue given up on, a plant
+  a gatherer is picking put back, request floods) are in the second sync commit.
+- Pause and speed: the speed steps do not unpause a paused game; a save broadcasts its stored speed to
+  the neighbour on arrival (val-4's 50x from the night before came back while both were paused).
+
+### Open after this run
+
+- Loading MacTown's own val-4 save from the lobby asked "The following mod is out of date ...
+  [RKEditorChoiceEdition.pkm] Saved with version 0 (0.0.0)" (`modsOutOfDate`, CheckMod 2): the save
+  records that mod's header version (`Mod::i18`, the package's `_version`) as 0. Not traced: whether the
+  package header really says 0 (then retail asks the same) or the port reads it wrong. Probably the same
+  family as the PC's nameless mod entry above.
+- The drive mailbox's front-end `shot` does not show a modal question opened inside a dialog pump (the
+  question above stayed invisible in shots; the real window showed it), and the boot watchdog reports
+  HUNG while such a question waits on the front end (attended runs are not killed).
+- The old build hung once on quitting a paused game for the dev loop (killed after 60 s, its save was
+  written); the next build quit a paused game cleanly twice. Not reproduced.
+- Unstamped records from before this run decide a tie for the removal, so a tile where one town removed
+  a plant and the other planted the same kind again later loses that plant once on a reload (about 10 of
+  15,000 in val-5).
