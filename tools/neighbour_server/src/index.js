@@ -40,6 +40,7 @@ const kHash64 = /^[0-9a-f]{16}$/;
 const kMaxMods = 256;
 const kMaxModsChars = 12 * 1024;
 const kMaxFrameBytes = 16 * 1024;
+const kMaxSyncChars = 15000;   // a nature sync message's list (the game keeps them under 11,000)
 const kMaxNameChars = 24;
 const kMaxRoomChars = 64;
 const kMaxPassChars = 128;
@@ -447,6 +448,9 @@ export class Room {
     if (msg.t === "pause") return this.onPause(ws, a, msg);
     if (msg.t === "speed") return this.onSpeed(ws, a, msg);
     if (msg.t === "walkers") return this.onWalkers(ws, a, msg);
+    if (msg.t === "natSyncReq" || msg.t === "natDigest" || msg.t === "natBlockReq" || msg.t === "natBlock") {
+      return this.onNatSync(ws, a, msg);
+    }
     if (msg.t === "ping") return this.send(ws, { t: "pong" });
     // Unknown types from a newer game: ignored.
   }
@@ -470,6 +474,24 @@ export class Room {
       return this.fail(ws, "bad walkers", false);
     }
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "walkers", tmpl: msg.tmpl, list: msg.list });
+  }
+
+  // The nature sync (src/ext/neighbour/nature_sync.h): the town that does not own a half of the map asks
+  // its owner how the half stands (natSyncReq, natBlockReq) and the owner answers (natDigest, natBlock).
+  // Passed straight to the neighbour if it is online, kept nowhere: a round nobody answered is asked
+  // again by the game.
+  onNatSync(ws, a, msg) {
+    if (!Number.isInteger(msg.id) || msg.id < 0 || (msg.half !== 0 && msg.half !== 1)) {
+      return this.fail(ws, "bad nature sync", false);
+    }
+    const ev = { t: msg.t, id: msg.id, half: msg.half };
+    for (const k of ["list", "blocks", "tmpls", "done"]) {
+      if (msg[k] === undefined) continue;
+      if (typeof msg[k] !== "string" || msg[k].length > kMaxSyncChars) return this.fail(ws, "bad nature sync", false);
+      ev[k] = msg[k];
+    }
+    if (msg.end === true) ev.end = true;
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, ev);
   }
 
   async onCreate(ws, a, msg) {

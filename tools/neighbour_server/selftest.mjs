@@ -364,6 +364,19 @@ const walkers = await tryWait(pb.wait((m) => m.t === "walkers"));
 pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,a,b" }));
 const badWalkers = await tryWait(pa.wait((m) => m.t === "error" && /walkers/.test(m.why)));
 check(walkers && walkers.list.startsWith("1,100,-200") && !!badWalkers, "villagers reach the neighbour; a bad list is refused");
+
+// The nature sync: passed straight through both ways, a malformed one refused.
+pa.ws.send(JSON.stringify({ t: "natSyncReq", id: 7, half: 1 }));
+const syncReq = await tryWait(pb.wait((m) => m.t === "natSyncReq" && m.id === 7));
+pb.ws.send(JSON.stringify({ t: "natDigest", id: 7, half: 1, list: "300,2,00000000000000ff", end: true }));
+const digest = await tryWait(pa.wait((m) => m.t === "natDigest" && m.id === 7));
+pb.ws.send(JSON.stringify({ t: "natBlock", id: 7, half: 1, tmpls: "Template\\Tree.rsc", list: "5000,0,1,2,500", done: "300" }));
+const block = await tryWait(pa.wait((m) => m.t === "natBlock" && m.id === 7));
+pa.ws.send(JSON.stringify({ t: "natBlockReq", id: 7, half: 2, blocks: "300" }));
+const badSync = await tryWait(pa.wait((m) => m.t === "error" && /nature sync/.test(m.why)));
+check(syncReq && syncReq.half === 1 && digest && digest.end === true && digest.list === "300,2,00000000000000ff" &&
+      block && block.done === "300" && block.tmpls === "Template\\Tree.rsc" && !!badSync,
+      "nature sync messages reach the neighbour; a bad one is refused");
 for (const x of [pa, pb]) x.ws.close();
 
 // Starting over: a town back in its seat with a new game (hello `fresh`) takes its old buildings,
