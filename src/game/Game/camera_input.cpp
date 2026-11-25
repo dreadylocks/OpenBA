@@ -51,6 +51,7 @@
 #include "ext/registry.h"             // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md, BETTERCAM.md): Ext::Ext()
 #include "ext/eye_camera/eye_camera.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EYECAM.md): ext.eye_camera's zoom
 #include "ext/better_camera/better_camera.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/BETTERCAM.md): ext.better_camera's zoom range + steady tilt
+#include "ext/copy_move/copy_move.h"   // EXT SEAM (NOT RETAIL, docs/fork/COPY_MOVE.md): the copy / move tool's keys
 
 extern "C" bool StartTown_GetSpawnTile(int* x, int* y);   // starttown.cpp (BANISHED_CAMERA_PIN=town)
 
@@ -400,6 +401,10 @@ void PlayerToolManager::ApplyCameraView(int index) {
 // the tool's OnCancel (slot 9, +0x48) answering 0 drops back to the EditTool.
 // No null test on the key map, the world or the tool: retail has none.
 void PlayerToolManager::UpdateHotkeys(bool inputFlag) {
+    // EXT SEAM (NOT RETAIL, docs/fork/COPY_MOVE.md): Ctrl+C / Ctrl+X / Ctrl+V start the copy / move tool;
+    // a frame whose keys were the tool's skips retail's hotkeys (C, X and V are also camera views).
+    if (Ext::CopyMove::PollHotkeys(this, inputFlag))
+        return;
     const Input::KeyMap* keyMap = Input::Configuration::_singleton->_keyMap;
     if (keyMap->Pressed(0, 0x17) && ((GameUpdateLoop::_singleton->m_gameFlags >> 10) & 1) == 0)
         paused = !paused;

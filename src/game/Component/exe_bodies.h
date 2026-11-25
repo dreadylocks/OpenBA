@@ -128,6 +128,11 @@ class CropFieldComponent;
 // ---- decalcomponent.cpp
 class WorldGeometry;
 
+// ---- destroycomponent_state6.cpp
+// Every citizen's action stack drops its actions that name `*pEntityIbp` (a storage that burned, a freed
+// entity; the copy / move tool's moved building, src/ext/copy_move/teleport.cpp).
+extern "C" void TownMgr_AbortCitizenActionsFor_89e30(CitizenBehavior* townMgr, ComponentEntity** pEntityIbp);  // 0x140089e30
+
 // ---- destroycomponent_workerrelease.cpp
 // B4 X3-COMP: WorkPlaceComponent_SetMaxWorkers (0x14012fb00, its one caller calls the
 // member now) and WorkPlaceComponent_EnterBuilderProfession (0x14012f520, no caller):

@@ -85,14 +85,37 @@ void SetTableText(UI::Element* e, const char* key);
 // ASCII lower case of a C string (null = empty).
 std::string Lower(const char* s);
 
-// ---- the button (toolbar_window.cpp; EXT SEAMS in ToolbarDialog) ----
-// Where in the sorted `items` (count `n`) of the Reports group the button goes, or -1 for none: not the
-// Reports group, no running game, not Offered(), or the resources do not load. The toolbar keeps a null
-// entry in its item array for it, so each retail reader of that array skips null.
-int InsertAt(const ::Toolbar* group, const ::Toolbar* const* items, int n);
-// Name, id, tooltip and icon on the freshly cloned toolbar button `button` (a template-3 clone) at `index`.
+// ---- our buttons (toolbar_window.cpp; EXT SEAMS in ToolbarDialog) ----
+// The toolbar gets buttons of our own: the extension window's (in the Reports group, while Offered()) and
+// the tool buttons of the fork's always-on features (ToolButton below; docs/fork/COPY_MOVE.md). The toolbar
+// keeps a null entry in its item array for each, so each retail reader of that array skips null.
+constexpr int kMaxButtons = 4;   // our buttons one toolbar group can hold
+
+// A fork feature's toolbar button: a click runs `click` (it starts the feature's tool) instead of opening
+// the window. Defined beside its feature; the list is ToolButtons() in toolbar_window.cpp.
+struct ToolButton {
+    const char* name;          // the button element's name; Click finds the button by it
+    const char* group;         // the toolbar group it joins, by GroupName: "" = the main bar
+    int32_t     sortPriority;  // it goes before the group's first item with a higher priority (Toolbar +0x50)
+    const char* tooltip;       // a key in Dialog/ExtensionsStringTable.rsc
+    const char* sprite;        // a sprite in Dialog/ExtensionsSprites.rsc
+    bool (*offered)();         // shown when the toolbar is built
+    void (*click)();           // the button was clicked
+};
+const ToolButton& CopyMoveButton();   // src/ext/copy_move/copy_move.cpp
+
+// Where in the sorted `items` (count `n`) of the toolbar group `group` (null = the main bar) our buttons
+// go: up to `capacity` slots into `slots`, ascending, and how many. Each slot is an index into `items`
+// before any insertion, and two buttons may share one (they keep the returned order). None: no running
+// game, the gate's command-line faithful profile, or our resources do not load.
+int InsertAt(const ::Toolbar* group, const ::Toolbar* const* items, int n, int* slots, int capacity);
+// Name, id, tooltip and icon on the freshly cloned toolbar button `button` (a template-3 clone) at `index`:
+// the buttons the last InsertAt placed, in its order.
 void Style(UI::Element* button, int32_t index);
-// The button's click: opens the window, or closes it when it is open.
+// A click on one of our buttons, told apart by the element's name: the window's button opens or closes the
+// window, a tool button runs its `click`.
+void Click(UI::UserInterface* ui, UI::Element* button);
+// Opens the window, or closes it when it is open.
 void Toggle(UI::UserInterface* ui);
 // PlayerToolManager::Startup's EXT SEAM, after retail reopened its pinned utility windows: reopens the
 // window when the town's save had it open (window_state.h) and some page is offered.
