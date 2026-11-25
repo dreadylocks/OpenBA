@@ -235,8 +235,14 @@ async function passwordHash(room, pass) {
 // chats and parcels still write through. A room evicted before its alarm loses those last seconds of the
 // buffered record (the live messages were already passed on; a town's structures are sent again on join),
 // a buffered delete included (a fresh start's removal of the old town's mirror and roads could come back).
+// The nature keys wait longer (kNatFlushMs): at 10x two towns change thousands of plants a minute, and
+// with a 5 s flush every touched shard was a row every 5 s, about 350 rows a minute, a fifth of the day's
+// allowance an hour (val-6, 2026-11-25). Their record only serves a town that loads or starts again
+// (natlog) or one that comes back (natq); a minute lost to an eviction is mended by the nature sync.
 const kBufferedPrefixes = ["natlog:", "natq:", "roads:", "roadoff:", "roadq:", "mirror:"];
+const kSlowPrefixes = ["natlog:", "natq:"];
 const kFlushMs = 5000;
+const kNatFlushMs = 60_000;
 
 class BufferedStore {
   constructor(ctx) {
@@ -245,6 +251,7 @@ class BufferedStore {
     this.dels = new Set();
     this.version = new Map();   // key -> a count bumped on every buffered put or delete (flush's "unchanged since")
     this.armed = false;
+    this.alarmAt = 0;
     this.rowsWritten = 0;
     this.loggedAt = Date.now();
     this.loggedRows = 0;
@@ -265,6 +272,18 @@ class BufferedStore {
 
   buffered(key) {
     return kBufferedPrefixes.some((p) => key.startsWith(p));
+  }
+
+  // How soon a staged key must reach storage: a minute for the nature keys, 5 s for the rest.
+  delayFor(key) {
+    return kSlowPrefixes.some((p) => key.startsWith(p)) ? kNatFlushMs : kFlushMs;
+  }
+
+  // The delay the waiting entries need: the shortest of theirs.
+  waitingDelay() {
+    for (const k of this.puts.keys()) if (this.delayFor(k) === kFlushMs) return kFlushMs;
+    for (const k of this.dels) if (this.delayFor(k) === kFlushMs) return kFlushMs;
+    return kNatFlushMs;
   }
 
   async get(key) {
@@ -295,7 +314,7 @@ class BufferedStore {
     this.puts.set(key, value);
     this.dels.delete(key);
     this.version.set(key, (this.version.get(key) || 0) + 1);
-    this.arm();
+    this.arm(this.delayFor(key));
   }
 
   async delete(keys) {
@@ -305,7 +324,7 @@ class BufferedStore {
         this.puts.delete(k);
         this.dels.add(k);
         this.version.set(k, (this.version.get(k) || 0) + 1);
-        this.arm();
+        this.arm(this.delayFor(k));
       } else {
         direct.push(k);
       }
@@ -324,12 +343,15 @@ class BufferedStore {
     return out;
   }
 
+  // Sets the alarm, or brings it forward when a key needs storage sooner than the one set.
   arm(delayMs = kFlushMs) {
-    if (this.armed) return;
+    const at = Date.now() + delayMs;
+    if (this.armed && this.alarmAt <= at) return;
     this.armed = true;
+    this.alarmAt = at;
     this.count(1);   // the alarm is a row too
     // A refused alarm must not leave the buffer unflushable: the next write arms again.
-    this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { this.armed = false; });
+    this.ctx.storage.setAlarm(at).catch(() => { this.armed = false; });
   }
 
   // Writes what waits, chunk by chunk; an entry leaves the buffer only once written and only if it was
@@ -362,7 +384,7 @@ class BufferedStore {
     } catch {
       failed = true;   // a write refused (the day's allowance gone, say): try again in a minute, not 5 s
     } finally {
-      if (this.puts.size > 0 || this.dels.size > 0) this.arm(failed ? 60_000 : kFlushMs);
+      if (this.puts.size > 0 || this.dels.size > 0) this.arm(failed ? 60_000 : this.waitingDelay());
     }
   }
 }
