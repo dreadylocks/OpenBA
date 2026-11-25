@@ -246,6 +246,21 @@ class BufferedStore {
     this.version = new Map();   // key -> a count bumped on every buffered put or delete (flush's "unchanged since")
     this.armed = false;
     this.rowsWritten = 0;
+    this.loggedAt = Date.now();
+    this.loggedRows = 0;
+  }
+
+  // Counts rows written and logs the rate at most once a minute (`wrangler tail` shows it): what a room
+  // costs of the account's daily allowance.
+  count(n) {
+    this.rowsWritten += n;
+    const now = Date.now();
+    if (now - this.loggedAt < 60_000) return;
+    const id = this.ctx.id.toString().slice(0, 8);
+    console.log(`[rows] room ${id}: ${this.rowsWritten - this.loggedRows} row(s) written in ` +
+                `${Math.round((now - this.loggedAt) / 1000)} s, ${this.rowsWritten} since it woke`);
+    this.loggedAt = now;
+    this.loggedRows = this.rowsWritten;
   }
 
   buffered(key) {
@@ -261,7 +276,7 @@ class BufferedStore {
   async put(keyOrEntries, value) {
     if (typeof keyOrEntries === "string") {
       if (this.buffered(keyOrEntries)) return this.stage(keyOrEntries, value);
-      this.rowsWritten += 1;
+      this.count(1);
       return this.ctx.storage.put(keyOrEntries, value);
     }
     const direct = {};
@@ -271,7 +286,7 @@ class BufferedStore {
     }
     const n = Object.keys(direct).length;
     if (n > 0) {
-      this.rowsWritten += n;
+      this.count(n);
       await this.ctx.storage.put(direct);
     }
   }
@@ -295,7 +310,10 @@ class BufferedStore {
         direct.push(k);
       }
     }
-    if (direct.length > 0) await this.ctx.storage.delete(direct);
+    if (direct.length > 0) {
+      this.count(direct.length);
+      await this.ctx.storage.delete(direct);
+    }
   }
 
   async list(options) {
@@ -309,6 +327,7 @@ class BufferedStore {
   arm(delayMs = kFlushMs) {
     if (this.armed) return;
     this.armed = true;
+    this.count(1);   // the alarm is a row too
     // A refused alarm must not leave the buffer unflushable: the next write arms again.
     this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { this.armed = false; });
   }
@@ -332,13 +351,13 @@ class BufferedStore {
         const chunk = puts.slice(i, i + 100);
         await this.ctx.storage.put(Object.fromEntries(chunk.map(([k, v]) => [k, v])));
         for (const [k, , ver] of chunk) if (done(k, ver)) this.puts.delete(k);
-        this.rowsWritten += chunk.length;
+        this.count(chunk.length);
       }
       for (let i = 0; i < dels.length; i += 100) {
         const chunk = dels.slice(i, i + 100);
         await this.ctx.storage.delete(chunk.map(([k]) => k));
         for (const [k, ver] of chunk) if (done(k, ver)) this.dels.delete(k);
-        this.rowsWritten += chunk.length;
+        this.count(chunk.length);
       }
     } catch {
       failed = true;   // a write refused (the day's allowance gone, say): try again in a minute, not 5 s
