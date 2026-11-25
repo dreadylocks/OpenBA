@@ -73,6 +73,15 @@ const Entry kEntries[] = {
       "A mod package larger than 2 GB loads instead of crashing the game. Takes effect at the next "
       "start.",
       0, [](State& s) -> bool& { return s.fix.large_packages; } },
+    // docs/retail_bugs.md section 11: the cost-and-size label of a dragged tool (road, field, fence) is
+    // placed at the projected rectangle, which is already scaled to the UI's units, and scaled again.
+    // Render only: where a dialog sits on screen; nothing saved or simulated changes.
+    { "createbar_scale", Tier::Fix, Class::None, true,
+      "Cost label beside the cursor",
+      "The cost and size label of a road, field or other dragged building sits beside what you drag "
+      "at any UI scale, instead of drifting toward the top left when the UI scale is not 100% (always "
+      "on a Retina Mac).",
+      0, [](State& s) -> bool& { return s.fix.createbar_scale; } },
 
     // Extensions. Each one adds a field to Ext::Extensions and a row here:
     // Tier::Extension, its Class, default true for class A / false for B or C, and for class B or C its

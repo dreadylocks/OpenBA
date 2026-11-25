@@ -414,3 +414,35 @@ records the real values.
 **Lever.** `ReadPackfile` ignores `Open`'s result at `0x1800b4864`, so a missing directory is not
 reported anywhere. A `fix.*` row could check that result in `RefreshList` and skip or flag such a
 package. Not done: no such row exists, and the faithful behaviour is the one above.
+
+## 11. A dragged tool's cost label sits away from the cursor at any UI scale but 100%
+
+**Symptom.** Found in two-player testing on 2026-11-25 (room val-6, the Mac). While dragging a road,
+field, orchard or pasture, the label that names the tool and its cost or size ("Dirt Road 13",
+"Standard Orchard 8x6") appears at about half the cursor's screen position, toward the top left,
+instead of beside what is being dragged. A Retina Mac shows it on every drag: its UI scale defaults to
+50% at pixel density 2 (`Platform::Display::FirstRunUiScalePercent`). On Windows it shows only when
+the player moves the UI scale slider off 100%.
+
+**Retail mechanism.**
+- `UpdateCreateBar` (`0x1400ffc60`, `Player/tool_base_createbar.cpp`) projects the drag's corners
+  through `0x1400fe960`, which scales the projected rectangle by `GameSettings::uiScale / 100`: the
+  rectangle comes out in the UI's own units (back-buffer pixels times the UI scale).
+- It then subtracts half the label's layout size (UI units) and calls
+  `DialogInstance::SetUpperLeft(x, y, true)` (`0x180114a60`), whose `true` multiplies the position by
+  `UserInterface::_uiScale` (`GameSettings::uiScale / 100` once the options are applied) a second time.
+- At 100% both factors are 1 and nothing shows. At scale s the label lands at s^2 of the pixel
+  position in UI units, that is s times where it belongs on screen.
+- The edit tool's selection popup (`Player/edittool.cpp`, same `0x1400fe960` rectangle) divides its
+  position by `_uiScale` before calling `SetUpperLeft(.., true)`, so it lands right at any scale: the
+  create bar is the one caller that misses the division.
+
+**Proof it is retail.** Read from the port's transcriptions of the three functions above (retail's
+addresses, byte-faithful arithmetic); retail itself was not run at a non-100% scale. The port's log
+line `[fc60] positioned CreateBar` showed the rectangle already in UI units (294.7, 554.6 for a
+cursor at 300, 560 points on a 1280 x 800-point window) before the second scale.
+
+**Lever.** The `scaled` flag of that one `SetUpperLeft` call.
+
+Fix: `fix.createbar_scale` (tier 1), default on: the position goes in unscaled, since the rectangle is
+already in the UI's units. Render only: where the label sits; nothing saved or simulated changes.
