@@ -107,3 +107,10 @@ neighbour.server=wss://openba-neighbour.<your-subdomain>.workers.dev
 
 Use `wss://` (secure) for the Cloudflare address and `ws://` only for the local relay. Pick a room
 name and password only the two of you know.
+
+**The free plan's write allowance.** Cloudflare's free plan allows 100,000 storage rows written a day
+for the whole account: every relay on it, a test relay included, shares it. The relay buffers its busy
+keys and writes nature records at most once a minute, so two towns at 10x cost a few thousand rows an
+hour; `npx wrangler tail <worker>` shows each busy room's rate in a `[rows]` line once a minute. A day
+spent at 50x, or several rooms playing at once, can still use it up: the rooms then cannot save until
+the next UTC day, and the nature sync mends the towns afterwards.
