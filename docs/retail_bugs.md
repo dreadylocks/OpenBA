@@ -368,3 +368,49 @@ Fix: `fix.large_packages` (tier 1), default on: a mounted package larger than 2 
 entry offsets, unwrapped from its index and validated, and its packed reads seek 64-bit; packages
 up to 2 GiB are read exactly as retail. `src/ext/large_packages/`,
 docs/extensions/handins/LARGEPKM.md.
+
+## 10. A package with no directory mounts empty, and every save made with it asks "out of date"
+
+**Symptom.** Found in two-player testing on 2026-11-24 (docs/fork/TWO_PLAYER_TESTING.md). Every load
+of a save made with `RKEditorChoiceEdition.pkm` enabled asks "The following mod is out of date ...
+[RKEditorChoiceEdition.pkm] Saved with version 0 (0.0.0)" (`Dialog/SaveLoad.rsc:modsOutOfDate`,
+`SaveLoad::CheckMod` status 2). The package's Mods list entry gets an empty name, and none of its
+files reach the game.
+
+**Cause: the file is incomplete, not misread.** The package's header word (offset 0) says its
+directory blob is at 1,169,561,613. On the Mac's copy (1,170,893,820 bytes) the last non-zero byte
+is at 961,544,191 (exactly 917 MiB in), and the 209,349,628 bytes after it are zeros. That is the
+mark of a download or copy that stopped after the file was allocated at full size. So the directory
+blob's length reads as 0. The PC's saves show the same nameless mod with version 0, so its copy is
+probably the same incomplete file (not checked byte for byte: `tools/build.sh unit` on the PC prints it).
+
+**Retail mechanism** (what `ReadPackfile` makes of an empty directory blob):
+- `ReadPackfile` (`0x1800b46b0`) reads the blob length (0), allocates and reads 0 bytes, and opens
+  a `CompressedMemoryStream` over it (`0x1800b4864`). `CompressedStream::Open` (`0x1800aa560`)
+  returns false at its `len < 4` test (`0x1800aa595`), and `ReadPackfile` does not check the result.
+- Every `CompressedStream::Read` after that fails without writing, so the file count, the format
+  version and every header field keep the constructor's values (`_version` 0, `_userVersion` 0,
+  `_crc` 0, `_platform` 0), and the three strings come out empty. `ReadPackfile` returns true.
+- `Modification::RefreshList` keeps the package (the file opened, platform 0) with name "", version 0
+  and no entries. A save copies version 0 into its mod record (`saveload_meta.cpp`, `Mod::i18`).
+  `CheckMod` (`0x1800c1090`) returns 2 when the recorded CRC and user version match the installed
+  package's (here 0 and 0) and the recorded version is below `0x1000400`. An intact package carries
+  the game version it was built with, `0x010007ff` for the other three mods in this install.
+
+**Why the port's result is retail's.** Retail itself was not run on the file. The argument is that
+the functions on this path are transcriptions with retail's addresses, and the port's own body gives
+this result. `tests/unit/package_header_test.cpp` reads every installed `.pkm` through the port's
+`PackageFile::ReadPackfile` (2026-11-25, Mac). The three intact mods read with their names, version
+`0x010007ff`, user versions 1, 176 and 1, and entry counts equal to their directories'.
+RKEditorChoiceEdition.pkm reads as name "", version 0, no entries, with an empty directory and zeros
+from byte 961,544,192 to the end. A synthetic 12-byte package with an empty directory (no game data)
+pins the same result on every platform.
+
+**What the player does.** Replace the package with an intact copy. Saves already stamped with
+version 0 keep that record. After the replacement they ask `modsChanged` (CheckMod status 4: the
+recorded CRC, 0, no longer matches the package's) instead of `modsOutOfDate`, and saving them again
+records the real values.
+
+**Lever.** `ReadPackfile` ignores `Open`'s result at `0x1800b4864`, so a missing directory is not
+reported anywhere. A `fix.*` row could check that result in `RefreshList` and skip or flag such a
+package. Not done: no such row exists, and the faithful behaviour is the one above.

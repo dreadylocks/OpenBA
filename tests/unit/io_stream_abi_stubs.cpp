@@ -17,7 +17,8 @@
 // is `src/engine/io/memory_stream.cpp`, `file_stream.cpp`,
 // `compressedstream.cpp` and `text_file_stream.cpp` — files that stand on
 // the port registry, the allocator and <windows.h> and cannot link into a host
-// test (tests/unit/README.md, B31_RULES rule 6).
+// test (tests/unit/README.md, B31_RULES rule 6). memory_stream.cpp no longer
+// does and is linked (package_header_test.cpp), so its stubs are gone.
 //
 // THE CLASS IS STILL THE REAL ONE. What is stubbed here is only the BODY of
 // each member: the declarations, their order and their signatures come from
@@ -37,6 +38,7 @@
 #include "io/Stream.h"
 #include "io/FileStream.h"
 #include "io/PackageFile.h"
+#include "io/FileSystem.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -58,13 +60,8 @@ namespace {
 namespace IO {
 
 // ---- IO::MemoryStream (src/engine/io/memory_stream.cpp) -------------------
-// Retail slot 0 is the class's own virtual destructor (B3X W1; ENDGAME B.3.9 IO).
-bool     MemoryStream::Write(int, const void*) { StubReached("MemoryStream::Write"); }
-bool     MemoryStream::Read(int, void*)        { StubReached("MemoryStream::Read"); }
-bool     MemoryStream::SetCurrentPos(int)      { StubReached("MemoryStream::SetCurrentPos"); }
-uint32_t MemoryStream::GetCurrentPos() const   { StubReached("MemoryStream::GetCurrentPos"); }
-uint32_t MemoryStream::GetSize() const         { StubReached("MemoryStream::GetSize"); }
-void     MemoryStream::Close()                 { StubReached("MemoryStream::Close"); }
+// The real bodies are linked (sources.cmake, for package_header_test.cpp:
+// ReadPackfile reads a package's directory through one). Their stubs are gone.
 
 // ---- IO::FileStream (src/engine/io/file_stream.cpp + file_stream_write.cpp) --
 // Slot 0 is PURE on this class, so there is nothing to stub for it.
@@ -100,6 +97,9 @@ bool     CompressedStream::Write(int, const void*) { StubReached("CompressedStre
 // decode_exact_test.cpp); so are SetWindow / GetAvailableWindow / DecompressFromSource.
 // The write path they reach only when WRITING stays a stub, and the ext hook is null.
 void     CompressedStream::CompressWindow(int)     { StubReached("CompressedStream::CompressWindow"); }
+// compressed_stream_write.cpp. ReadPackfile's teardown names it behind a guard the
+// read path never passes (package_file_read.cpp section 70: Open sets direction 0).
+void     CompressedStream::Commit()                { StubReached("CompressedStream::Commit"); }
 CompressedStream::ExtAsyncCompressFn CompressedStream::_extAsyncCompress = nullptr;
 bool     CompressedStream::SetCurrentPos(int)      { StubReached("CompressedStream::SetCurrentPos"); }
 uint32_t CompressedStream::GetCurrentPos() const   { StubReached("CompressedStream::GetCurrentPos"); }
@@ -169,5 +169,14 @@ Object::External* PackageFile::Reconstruct()            { StubReached("PackageFi
 void          PackageFile::Destruct()                   { StubReached("PackageFile::Destruct"); }
 Object::External* PackageFile::Construct()              { StubReached("PackageFile::Construct"); }
 PackageFile::~PackageFile() {}
+// filesystem_packages.cpp. FileSystem::ReadFile's PACKED arm calls it; the host
+// tests mount no package, so every read takes the loose arm.
+RtIO::FileInfo PackageFile::GetFileInfo() const { StubReached("PackageFile::GetFileInfo"); }
+
+// ---- IO::FileSystem (src/engine/io/filesystem.cpp) -------------------------
+// The class static, defined in filesystem.cpp, which stands on the package
+// system. package_header_test.cpp points it at an empty FileSystem for the
+// length of one ReadPackfile (filesystem_openfile.cpp is linked).
+FileSystem* FileSystem::_singleton = nullptr;
 
 }  // namespace IO
