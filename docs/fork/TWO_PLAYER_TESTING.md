@@ -126,7 +126,7 @@ dev loop game sitting in a Load's question.
 - Goods a receiving game does not know (another mod list) are dropped with an event line, not returned.
 - Saves written on the Windows PC list a mod with an empty display name that DoLoad reports as
   `modsOutOfDate` (CheckMod 2) when the same PC loads them. Traced (2026-11-25): it is
-  RKEditorChoiceEdition.pkm, and the package file is incomplete; see the next run's notes.
+  RKEditorChoiceEdition.pkm, and the package file is incomplete (docs/retail_bugs.md section 10).
 - The removal tool's preview over the neighbour's road is green (the removal itself skips those tiles).
 - Row 20 (Continents) not run; row 6 checked by solid-tile counts only.
 - Shared spreading (6263d4f8f): seat 0 spreads plants on the west half of the map, seat 1 on the east,

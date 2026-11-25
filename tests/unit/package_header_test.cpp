@@ -219,8 +219,12 @@ std::string GameDir() {
 UNIT_TEST(package_header_empty_directory) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::string leaf = "banished_pkg_header_unit_" + std::to_string(static_cast<long long>(stamp));
-    const fs::path dir = fs::temp_directory_path() / leaf;
     std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path(ec);
+    CHECK(!ec);
+    if (ec)
+        return;
+    const fs::path dir = tmp / leaf;
     fs::create_directories(dir, ec);
     const fs::path file = dir / "EmptyDirectory.pkm";
 
@@ -230,8 +234,10 @@ UNIT_TEST(package_header_empty_directory) {
     PutI32(bytes, 0);                                   // padding, never read
     FILE* f = std::fopen(file.string().c_str(), "wb");
     CHECK(f != nullptr);
-    if (f == nullptr)
+    if (f == nullptr) {
+        fs::remove_all(dir, ec);
         return;
+    }
     std::fwrite(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);
 

@@ -393,17 +393,18 @@ probably the same incomplete file (not checked byte for byte: `tools/build.sh un
   `_crc` 0, `_platform` 0), and the three strings come out empty. `ReadPackfile` returns true.
 - `Modification::RefreshList` keeps the package (the file opened, platform 0) with name "", version 0
   and no entries. A save copies version 0 into its mod record (`saveload_meta.cpp`, `Mod::i18`).
-  `CheckMod` (`0x1800c1090`) returns 2 for any recorded version below `0x1000400`. An intact package
-  carries the game version it was built with, `0x010007ff` for the other three mods in this install.
+  `CheckMod` (`0x1800c1090`) returns 2 when the recorded CRC and user version match the installed
+  package's (here 0 and 0) and the recorded version is below `0x1000400`. An intact package carries
+  the game version it was built with, `0x010007ff` for the other three mods in this install.
 
-**Proof the port reads it as retail does.** `tests/unit/package_header_test.cpp` reads every
-installed `.pkm` through the port's own `PackageFile::ReadPackfile` (2026-11-25, Mac). The three
-intact mods read with their names, version `0x010007ff`, user versions 1, 176 and 1, and entry
-counts equal to their directories'. RKEditorChoiceEdition.pkm reads as name "", version 0, no
-entries, with an empty directory and zeros from byte 961,544,192 to the end. A synthetic 12-byte
-package with an empty directory (no game data) pins the same result on every platform. The
-functions on this path are transcriptions with retail's addresses. Retail itself was not run on
-the file.
+**Why the port's result is retail's.** Retail itself was not run on the file. The argument is that
+the functions on this path are transcriptions with retail's addresses, and the port's own body gives
+this result. `tests/unit/package_header_test.cpp` reads every installed `.pkm` through the port's
+`PackageFile::ReadPackfile` (2026-11-25, Mac). The three intact mods read with their names, version
+`0x010007ff`, user versions 1, 176 and 1, and entry counts equal to their directories'.
+RKEditorChoiceEdition.pkm reads as name "", version 0, no entries, with an empty directory and zeros
+from byte 961,544,192 to the end. A synthetic 12-byte package with an empty directory (no game data)
+pins the same result on every platform.
 
 **What the player does.** Replace the package with an intact copy. Saves already stamped with
 version 0 keep that record. After the replacement they ask `modsChanged` (CheckMod status 4: the
