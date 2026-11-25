@@ -309,8 +309,8 @@ uint64_t CitizenComponent::HandleLifeEvent(int eventType, const char* strParam) 
     if (!cem) {
         flags = (eventType != 2) ? 0x80u : 0x2u;
         // eventType names the CAUSE; without it every death in the log looks alike:
-        // 0 starvation, 1 thirst, 2 old age, 3 health, 6 disease, 7 other.
-        static const char* kCause[] = {"starvation", "thirst", "old-age", "health",
+        // 0 starvation, 1 freezing (CitizenComponent +0x48 coldness), 2 old age, 3 health, 6 disease, 7 other.
+        static const char* kCause[] = {"starvation", "freezing", "old-age", "health",
                                        "?4", "?5", "disease", "other"};
         ErrLine("[Burial] NO GRAVE: citizen=%p cause=%d(%s) cell=%u "
                         "townCemeteries=%d (0 => the state-2 registrar never ran; "
