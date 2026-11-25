@@ -289,6 +289,15 @@ bool RoadTool::CalcPath(int startCell, int endCell) {
                                         (uint64_t)ec, mapDescVal, roadDescExtra);
     }
 
+    // 0x1400af370: the planned tiles join the road mesh now. PlaceRoadCell gives each one its road type
+    // (+0x2A) and the queued marker 0x80 (+0x2B), which RebuildRoadMesh writes into the vertex blend, so a
+    // planned road draws see-through until it is built. Without this call nothing rebuilt the mesh until
+    // some other road tile finished (FinishRoadCell), so a road laid while paused, or on a map with no road
+    // under construction, did not show at all (seen on Mac and Windows, 2026-11-25: the plan appeared only
+    // after the next tile anywhere was built). Retail shows a planned road at once, and the mesh is the
+    // only thing that draws it; whether retail rebuilds here or per tile in PlaceRoadCell is not
+    // disassembled yet (the result on screen is the same).
+    decalMgr->RebuildRoadMesh(mapGrid);
 
     return true;
 }
