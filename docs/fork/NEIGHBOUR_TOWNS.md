@@ -500,7 +500,28 @@ follow-ups (§6).
 - **Resource changes**: every natural resource freed (`EntityList::DrainRemovals` EXT SEAM: felled,
   quarried, mined out, cleared, gathered) is sent as (tile, template); the neighbour's copy removes
   the same one (`QueueDestroy`). A forester's sapling (`CreateNaturalResource` EXT SEAM) is sent and
-  planted on a free tile. Natural spreading stays local (mirroring it too would double the forests).
+  planted on a free tile. Natural spreading: each half of the map spreads in its owner's game only (seat
+  0 the west, x < size / 2; seat 1 the east; `SharedMap::SpreadsHere`), which sends its new plants with
+  their model variant; spreading in both copies doubled the forests and let them drift apart.
+- **Nature sync** (`nature_sync.{h,cpp}`, `shared_map.cpp`): a change that never arrives (a relay that
+  could not write, a full queue, a crash before a save) used to leave the copies apart for good. Every
+  45 s (20 s after the neighbour arrives) the town that does not own a half asks its owner for that
+  half's digest (`natSyncReq` -> `natDigest`: per 16 x 16 tiles, the count and an order-free hash of
+  every natural resource's tile and template), asks for the blocks that differ (`natBlockReq` ->
+  `natBlock`: each resource's tile, template, model variant and growth) and makes them match: extra
+  plants go, missing ones come back as they stand at the owner. Requests travel in the queue of the
+  town's own changes and answers in the owner's, so each side has the other's earlier changes first; a
+  block the asking town changed meanwhile waits for the next round. Tiles either town claims (a field's
+  crops, an orchard's trees) are left out on both sides: they are their structure's town's. A block that
+  cannot be made to match (a lost rock cannot be put back) is settled until either copy of it changes.
+  Logged as `[Neighbour] nature sync:` when the outcome changes. The relay passes the four messages
+  through, keeps nothing, and drops more than 8 requests from a town in 5 s.
+- **Plant ends**: a plant's natural end (its growth past a threshold each copy rolls, or frozen) is
+  decided by one game, as its spreading: the half's owner, or the town whose structure holds the tile
+  (`SharedMap::DecidesNature`, EXT SEAM in `GrowthComponent::Update`); the other copy keeps the plant
+  until the removal comes. Before, both copies ended every plant and each died at the earlier time.
+- **Replay order**: the relay stamps each resource record and replays the newest change per tile and
+  template across both towns (a removal wins a tie between records from before stamps).
   The relay queues changes (the newest 20 000) for a town that is away. What the neighbour's changes
   did is logged every ~5 s when it changes (`[Neighbour] shared map: from the neighbour so far: ...`,
   with the last reason one was not applied).

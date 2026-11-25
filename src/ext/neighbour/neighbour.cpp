@@ -438,6 +438,7 @@ void OnMessage(const Message& m) {
         int64_t seat = -1;
         if (m.GetInt("seat", seat)) SharedMap::SetSeat(static_cast<int>(seat));
         SharedMap::OnWelcome();
+        SharedMap::SetPeerOnline(online);
         // A loaded game's first join: its roads again, once the neighbour's land is in.
         if ((s_freshGame && s_loadedFromSave) || s_testReload) SharedMap::ExpectReload();
         if (s_freshGame) {   // told once: a reconnect must not drop this game's own buildings
@@ -468,6 +469,7 @@ void OnMessage(const Message& m) {
         m.GetBool("online", online);
         s_peerName = peer;
         s_peerOnline = online;
+        SharedMap::SetPeerOnline(online);
         Post(peer + (online ? " has arrived." : " has left."), kColourStatus);
         if (online) {
             ShareCurrentPause();

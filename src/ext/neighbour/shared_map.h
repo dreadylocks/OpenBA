@@ -23,7 +23,10 @@
 // M3. ROADS: a road tile this town finishes (Map::FinishRoadCell) is sent; the neighbour's become
 // finished roads here at once, by the same call. RESOURCES: a tree, rock or deposit that goes
 // (EntityList::DrainRemovals) is sent and the same one goes here; a sapling a forester plants
-// (CreateNaturalResource) is sent and planted here. Natural spreading stays local to each copy.
+// (CreateNaturalResource) is sent and planted here. Natural spreading: each half of the map spreads in
+// its owner's game only (SpreadsHere), which sends the new plants. NATURE SYNC: the town that does not
+// own a half checks its copy of it against the owner's now and then and mends the blocks that differ
+// (nature_sync.h), so a change that never arrived does not keep the copies apart.
 // ============================================================================
 
 #include <cstdint>
@@ -86,8 +89,20 @@ void NotePlanted(ComponentEntity* entity);
 // (a loaded game before the relay's welcome). Always true outside a shared map and before play (world
 // generation must stay the same in both games).
 bool SpreadsHere(int x, int y);
+// A plant's end by itself (past its growth threshold, or frozen below nothing: GrowthComponent::Update)
+// is decided by the same game: on a tile under one of this town's own structures (its field, its
+// orchard) this town's, on a tile the neighbour holds the neighbour's, elsewhere the half's owner's.
+// Each copy rolls each plant's threshold and has its own weather, so two copies deciding alone let
+// every plant die at the earlier of two times, in both. False where this copy waits for the other's
+// removal; always true outside a shared map and before play. Like spreading, a half whose owner is not
+// in the room (or a loaded game before the relay's welcome) does not end its plants here: that half
+// stands still until its town plays.
+bool DecidesNature(int x, int y);
 // This town's seat in the room (the relay's welcome), for SpreadsHere.
 void SetSeat(int seat);
+// Whether the neighbour's game is in the room (the welcome, then "peer"): the nature sync asks it, now
+// and then, how its half stands and mends this copy of that half (nature_sync.h).
+void SetPeerOnline(bool online);
 
 // From Neighbour::BeginFrame: send what is queued, notice structures that are gone.
 void Tick(Link* link, uint64_t frame);

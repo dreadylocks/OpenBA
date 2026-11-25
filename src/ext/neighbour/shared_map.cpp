@@ -49,6 +49,7 @@
 #include "system/MemoryAllocator.h"
 
 #include "ext/neighbour/link.h"
+#include "ext/neighbour/nature_sync.h"
 #include "ext/neighbour/protocol.h"
 
 namespace Neighbour {
@@ -358,11 +359,16 @@ std::unordered_multimap<int, ComponentEntity*> s_natIndex;
 
 // Nature traffic, for the log (LogNature): what this town sent and what came of the neighbour's.
 struct NatStats {
-    uint64_t sentAdds = 0, sentRms = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
+    uint64_t sentAdds = 0, sentRms = 0, sentRmsThere = 0, dropped = 0, rmMiss = 0, rmByScan = 0;
     std::map<std::string, int> missByTmpl;
 };
 NatStats s_nat;
 std::string s_natLogged;
+
+// The nature sync's (defined with it, before Tick): a change this town made on the neighbour's half,
+// and the sync's state dropped with the game.
+void MarkSyncDirty(int cell);
+void ResetSync();
 
 void Queue(const Message& m) {
     if (s_pending.size() >= kMaxPending) {
@@ -370,8 +376,16 @@ void Queue(const Message& m) {
         ++s_nat.dropped;
     }
     if (m.type == "nat") {
-        if (m.GetOr("op", "") == "add") ++s_nat.sentAdds;
-        else ++s_nat.sentRms;
+        if (m.GetOr("op", "") == "add") {
+            ++s_nat.sentAdds;
+        } else {
+            ++s_nat.sentRms;
+            int64_t cell = -1;
+            Map* map = TheMap();
+            if (map != nullptr && s_seat >= 0 && m.GetInt("cell", cell) && cell >= 0 &&
+                ((cell % map->size) < map->size / 2 ? 0 : 1) != s_seat)
+                ++s_nat.sentRmsThere;
+        }
     }
     s_pending.push_back(m);
     ++s_waitingAdds;
@@ -385,9 +399,11 @@ void LogNature() {
     for (size_t i = 0; i < misses.size() && i < 4; ++i)
         top += (i ? ", " : "") + misses[i].second + " x" + std::to_string(misses[i].first);
     char line[600];
-    snprintf(line, sizeof line, "sent %llu plant(s) and %llu removal(s), %llu dropped (queue full); of the neighbor's "
-             "removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
+    snprintf(line, sizeof line,
+             "sent %llu plant(s) and %llu removal(s) (%llu on the neighbor's half), %llu dropped (queue full); "
+             "of the neighbor's removals %llu found off the tile's slots, %llu found nothing here%s%s%s",
              static_cast<unsigned long long>(s_nat.sentAdds), static_cast<unsigned long long>(s_nat.sentRms),
+             static_cast<unsigned long long>(s_nat.sentRmsThere),
              static_cast<unsigned long long>(s_nat.dropped), static_cast<unsigned long long>(s_nat.rmByScan),
              static_cast<unsigned long long>(s_nat.rmMiss), top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
     if (line == s_natLogged) return;
@@ -560,6 +576,81 @@ int CellOf(ComponentEntity* e) {
     return mc->tileY0 * map->size + mc->tileX0;
 }
 
+enum class Planted { kYes, kTaken, kTakenByNature, kNoTemplate, kNotAPlant };
+
+// A plant of `tmpl` on a free tile, as the game's spreading puts a sapling there
+// (GrowthComponent::SpawnSubResource): grown to `progress` (0 a sapling, 1 full size), with the model
+// variant grp / var when they are known (-1: the template's own roll).
+Planted PlantAt(int cell, const std::string& tmpl, int64_t grp, int64_t var, float progress,
+                ComponentEntity** made = nullptr) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    Map* map = TheMap();
+    if (g == nullptr || map == nullptr || g->m_entityList == nullptr || cell < 0 ||
+        cell >= map->size * map->size)
+        return Planted::kNoTemplate;
+    const MapCell& c = map->cells.GetData()[cell];
+    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 ||
+        c.field_0x2A != 0xFF) {
+        // Held by natural resources and nothing else: one may be on its way out.
+        ComponentEntity* occupant = c.occupant.Get();
+        ComponentEntity* blocker = c.blocker.Get();
+        const bool occupantNature =
+            occupant == nullptr || occupant->FindComponent<NaturalResourceComponent>() != nullptr;
+        const bool blockerNature =
+            blocker == nullptr || blocker->FindComponent<NaturalResourceComponent>() != nullptr;
+        const bool nature = occupantNature && blockerNature && c.footprintCount == 0 && c.field_0x2A == 0xFF;
+        return nature ? Planted::kTakenByNature : Planted::kTaken;
+    }
+    ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
+    if (f == nullptr) return Planted::kNoTemplate;
+    ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(tmpl.c_str()));
+    if (!::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())) return Planted::kNoTemplate;
+    void* mem = System::MemoryAllocator::MemAlloc(0x48, 8);
+    if (mem == nullptr) return Planted::kNoTemplate;
+    ComponentEntity* ent = ::new (mem) ComponentEntity(desc);
+    Object::InternalPtr<ComponentEntity> ibp(ent);
+    NaturalResourceComponent* nr = ent->FindComponent<NaturalResourceComponent>();
+    GrowthComponent* growth = ent->FindComponent<GrowthComponent>();
+    if (nr == nullptr || growth == nullptr) return Planted::kNotAPlant;   // the pointer frees it
+    s_applying = true;
+    nr->PlaceAtCell(cell);
+    growth->SetProgress(progress);
+    if (grp >= 0 && grp < 64 && var >= 0 && var < 64)
+        if (ModelComponent* model = ent->FindComponent<ModelComponent>())
+            model->SelectMesh(static_cast<uint16_t>(grp), static_cast<int16_t>(var));
+    g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
+    s_applying = false;
+    if (made != nullptr) *made = ibp.Get();
+    return Planted::kYes;
+}
+
+// The natural resources by their tile, built once a frame when needed (a load's replay brings thousands of
+// changes at once) and kept up to date with what this frame plants.
+void EnsureNatIndex() {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    if (s_natIndexFrame == s_frame || g == nullptr || g->m_entityList == nullptr) return;
+    s_natIndexFrame = s_frame;
+    s_natIndex.clear();
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+        const int at = CellOf(e);
+        if (at >= 0) s_natIndex.emplace(at, e);
+    }
+}
+
+// A natural resource of `tmpl` whose origin is `cell`, not on its way out.
+ComponentEntity* StandingNatural(int cell, const std::string& tmpl) {
+    EnsureNatIndex();
+    const auto range = s_natIndex.equal_range(cell);
+    for (auto it = range.first; it != range.second; ++it) {
+        ComponentEntity* e = it->second;
+        if (!((e->_entityFlags >> 10) & 1) && PathOf(e->_description) == tmpl) return e;
+    }
+    return nullptr;
+}
+
 void ApplyNat(const Message& m) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     Map* map = TheMap();
@@ -586,17 +677,7 @@ void ApplyNat(const Message& m) {
         // Not in the tile's occupant / blocker slots (a plant that does not hold its tile, a wild herb):
         // look for it among the natural resources, indexed by tile once a frame (a load's replay brings
         // thousands of removals at once, most of them for plants this copy no longer has).
-        if (s_natIndexFrame != s_frame) {
-            s_natIndexFrame = s_frame;
-            s_natIndex.clear();
-            const auto& all = g->m_entityList->masterArray;
-            for (int i = 0; i < all._size; ++i) {
-                ComponentEntity* e = all._data[i].Get();
-                if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
-                const int at = CellOf(e);
-                if (at >= 0) s_natIndex.emplace(at, e);
-            }
-        }
+        EnsureNatIndex();
         const auto range = s_natIndex.equal_range(static_cast<int>(cell));
         for (auto it = range.first; it != range.second; ++it) {
             ComponentEntity* e = it->second;
@@ -614,38 +695,32 @@ void ApplyNat(const Message& m) {
         return;
     }
     if (op != "add") return;
-    // A sapling, as the game's spreading plants one: on a free cell only.
-    if (c.occupant.Get() != nullptr || c.blocker.Get() != nullptr || c.footprintCount != 0 || c.field_0x2A != 0xFF) {
+    // A replay onto a save that has the plant already: nothing to do, or a herb (which does not hold its
+    // tile, so the slots cannot tell) would grow there twice. (Live, a plant is new; one that came twice
+    // is the nature sync's to mend, and the index costs a walk of every entity.)
+    if (replay && StandingNatural(static_cast<int>(cell), tmpl) != nullptr) return;
+    int64_t grp = -1, var = -1;
+    m.GetInt("grp", grp);
+    m.GetInt("var", var);
+    ComponentEntity* made = nullptr;
+    switch (PlantAt(static_cast<int>(cell), tmpl, grp, var, 0.0f, &made)) {
+    case Planted::kYes:
+        ++s_applied.planted;
+        if (made != nullptr && s_natIndexFrame == s_frame) s_natIndex.emplace(static_cast<int>(cell), made);
+        break;
+    case Planted::kTaken:
+    case Planted::kTakenByNature:
         if (replay) return;   // most likely the sapling itself, grown or not
         ++s_applied.refused;
         s_lastRefusal = "a sapling on a tile that is taken";
-        return;
-    }
-    ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
-    if (f == nullptr) return;
-    ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(tmpl.c_str()));
-    if (!::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())) return;
-    void* mem = System::MemoryAllocator::MemAlloc(0x48, 8);
-    if (mem == nullptr) return;
-    ComponentEntity* ent = ::new (mem) ComponentEntity(desc);
-    Object::InternalPtr<ComponentEntity> ibp(ent);
-    NaturalResourceComponent* nr = ent->FindComponent<NaturalResourceComponent>();
-    GrowthComponent* growth = ent->FindComponent<GrowthComponent>();
-    if (nr == nullptr || growth == nullptr) {   // not a plant: the pointer frees it
+        break;
+    case Planted::kNotAPlant:
         ++s_applied.refused;
         s_lastRefusal = "a sapling of something that does not grow";
-        return;
+        break;
+    case Planted::kNoTemplate:
+        break;
     }
-    s_applying = true;
-    nr->PlaceAtCell(static_cast<int>(cell));
-    growth->SetProgress(0.0f);
-    int64_t grp = -1, var = -1;
-    if (m.GetInt("grp", grp) && m.GetInt("var", var) && grp >= 0 && grp < 64 && var >= 0 && var < 64)
-        if (ModelComponent* model = ent->FindComponent<ModelComponent>())
-            model->SelectMesh(static_cast<uint16_t>(grp), static_cast<int16_t>(var));
-    g->m_entityList->RegisterEntity(&ibp, static_cast<int>(desc->_category));
-    ++s_applied.planted;
-    s_applying = false;
 }
 
 std::vector<std::string> SplitOn(const std::string& s, char sep) {
@@ -800,6 +875,9 @@ void End() {
     s_applied = Applied();
     s_appliedLogged = Applied();
     s_tokens = kSendBurst;
+    s_nat = NatStats();
+    s_natLogged.clear();
+    ResetSync();
 }
 
 bool PeerHolds(int x, int y) {
@@ -992,6 +1070,7 @@ void NoteRemoved(ComponentEntity* entity) {
     Message n("nat");
     n.Set("op", "rm").SetInt("cell", cell).Set("tmpl", tmpl);
     Queue(n);
+    MarkSyncDirty(cell);
 }
 
 void NotePlanted(ComponentEntity* entity) {
@@ -1005,6 +1084,18 @@ void NotePlanted(ComponentEntity* entity) {
     if (ModelComponent* model = entity->FindComponent<ModelComponent>(); model != nullptr && model->meshIndex >= 0)
         n.SetInt("grp", model->meshGroup).SetInt("var", model->meshIndex);
     Queue(n);
+    MarkSyncDirty(cell);
+}
+
+bool DecidesNature(int x, int y) {
+    if (!s_on || !s_live) return true;
+    Map* map = TheMap();
+    if (map == nullptr || x < 0 || y < 0 || x >= map->size || y >= map->size) return true;
+    const uint32_t cell = static_cast<uint32_t>(y * map->size + x);
+    if (PeerHoldsCell(cell)) return false;                                // the neighbour's land: its crops
+    if (map->cells.GetData()[cell].footprintCount != 0) return true;   // this town's own structure
+    if (s_seat < 0) return false;
+    return (x < map->size / 2 ? 0 : 1) == s_seat;
 }
 
 void SetSeat(int seat) {
@@ -1073,6 +1164,411 @@ void LogFingerprint() {
     fprintf(stderr, "[Neighbour] map fingerprint: %s\n", line);
 }
 
+// ---- Nature sync (nature_sync.h): the half this town does not own, checked against its owner ------
+// A round: this town asks the owner for its half's digest (natSyncReq), compares it with its own copy,
+// asks for the blocks that differ (natBlockReq) and makes them match the owner's lists (natBlock). Its
+// requests go in the same queue as its own changes and the owner answers in the same queue as its own,
+// so each side has the other's earlier changes before it counts; a block this town changes after it
+// asks, or holds a resource of its own on the way out (felled, not yet freed), waits for the next round.
+namespace {
+
+constexpr double kSyncFirstSeconds = 20.0;    // after the neighbour arrives: its replays land first
+constexpr double kSyncEverySeconds = 45.0;
+constexpr double kSyncGiveUpSeconds = 90.0;   // an answer that never comes (the neighbour left, a throttle)
+constexpr double kSyncAnswerSeconds = 5.0;    // the owner answers one round at most this often
+constexpr size_t kSyncChars = 11000;          // a sync message's lists, well under kMaxMessageBytes
+
+struct SyncRound {
+    int64_t id = 0;
+    int     stage = 0;   // 0 none, 1 waiting for the digest, 2 waiting for the blocks
+    std::chrono::steady_clock::time_point sentAt;
+    std::map<int, NatureSync::BlockSum> digest;   // the owner's, as its lists come
+    std::map<int, NatureSync::BlockSum> ownerSums;   // the owner's sum of each block asked for
+    std::set<int> asked;                          // blocks still to come
+    std::map<int, std::vector<NatureSync::Plant>> partial;
+    int blocks = 0, differed = 0, skipped = 0, added = 0, removed = 0, waiting = 0, blocked = 0;
+    std::map<std::string, int> blockedByTmpl;
+};
+SyncRound s_round;
+std::set<int> s_syncDirty;   // blocks of the neighbour's half this town changed since its last request
+// Blocks this copy cannot make match (a rock or deposit it has lost cannot be put back; a tile under one
+// of this town's structures takes no plant): the owner's sum and this copy's when it was settled. Not
+// asked for again while both stay so.
+std::map<int, NatureSync::Settled> s_syncSettled;
+int64_t s_syncSerial = 0;
+bool s_peerOnline = false;
+std::chrono::steady_clock::time_point s_syncNext;
+bool s_syncScheduled = false;
+std::string s_syncLogged;
+// The owner's side: when it last answered a round, and which.
+std::chrono::steady_clock::time_point s_syncAnsweredAt;
+int64_t s_syncAnsweredId = -1;
+
+const char* HalfName(int half) {
+    return half == 0 ? "west" : "east";
+}
+
+NatureSync::Plant PlantOf(ComponentEntity* e, int cell) {
+    NatureSync::Plant p;
+    p.cell = cell;
+    p.tmpl = PathOf(e->_description);
+    if (ModelComponent* model = e->FindComponent<ModelComponent>(); model != nullptr && model->meshIndex >= 0) {
+        p.grp = model->meshGroup;
+        p.var = model->meshIndex;
+    }
+    NaturalResourceComponent* nr = e->FindComponent<NaturalResourceComponent>();
+    GrowthComponent* growth = e->FindComponent<GrowthComponent>();
+    if (nr != nullptr && growth != nullptr && growth->growthScale > 0.0f) {
+        const float f = std::clamp(nr->resourceScale / growth->growthScale, 0.0f, 50.0f);
+        p.prog = static_cast<int>(std::lround(f * 1000.0f));
+    }
+    return p;
+}
+
+// The tiles this town's structures claim, built once a frame for CollectHalf.
+const std::vector<uint8_t>& OwnHeld(Map* map) {
+    static std::vector<uint8_t> grid;
+    static uint64_t builtFrame = ~0ull;
+    const size_t n = static_cast<size_t>(map->size) * map->size;
+    if (builtFrame == s_frame && grid.size() == n) return grid;
+    builtFrame = s_frame;
+    grid.assign(n, 0);
+    for (const auto& kv : s_mine) {
+        const TileRect& r = kv.second.rect;
+        for (int y = std::max(0, r.y); y < std::min(map->size, r.y + r.h); ++y)
+            for (int x = std::max(0, r.x); x < std::min(map->size, r.x + r.w); ++x)
+                grid[static_cast<size_t>(y) * map->size + x] = 1;
+    }
+    return grid;
+}
+
+// This copy's natural resources on one half, outside structures: its digest, the plants and entities of
+// `blocks`, and the blocks holding a resource this town's own game is taking away (flagged, not yet
+// freed: its removal is not sent yet).
+void CollectHalf(int half, std::map<int, NatureSync::BlockSum>* sums, const std::set<int>* blocks,
+                 std::map<int, std::vector<NatureSync::Plant>>* plants,
+                 std::map<int, std::vector<ComponentEntity*>>* ents, std::set<int>* busy) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    Map* map = TheMap();
+    if (g == nullptr || g->m_entityList == nullptr || map == nullptr) return;
+    const std::vector<uint8_t>& ownHeld = OwnHeld(map);
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || e->FindComponent<NaturalResourceComponent>() == nullptr) continue;
+        const int cell = CellOf(e);
+        if (cell < 0 || NatureSync::HalfOf(cell, map->size) != half) continue;
+        // A tile either town's structure claims (a field's crops, an orchard's trees) is that town's to
+        // keep, by its own changes, not the half's owner's: left out of the sync on both sides (this
+        // town's structures' rectangles are what the neighbour holds as PeerHolds, with its roads, which
+        // grow nothing; a claim on its way may differ for a round).
+        if (ownHeld[static_cast<size_t>(cell)] || PeerHoldsCell(static_cast<uint32_t>(cell))) continue;
+        if ((e->_entityFlags >> 10) & 1) {
+            if (busy != nullptr && s_quiet.count(e) == 0) busy->insert(NatureSync::BlockOf(cell, map->size));
+            continue;
+        }
+        if (sums != nullptr) NatureSync::AddTo(*sums, map->size, cell, PathOf(e->_description));
+        if (blocks == nullptr) continue;
+        const int block = NatureSync::BlockOf(cell, map->size);
+        if (blocks->count(block) == 0) continue;
+        if (plants != nullptr) (*plants)[block].push_back(PlantOf(e, cell));
+        if (ents != nullptr) (*ents)[block].push_back(e);
+    }
+}
+
+void MarkSyncDirty(int cell) {
+    Map* map = TheMap();
+    if (map == nullptr || s_seat < 0 || cell < 0 || NatureSync::HalfOf(cell, map->size) == s_seat) return;
+    s_syncDirty.insert(NatureSync::BlockOf(cell, map->size));
+}
+
+void ResetSync() {
+    s_round = SyncRound();
+    s_syncDirty.clear();
+    s_syncSettled.clear();
+    s_peerOnline = false;
+    s_syncScheduled = false;
+    s_syncLogged.clear();
+    s_syncAnsweredId = -1;
+    // Round ids from the clock: an owner's answer to a round of an earlier run of this game never
+    // matches one of this run.
+    s_syncSerial = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::system_clock::now().time_since_epoch()).count() &
+                                        0x3FFFFFFFFFll) << 8;
+}
+
+void ScheduleSync(double seconds) {
+    const auto wait = std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000.0));
+    s_syncNext = std::chrono::steady_clock::now() + wait;
+    s_syncScheduled = true;
+}
+
+void LogSync(const std::string& line) {
+    if (line == s_syncLogged) return;
+    s_syncLogged = line;
+    fprintf(stderr, "[Neighbour] nature sync: %s\n", line.c_str());
+}
+
+void FinishRound() {
+    const SyncRound& r = s_round;
+    const int half = 1 - s_seat;
+    if (r.differed == 0 && r.skipped == 0) {
+        const std::string settled =
+            s_syncSettled.empty() ? "" : ", " + std::to_string(s_syncSettled.size()) + " settled as they are";
+        LogSync(std::string("the neighbor's ") + HalfName(half) + " half matches here (" +
+                std::to_string(r.blocks) + " block(s) with nature" + settled + ")");
+    } else {
+        std::string top;
+        std::vector<std::pair<int, std::string>> worst;
+        for (const auto& kv : r.blockedByTmpl) worst.emplace_back(kv.second, kv.first);
+        std::sort(worst.rbegin(), worst.rend());
+        for (size_t i = 0; i < worst.size() && i < 3; ++i)
+            top += (i ? ", " : "") + worst[i].second + " x" + std::to_string(worst[i].first);
+        char line[800];
+        snprintf(line, sizeof line,
+                 "the neighbor's %s half differed here in %d of %d block(s) (%d left for the next round: "
+                 "changed here meanwhile); mended: %d plant(s) added, %d removed, %d wait for their tile to "
+                 "clear, %d cannot be put here%s%s%s",
+                 HalfName(half), r.differed + r.skipped, r.blocks, r.skipped, r.added, r.removed, r.waiting,
+                 r.blocked,
+                 top.empty() ? "" : " (", top.c_str(), top.empty() ? "" : ")");
+        LogSync(line);
+    }
+    s_round = SyncRound();
+    ScheduleSync(kSyncEverySeconds);
+}
+
+// A request of this round still waiting in the queue (a long backlog): not yet unanswered.
+bool RequestQueued() {
+    for (const Message& m : s_pending) {
+        if (m.type != "natSyncReq" && m.type != "natBlockReq") continue;
+        int64_t id = 0;
+        if (m.GetInt("id", id) && id == s_round.id) return true;
+    }
+    return false;
+}
+
+void SyncTick(Link* link) {
+    if (s_seat < 0 || !s_peerOnline || link == nullptr || !link->Connected()) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (s_round.stage != 0) {
+        if (std::chrono::duration<double>(now - s_round.sentAt).count() > kSyncGiveUpSeconds) {
+            if (RequestQueued()) {
+                s_round.sentAt = now;
+                return;
+            }
+            LogSync("no answer from the neighbor (an older game, or it left); asking again later");
+            s_round = SyncRound();
+            ScheduleSync(kSyncEverySeconds);
+        }
+        return;
+    }
+    if (!s_syncScheduled) ScheduleSync(kSyncFirstSeconds);
+    if (now < s_syncNext) return;
+    s_round = SyncRound();
+    s_round.id = ++s_syncSerial;
+    s_round.stage = 1;
+    s_round.sentAt = now;
+    s_syncDirty.clear();
+    Message q("natSyncReq");
+    q.SetInt("id", s_round.id).SetInt("half", 1 - s_seat);
+    Queue(q);
+}
+
+// The owner's side: this town's half as it stands, to the neighbour that asked (one round at most every
+// kSyncAnswerSeconds: each answer walks every entity and fills the queue).
+void AnswerDigest(const Message& m) {
+    int64_t id = 0, half = -1;
+    if (s_seat < 0 || !m.GetInt("id", id) || !m.GetInt("half", half) || half != s_seat) return;
+    const auto now = std::chrono::steady_clock::now();
+    const double sinceLast = std::chrono::duration<double>(now - s_syncAnsweredAt).count();
+    if (s_syncAnsweredId >= 0 && sinceLast < kSyncAnswerSeconds) return;
+    s_syncAnsweredAt = now;
+    s_syncAnsweredId = id;
+    std::map<int, NatureSync::BlockSum> sums;
+    CollectHalf(s_seat, &sums, nullptr, nullptr, nullptr, nullptr);
+    const std::vector<std::string> lists = NatureSync::EncodeDigest(sums, kSyncChars);
+    for (size_t i = 0; i < lists.size(); ++i) {
+        Message d("natDigest");
+        d.SetInt("id", id).SetInt("half", half).Set("list", lists[i]).SetBool("end", i + 1 == lists.size());
+        Queue(d);
+    }
+}
+
+void AnswerBlocks(const Message& m) {
+    Map* map = TheMap();
+    int64_t id = 0, half = -1;
+    std::vector<int> blocks;
+    // Only for the round this town last sent a digest for (a long list of blocks comes in several asks).
+    if (map == nullptr || s_seat < 0 || !m.GetInt("id", id) || id != s_syncAnsweredId ||
+        !m.GetInt("half", half) || half != s_seat || !NatureSync::ParseInts(m.GetOr("blocks", ""), blocks))
+        return;
+    const int perRow = (map->size + NatureSync::kBlock - 1) / NatureSync::kBlock;
+    std::set<int> want;
+    std::vector<int> order;
+    for (int b : blocks)
+        if (b >= 0 && b < perRow * perRow && want.insert(b).second) order.push_back(b);
+    std::map<int, std::vector<NatureSync::Plant>> plants;
+    CollectHalf(s_seat, nullptr, &want, &plants, nullptr, nullptr);
+    for (const NatureSync::BlockMessage& b : NatureSync::PackBlocks(order, plants, kSyncChars)) {
+        Message out("natBlock");
+        out.SetInt("id", id).SetInt("half", half).Set("tmpls", b.tmpls).Set("list", b.list).Set("done", b.done);
+        Queue(out);
+    }
+}
+
+// The asking side: the owner's digest, then its lists of the blocks that differ.
+void TakeDigest(const Message& m) {
+    int64_t id = 0, half = -1;
+    bool end = false;
+    if (s_round.stage != 1 || !m.GetInt("id", id) || id != s_round.id || !m.GetInt("half", half) ||
+        half != 1 - s_seat)
+        return;
+    m.GetBool("end", end);
+    if (!NatureSync::DecodeDigest(m.GetOr("list", ""), s_round.digest)) {
+        LogSync("the neighbor's digest is malformed; asking again later");
+        s_round = SyncRound();
+        ScheduleSync(kSyncEverySeconds);
+        return;
+    }
+    if (!end) return;
+    std::map<int, NatureSync::BlockSum> here;
+    std::set<int> busy;
+    CollectHalf(static_cast<int>(half), &here, nullptr, nullptr, nullptr, &busy);
+    std::set<int> withNature;
+    for (const auto& kv : s_round.digest) withNature.insert(kv.first);
+    for (const auto& kv : here) withNature.insert(kv.first);
+    s_round.blocks = static_cast<int>(withNature.size());
+    // Settled blocks stay out while neither copy of them changed.
+    const std::set<int> settledNow = NatureSync::StillSettled(s_syncSettled, s_round.digest, here);
+    const NatureSync::BlockSum none;
+    std::set<int> skip = s_syncDirty;
+    skip.insert(busy.begin(), busy.end());
+    std::vector<int> differ;
+    for (int b : NatureSync::Differing(s_round.digest, here, skip, &s_round.skipped))
+        if (settledNow.count(b) == 0) differ.push_back(b);
+    for (int b : differ) {
+        const auto o = s_round.digest.find(b);
+        s_round.ownerSums[b] = o == s_round.digest.end() ? none : o->second;
+    }
+    s_round.digest.clear();
+    if (differ.empty()) {
+        FinishRound();
+        return;
+    }
+    s_round.differed = static_cast<int>(differ.size());
+    s_round.asked.insert(differ.begin(), differ.end());
+    s_round.stage = 2;
+    s_round.sentAt = std::chrono::steady_clock::now();
+    s_syncDirty.clear();
+    // The block numbers, a few thousand characters at most on the largest map; cut anyway.
+    std::vector<int> part;
+    size_t chars = 0;
+    for (size_t i = 0; i < differ.size(); ++i) {
+        part.push_back(differ[i]);
+        chars += std::to_string(differ[i]).size() + 1;
+        if (chars > kSyncChars || i + 1 == differ.size()) {
+            Message q("natBlockReq");
+            q.SetInt("id", id).SetInt("half", half).Set("blocks", NatureSync::JoinInts(part));
+            Queue(q);
+            part.clear();
+            chars = 0;
+        }
+    }
+}
+
+void TakeBlocks(const Message& m) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    Map* map = TheMap();
+    int64_t id = 0, half = -1;
+    if (g == nullptr || g->m_entityList == nullptr || map == nullptr || s_round.stage != 2 ||
+        !m.GetInt("id", id) || id != s_round.id || !m.GetInt("half", half) || half != 1 - s_seat)
+        return;
+    NatureSync::BlockMessage b;
+    b.tmpls = m.GetOr("tmpls", "");
+    b.list = m.GetOr("list", "");
+    b.done = m.GetOr("done", "");
+    std::map<int, std::vector<NatureSync::Plant>> got;
+    std::vector<int> done;
+    if (!NatureSync::UnpackBlocks(b, map->size, got, done)) {
+        LogSync("a block list from the neighbor is malformed; asking again later");
+        s_round = SyncRound();
+        ScheduleSync(kSyncEverySeconds);
+        return;
+    }
+    // Only what was asked for, on the half that was asked about.
+    for (auto& kv : got) {
+        if (s_round.asked.count(kv.first) == 0) continue;
+        std::vector<NatureSync::Plant>& into = s_round.partial[kv.first];
+        for (NatureSync::Plant& p : kv.second)
+            if (NatureSync::HalfOf(p.cell, map->size) == half) into.push_back(std::move(p));
+    }
+    std::set<int> ready;
+    for (int block : done)
+        if (s_round.asked.count(block)) ready.insert(block);
+    std::map<int, std::vector<NatureSync::Plant>> herePlants;
+    std::map<int, std::vector<ComponentEntity*>> hereEnts;
+    std::set<int> busy;
+    if (!ready.empty()) CollectHalf(static_cast<int>(half), nullptr, &ready, &herePlants, &hereEnts, &busy);
+    for (int block : ready) {
+        s_round.asked.erase(block);
+        const std::vector<NatureSync::Plant> owner = std::move(s_round.partial[block]);
+        s_round.partial.erase(block);
+        // Changed here since the request, or a resource of this town's on its way out: the next round.
+        if (s_syncDirty.count(block) || busy.count(block)) {
+            ++s_round.skipped;
+            --s_round.differed;
+            continue;
+        }
+        const NatureSync::Mend mend = NatureSync::PlanMend(herePlants[block], owner);
+        for (size_t idx : mend.remove) {
+            ComponentEntity* e = hereEnts[block][idx];
+            if ((e->_entityFlags >> 10) & 1) continue;
+            s_quiet.insert(e);
+            g->m_entityList->QueueDestroy(&e);
+            ++s_round.removed;
+        }
+        bool cannot = false;
+        for (const NatureSync::Plant& p : mend.add) {
+            const float progress = p.prog >= 0 ? static_cast<float>(p.prog) / 1000.0f : 0.0f;
+            switch (PlantAt(p.cell, p.tmpl, p.grp, p.var, progress)) {
+            case Planted::kYes:
+                ++s_round.added;
+                continue;
+            case Planted::kTakenByNature:   // another resource there, perhaps one just removed: next round
+                ++s_round.waiting;
+                continue;
+            case Planted::kTaken:
+            case Planted::kNotAPlant:
+            case Planted::kNoTemplate:
+                break;
+            }
+            cannot = true;
+            ++s_round.blocked;
+            if (s_round.blockedByTmpl.size() < 32 || s_round.blockedByTmpl.count(p.tmpl))
+                ++s_round.blockedByTmpl[p.tmpl];
+        }
+        // What cannot be put here stays as it is until either copy of the block changes.
+        if (cannot) {
+            NatureSync::Settled st;
+            st.owner = s_round.ownerSums[block];
+            s_syncSettled[block] = st;
+        }
+    }
+    s_natIndexFrame = ~0ull;   // the mend planted and removed: ApplyNat's index is built again
+    if (s_round.asked.empty()) FinishRound();
+}
+
+}  // namespace
+
+void SetPeerOnline(bool online) {
+    // Arrived (perhaps again, on a new line while its old one was still counted) or gone: a round in
+    // flight went with the old line. The next one starts a little after the arrival.
+    s_round = SyncRound();
+    if (online) ScheduleSync(kSyncFirstSeconds);
+    s_peerOnline = online;
+}
+
 void Tick(Link* link, uint64_t frame) {
     if (!s_on || link == nullptr) return;
     s_frame = frame;
@@ -1082,6 +1578,7 @@ void Tick(Link* link, uint64_t frame) {
         LogFingerprint();
         LogNature();
     }
+    SyncTick(link);
     // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
     // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {
@@ -1152,6 +1649,9 @@ void OnWelcome() {
     // The relay sends the neighbour's land as it stands (claimBlock); land it gave up while the line
     // was down sent no `released` here.
     if (!s_peer.empty()) std::fill(s_peer.begin(), s_peer.end(), 0);
+    // A round in flight went with the old line: the next one starts a little after this join.
+    s_round = SyncRound();
+    s_syncScheduled = false;
 }
 
 void OnJoined(Link* link) {
@@ -1178,7 +1678,8 @@ uint64_t WaitingGeneration() {
 void SaveWaiting(SavedState& s) {
     s.mapWaiting.clear();
     s.mapWaiting.reserve(s_pending.size());
-    for (const Message& m : s_pending) s.mapWaiting.push_back(m.Encode());
+    for (const Message& m : s_pending)
+        if (m.type == "road" || m.type == "nat") s.mapWaiting.push_back(m.Encode());   // not the sync's
     s.mapUnbuilds = s_unbuildQueue;
     s.mapClaims = s_claimQueue;
     s.mapReleases = s_releaseQueue;
@@ -1282,6 +1783,10 @@ bool OnMessage(const Message& m, std::string* notice) {
     if (m.type == "road") { ApplyRoad(m); return true; }
     if (m.type == "nat") { ApplyNat(m); return true; }
     if (m.type == "natBatch" || m.type == "roadBatch" || m.type == "roadsOff") { ApplyBatch(m); return true; }
+    if (m.type == "natSyncReq") { AnswerDigest(m); return true; }
+    if (m.type == "natBlockReq") { AnswerBlocks(m); return true; }
+    if (m.type == "natDigest") { TakeDigest(m); return true; }
+    if (m.type == "natBlock") { TakeBlocks(m); return true; }
     return false;
 }
 

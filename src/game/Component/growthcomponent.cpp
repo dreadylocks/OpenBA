@@ -37,7 +37,7 @@
 #include "object/Internal.h"   // ENDGAME B.3.3 step 6B
 #include "system/Value.h"   // ENDGAME B.3.4b System caller batch
 #include "Component/exe_bodies.h"
-#include "ext/neighbour/shared_map.h"   // EXT SEAM (NOT RETAIL, ext.neighbour): shared spreading
+#include "ext/neighbour/shared_map.h"   // EXT SEAM (NOT RETAIL, ext.neighbour): shared spreading and plant ends
 #include "Player/exe_bodies.h"   // PlayerPath_CharComp_f5d0 (0x14009f5d0), the spawn placement test
 
 // ============================================================
@@ -113,6 +113,15 @@ static void DoHarvestReset(GrowthComponent* comp, const Map* resourceMgr, float 
 // ============================================================
 // GrowthComponent::Update (vtable slot [9], 0x140120050)
 // ============================================================
+
+// EXT SEAM (NOT RETAIL, ext.neighbour): on a shared map a plant's end by itself is decided by one game
+// (shared_map.h DecidesNature); the other copy keeps the plant until that game's removal arrives.
+// Always true outside a shared map.
+static bool PlantEndsHere(GrowthComponent* comp) {
+    const Map* map = GameUpdateLoop::_singleton->m_game;
+    const int cell = comp->GetResourceIndex();
+    return Neighbour::SharedMap::DecidesNature(cell % map->size, cell / map->size);
+}
 
 // Step-2 body-init (vtable slot [4], +0x20, original 0x1401206f0). Forward-declared
 // here so the Update guard can lazily invoke it if StartupComponents did not run.
@@ -529,7 +538,8 @@ void GrowthComponent::Update(const System::Time* time) {
             // Check entity doesn't have bit 20 set
             if ((resource.Get()->_flags >> 0x14 & 1) == 0) {
                 // Check world flag (bit 10 of world+0xD0)
-                if ((GameUpdateLoop::_singleton->m_gameFlags >> 10 & 1) == 0) {
+                // EXT SEAM (NOT RETAIL, ext.neighbour): PlantEndsHere, true outside a shared map.
+                if ((GameUpdateLoop::_singleton->m_gameFlags >> 10 & 1) == 0 && PlantEndsHere(this)) {
                     // Clamp growth to 1.0
                     float harvestAmount = (newGrowth <= fOne) ? newGrowth : fOne;
 
@@ -542,7 +552,7 @@ void GrowthComponent::Update(const System::Time* time) {
                 }
             }
         }
-    } else {
+    } else if (PlantEndsHere(this)) {   // EXT SEAM (NOT RETAIL, ext.neighbour): true outside a shared map
         // Growth went negative -- do full harvest/reset
         float configResourceScale = cfg->_f40;
         DoHarvestReset(this, resourceMgr, configResourceScale);

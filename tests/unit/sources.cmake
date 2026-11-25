@@ -82,6 +82,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/link.cpp                  # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/lobby.cpp                 # ext_neighbour_test.cpp (NEIGHBOUR_TOWNS M2)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/continents.cpp            #   the Continents map's shape (§12)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/nature_sync.cpp           # ext_neighbour_sync_test.cpp (mending the shared nature)
   ${CMAKE_SOURCE_DIR}/src/platform/common/websocket_frames.cpp    # websocket_frames_test.cpp (the Linux WebSocket seam's wire format)
   ${CMAKE_SOURCE_DIR}/src/diag/drive_script.cpp                  # drive_script_test.cpp (BANISHED_DRIVE's input script)
   ${CMAKE_SOURCE_DIR}/src/ext/crash_report/report.cpp            # ext_crash_report_test.cpp (ext.crash_reports)
