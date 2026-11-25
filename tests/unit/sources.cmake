@@ -141,6 +141,11 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/engine/system/value_types.cpp           # random_test.cpp: the real System::Random (MT19937); the erosion tests draw from it too
   ${CMAKE_SOURCE_DIR}/src/engine/system/timer.cpp                 #   value_types.cpp's System::Time bodies call Timer::SecondsToTicks
   ${CMAKE_SOURCE_DIR}/src/engine/io/filename_extension.cpp        # filename_test.cpp: the real Filename::GetPathExtension body
+  ${CMAKE_SOURCE_DIR}/src/engine/io/package_file_read.cpp         # package_header_test.cpp: the real PackageFile::ReadPackfile
+  ${CMAKE_SOURCE_DIR}/src/engine/io/compressed_stream_open.cpp    #   CompressedStream::Open / SetWindowCount
+  ${CMAKE_SOURCE_DIR}/src/engine/io/filesystem_openfile.cpp       #   FileSystem::OpenFile / ReadFile / PlatformOpenFile
+  ${CMAKE_SOURCE_DIR}/src/engine/io/packfile_fold_index.cpp       #   OpenFile's PackIndexFind
+  ${CMAKE_SOURCE_DIR}/src/engine/io/memory_stream.cpp             #   the MemoryStream the directory blob is read through
   # ext_sheet_builder_test.cpp (block RSCSPRITE, KITFREE.md): the packer and the SpriteSheet fill.
   # (The ported writer family cannot join the host build: ui_resources_abi_test.cpp and
   # b39_io_classes_test.cpp define SpriteSheet's slots and the encodings' / BinaryWriter's bodies
