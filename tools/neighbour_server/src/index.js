@@ -1181,6 +1181,9 @@ export class Room {
     if (this.socketsFor(a.seat).some((s) => s !== ws)) return;
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "peer", name: a.name, online: false });
     await this.publish(a.room, await this.meta());
+    // The last line out: what waits for the write-back goes now, since an idle room can be evicted before
+    // its alarm (the nature keys wait up to a minute), and the record is what a returning town reads.
+    if (this.ctx.getWebSockets().every((s) => s === ws)) await this.store.flush();
   }
 }
 

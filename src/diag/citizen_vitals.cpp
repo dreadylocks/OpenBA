@@ -71,13 +71,13 @@ void CitizenVitals_Tick(GameUpdateLoop* gameWorld) {
         const float age    = c->age;        // +0x3C
         const float maxAge = c->maxAge;     // +0x40
         const float hunger = c->hunger;     // +0x44
-        const float cold = c->coldness;   // +0x48
+        const float cold   = c->coldness;   // +0x48
         if (live == 0) maxAgeOf0 = maxAge;
         ++live;
         ageSum += age; hungerSum += hunger; coldSum += cold;
         if (age > ageMax)       ageMax = age;
         if (hunger > hungerMax) hungerMax = hunger;
-        if (cold > coldMax) coldMax = cold;
+        if (cold > coldMax)     coldMax = cold;
 
         // "Frozen" has two very different causes and this separates them:
         //   busy == 0 every sample  -> the AI never issues an action at all
