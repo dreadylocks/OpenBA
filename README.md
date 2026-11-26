@@ -26,6 +26,8 @@ With AO and MSAA enabled on 10x, OpenBA  (left) performs 100fps better than reta
 > OpenBA has no game assets, shaders, sounds, models or .rsc resource files.  
 > At a baseline it needs the retail 1.0.7 `WinData/*.pkg` packages.  
 > Grab a zip from releases, extract it to your banished folder, then run OpenBA's executable.  
+> Releases after v1.1.1 then update themselves: the game downloads each new release in the background
+> and installs it the next time you start it (`docs/fork/AUTO_UPDATE.md`; turn it off under Extensions).  
 > The GOG and Steam versions should both work for data.  
 
 ## Project status

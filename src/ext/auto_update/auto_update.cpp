@@ -284,6 +284,15 @@ int LaunchVersioned(const StagingState& st, bool enabled) {
     const fs::path bundle = s_dir / Staging::Path(plan.run) / PU::ProgramName();
     const fs::path engine = bundle / "Contents" / "MacOS" / "OpenBA-engine";
     const fs::path airconv = bundle / "Contents" / "Frameworks" / "libairconv.dylib";
+    // Never hand over to this very program (a build whose folder name and OPENBA_VERSION disagree
+    // would otherwise exec itself for ever).
+    {
+        std::error_code ec;
+        if (fs::weakly_canonical(Staging::Path(PU::SelfBundle()), ec) == fs::weakly_canonical(bundle, ec)) {
+            LaunchLog("this program is " + plan.run + "'s bundle but says it is " + kMine + ": not handing over");
+            return -1;
+        }
+    }
     if (plan.writePending) Staging::WriteLine(s_dir, "pending", plan.run);
     LaunchLog("handing over to " + plan.run);
     std::string error;

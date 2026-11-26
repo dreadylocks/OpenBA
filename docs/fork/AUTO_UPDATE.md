@@ -2,7 +2,7 @@
 
 Opened 2026-11-25. The design below was agreed with the maintainer on 2026-11-25: signed manifests,
 the Mac builds and publishes both required platforms, Linux only if cheap. It is built as described:
-extension `ext.auto_update`, code in `src/ext/auto_update/`. §14 records how it was tested.
+extension `ext.auto_update`, code in `src/ext/auto_update/`. §12 records how it was tested.
 
 **The goal.** A player installs one update-capable build by hand: the zip from the releases page,
 with the usual first-run prompts (Gatekeeper, SmartScreen). After that, getting a new build takes
@@ -271,22 +271,44 @@ updates to it.
   framing (a length, chunked, or until the close) and the redirects are one shared, unit-tested
   reader, `src/platform/common/http_reader.cpp`. That made Linux cheap, so it is included.
 
-## 12. How it is tested
+## 12. How it was tested (2026-11-25)
 
-- **Unit (`tests/unit/`, every platform):** the version compare; manifest parsing (missing, extra,
-  malformed and duplicate keys; wrong platform; future format); the signature check (a test key
-  pair, a flipped byte); SHA-256 against the NIST vectors; the AtLaunch decision table (ready, newer,
-  bad, pending, off, not writable); the staging state machine.
-- **Local feed on the Mac:** build 1.2.0 and 1.2.1. Install 1.2.0 the way a player does (quarantine
-  set as a browser would, approved by hand). Serve 1.2.1's manifest and zip from a local server
-  (`update.feed=http://127.0.0.1:<port>/`). Then check: download, no quarantine attribute, installed
-  at restart, Restart now resumes the town, a 1.2.2 built to fail at boot is rolled back and marked
-  bad, `ext.auto_update=0` stops it all.
-- **Windows:** cross-built on the Mac for every change. Running it needs the PC: the same local-feed
-  test, with the supervisor's rollback.
-- **End to end, one release to the next:** publish v1.2.0 (the first update-capable build, Windows
-  and Mac), install it from the releases page on both machines, publish v1.2.1, restart, and both
-  are on 1.2.1. **This publishes two real releases, so it waits for your OK.**
+- **Unit (`tests/unit/auto_update_test.cpp`, `http_reader_test.cpp`; every platform).** Version
+  parsing and the semver compare; SHA-256 against the FIPS 180-4 vectors, streamed across block
+  edges; Ed25519 against RFC 8032's first vector; the manifest round trip, every flipped byte, CRLF,
+  refused shapes (a key twice, no signature, a future format, a bad hash, size or address, a control
+  character); both launch models' decisions (promote, hand over, updates off, not newer, failed
+  before, incomplete, rollback to the previous build and to the player's own); the staging files; the
+  HTTP reader fed in pieces of every size (length, chunked, until-close), its limits and redirects.
+  On the Mac the whole suite passed: 1487 tests, 0 failures (18 skipped for game data the Mac lacks).
+- **Local feed on the Mac** (scratch builds 1.2.0 and 1.2.1 with the release feed compiled in,
+  `update.feed` pointed at a local server, each run in its own launcher `--run-dir`):
+  1. 1.2.0 checked 20 s after boot, downloaded 1.2.1 (13 MB), verified it and staged it. Nothing in
+     the staged bundle carries `com.apple.quarantine` (only `com.apple.provenance`, which every
+     locally built file here has too), and `codesign --verify --deep --strict` passes.
+  2. Quit and start again: 1.2.0's AtLaunch installed 1.2.1 and handed over; the process ran
+     `Updates/1.2.1/OpenBA.app`'s engine and converter, reached its menu (`started` = 1.2.1) and
+     found itself up to date.
+  3. Rollback: a "1.2.2" whose engine exits with code 3 was published, downloaded and handed over
+     to; it died. The next start marked 1.2.2 bad, went back to 1.2.1, showed
+     "OpenBA 1.2.2 did not start, so this is 1.2.1 again." on the build line, and 1.2.1 refused to
+     download 1.2.2 again.
+  4. Restart to update in game: the button appeared in the pause menu, the build line said
+     "OpenBA 1.2.1 is ready: restart to install it" and the event log announced it. The click saved
+     `Auto.sav`, restarted the same process (execv), installed 1.2.1, handed over, and 1.2.1 loaded
+     the town back (the same buildings, the build line v1.2.1).
+  5. Restart to update from the front-end menu, where the button was added by the menu tick when
+     the download finished with the menu already open: restarted straight into 1.2.1.
+  6. `ext.auto_update=0`: no check, no download, no staging folder.
+  The menus were driven through `BANISHED_DRIVE` and seen through the game's own screenshots.
+- **Windows:** cross-built on the Mac (mingw-w64, release) with every change; not yet run. The same
+  local-feed test, with the supervisor's rollback, needs the PC.
+- **Linux:** the twins compile (a syntax check on the Mac with the OpenSSL headers); not built or run
+  on Linux here. CI's Linux job builds and runs the unit tests when Actions is on.
+- **Not yet done: one real release to the next.** Publish v1.2.0 (the first update-capable build),
+  install it from the releases page in a browser on both machines (this is also the real test of the
+  quarantine and Mark-of-the-Web claims in §9), publish v1.2.1, restart, and both are on 1.2.1. This
+  publishes two real releases, so it waits for the maintainer's go-ahead.
 
 ## 13. Considered and not taken
 

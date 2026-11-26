@@ -2,7 +2,8 @@
 // (auto_update.h; docs/fork/AUTO_UPDATE.md §7).
 //
 // - The main menu (front end and pause menu) gets a Restart to update button while a build is
-//   ready, and the build line says so (or says what a rollback did).
+//   ready (when it opens, or at once in the front end when the download ends while it is open), and
+//   the build line says so (or says what a rollback did).
 // - In game, the event log says when a build has downloaded.
 // - Restart now: in the front end it quits and AtExit starts the game again. In game it first saves
 //   with the retail autosave's sequence (the dev loop harness's, src/diag/devloop_harness.cpp: slot 2,
@@ -77,6 +78,7 @@ ResumePhase  s_resume = ResumePhase::Off;
 std::string  s_resumeName;
 int          s_resumeFrames = 0;
 std::string  s_lastRefusal;
+const void*  s_buttonTriedOn = nullptr;   // the menu AttachMenuButton last ran on with a build ready
 
 UI::Element* Find(UI::DialogInstance* d, const char* name) {
     return d->FindElement(System::String(name)).Get();
@@ -216,6 +218,8 @@ void AttachMenuButton(MainMenuDialog* menu) {
     if (menu == nullptr || menu->_ui == nullptr || menu->_dialog == nullptr) return;
     if (Ext::GateProfileForced()) return;   // the gate's faithful run: the menu as retail's
     if (Internal::ReadyVersion().empty()) return;
+    if (s_buttonTriedOn == menu) return;   // once per menu (OnOpened, or MenuTick when the build came later)
+    s_buttonTriedOn = menu;
     UI::Element* mod = Find(menu, "buttonMod");
     UI::Element* quit = Find(menu, "buttonQuit");
     UI::Element* anchor = mod != nullptr ? mod : quit;
@@ -269,6 +273,12 @@ void OnRestartButton(MainMenuDialog* menu) {
 void MenuTick(MenuDialogLoopT* menuLoop) {
     if (!s_started) MarkStarted();
     if (menuLoop == nullptr) return;
+    // A build that finished downloading while the front-end menu was already open: its button now.
+    // The menu loop's dialog is always the MainMenuDialog (MenuDialogLoopT::CreateLoopDialog).
+    if (menuLoop->_dialogInstance != nullptr && menuLoop->_dialogInstance != s_buttonTriedOn &&
+        !Internal::ReadyVersion().empty()) {
+        AttachMenuButton(static_cast<MainMenuDialog*>(menuLoop->_dialogInstance));
+    }
     if (s_resume == ResumePhase::WaitMenu || s_resume == ResumePhase::WaitList) TickResume(menuLoop);
 }
 
