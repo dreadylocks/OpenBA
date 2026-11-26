@@ -831,3 +831,37 @@ disagreed (her old buildings still showed on the Mac).
   "the loaded town's roads again: 28 tile(s) claimed, 14 finished sent". selftest 55 checks.
 - **Not done**: "when you lay a road you can't tell" (the planned road not visible after the drag) is
   not looked into; the friend's crash needs her `standalone_crash.log`.
+
+---------------------------------------------------------------------------------------------
+
+## 14. The restate (2026-11-26)
+A change sent down a line that died without closing was lost for good. A demolition, land given back
+or a road change never reached the relay, and a removal the relay sent never reached the town. The other
+map kept a building that was gone, or held land that was free, until one town loaded a save or started
+over. Both machines lost their line once in the hour at 10x (TWO_PLAYER_TESTING.md, 2026-11-25); only
+the nature sync mended anything then, because neither town was building.
+- **The game notices a dead line in 60 s** (`link.h` `deadMs`): it pings every 25 s, busy or not, and
+  the relay's auto-response answers at once, so 60 s of silence means the line is dead. It closes it and
+  connects again.
+- **Every join replays the neighbour whole.** Mirrors (`mirrorEnd`) and land (`claimBlock`) already
+  were. Roads now end with `roadsEnd` `count`, and the game takes up the neighbour's road tiles it holds
+  that the replay did not name (on land the neighbour holds, the same test ScanRoads uses).
+- **The town restates itself** (`restate.h`, NEIGHBOUR_PROTOCOL.md `inv` / `want`): 15 s after every
+  welcome and once a minute after that, it sends its whole list (structures with their stages, finished
+  road tiles, land). The relay takes down what its record holds and the list does not name, telling the
+  neighbour, and gives back a taken-down building's land. It claims free land the list names, and asks
+  with `want` for what it lacks or holds at another stage. A list that matches writes nothing (no storage
+  rows), so the once-a-minute check costs reads only. Road tiles keep their land once laid, as before. A
+  relay eviction that lost a few seconds of records is put right within a minute too.
+- Checked on the Mac (2026-11-26): the game, a relay in the middle that can silence a line, and a
+  scripted neighbour, on a local relay:
+  - The line was silenced while the neighbour took up 2 road tiles and removed its house. The game said
+    "the relay went quiet" 60 s after it last heard anything, rejoined in 2 s, removed the house
+    (mirrorEnd) and took up the 2 tiles (roadsEnd 3), keeping the 3 that stand.
+  - A house and a road were planted in the relay's record under the game's seat, which is what a lost
+    demolition and a lost road removal look like. The game's next list took both down within a minute:
+    the neighbour got `unbuild`, `roadsOff` and the house's land `released`.
+  - An older stage of one of the game's buildings, planted the same way, was asked for (`want`) and sent
+    again.
+  - relay selftest 81 checks; unit tests for the list's parts, row runs, stale roads, the `want` lists
+    and the dead-line check.

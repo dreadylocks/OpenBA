@@ -533,6 +533,7 @@ void OnIncoming(Incoming& in) {
     case Incoming::Kind::Disconnected:
         s_joined = false;
         s_peerOnline = false;
+        SharedMap::OnLineDown();
         if (in.detail.empty()) break;   // our own Stop
         fprintf(stderr, "[Neighbour] offline: %s\n", in.detail.c_str());
         if (!s_announcedOffline) {

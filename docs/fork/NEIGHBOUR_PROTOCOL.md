@@ -95,6 +95,7 @@ The sender resends it on every join until it gets `stored`.
 | `unbuild` | `id` | it is gone |
 | `road` | `cell`, `type`, `tt` (ints), `tmpl` (path); or `cell`, `off: true` | a finished road tile, or one taken up |
 | `nat` | `op` (`rm` \| `add`), `cell` (int), `tmpl` (path) | a natural resource felled / mined out, or a sapling planted |
+| `inv` | `gen` (int, a new one per list), `part` (int from 0), `last` (bool, on the final part), `dim` (int, on part 0: the map's side, so a road cell's tile can be read), and at most 12,000 characters of lists: `b` = `id:built;...` (every structure and the stage last sent), `r` = `cell:type;...` (every finished road tile on land the neighbour does not hold), `l` = `x,y,w,h;...` (its land: the structures' footprints and every road tile, finished or not, on land the neighbour does not hold) | the restate (`restate.h`): the town's whole list, 15 s after every `welcome` and once a minute after that (once its own queued changes have gone, at most 2 minutes late). The relay puts its record right from it: a structure the record holds and the list does not name is taken down (`unbuild` to the neighbour, its footprint `released` where the list does not name it), and so is a road tile, except one on the neighbour's land (the list cannot name those: a tile both towns laid a road on belongs to whoever won the land) or when `dim` is missing (`roadsOff`); free land the list names is claimed (`claims`); what the list names that the record lacks, or holds at another stage or road type, is asked for with `want`, except a building the relay refused for standing on the neighbour's land. A part out of turn drops the list; a list that matches writes nothing. A change sent down a line that died without closing is put right this way |
 
 ### `pause`
 `on` (bool): this town paused (`true`) or carried on (`false`): the toolbar's pause / play or the pause
@@ -116,7 +117,10 @@ characters: a town of more than about 300 villagers sends its first ~300 (walker
 lets one no message names for 4 s go.
 
 ### `ping`
-Every 25 s of silence; answered `pong` (without waking the room).
+Every 25 s, whatever else the town is sending; answered `pong` at once (without waking the room). A game
+that hears nothing on its line for 60 s takes it as dead (it died without closing: writes still go, and the
+OS takes minutes to notice), closes it and connects again (`link.h` `deadMs`), so the join's replay and the
+restate put right what went down it.
 
 ## Relay -> game
 
@@ -135,7 +139,8 @@ Every 25 s of silence; answered `pong` (without waking the room).
 | `claimed` | `id`, `ok` (bool), `why` | the answer to a `claim` |
 | `claims` / `released` | `seat`, `rects` | the neighbour claimed / released land |
 | `claimBlock` | `bx`, `by`, `size`, `owner` (one char per tile: the neighbour's seat digit or `.`) | the neighbour's land, on join |
-| `build` / `unbuild` / `road` / `nat` | as above | the neighbour's; on join: every building, then `mirrorEnd` `count`, every road, the queued `nat`s |
+| `build` / `unbuild` / `road` / `nat` | as above | the neighbour's; on join: every building, then `mirrorEnd` `count`, every road (`roadBatch`), the roads taken up while this town was away (`roadsOff`), then `roadsEnd` `count`, the queued `nat`s. A game drops the mirrors the list did not name at `mirrorEnd`, and at `roadsEnd` (when `count` road tiles arrived) takes up the neighbour's roads it holds that the list did not name: both were taken down while its line was down |
+| `want` | `b` = ids, or `r` = cells, comma-separated (at most 12,000 characters a message) | the answer to an `inv`: the record lacks these of the town's, or holds them at another stage or road type; the town sends their `build` / `road` again |
 | `error` | `why`, `fatal` (bool, optional) | a problem; `fatal` = refused, the line closes, do not retry |
 | `pong` | | |
 
@@ -161,7 +166,8 @@ the save, and the lobby's Join, send the one from that file. The file never leav
 ## Not yet (agreed in issue #1, planned after this version works between two machines)
 
 - A **harvest lease**: a town asks the relay before felling a tree, so two towns cannot fell the same one.
-- A periodic **repair snapshot**: each town's full building, road and resource state now and then, so
-  drift (a missed message, saplings growing apart) is put right.
+- A periodic **repair snapshot**: now done in two parts. Buildings, roads and land: the restate (`inv` /
+  `want`, `roadsEnd`, the 60 s dead-line check). Natural resources: the nature sync (`natSyncReq` and the
+  rest, `nature_sync.h`). Both go through the relay rather than straight between the two games.
 - The reference relay the working group proposes (`unbanished-server`, a self-hostable native server) is
   not used yet; its spec is not written. The Worker relay stays.

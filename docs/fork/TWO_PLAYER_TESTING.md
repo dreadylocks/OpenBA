@@ -249,7 +249,7 @@ Found and fixed during the run:
   the button already up.
 - Speed steps are 1, 2, 5 and 10x, and play resumes at the last speed: "play" then one "faster" from a 5x
   pause gives 10x, not 2x.
-- A town whose connection dies without a close stays "here" on the other side until it reconnects (the PC's
+- (Fixed 2026-11-26, NEIGHBOUR_TOWNS.md §14: the game drops a line quiet for 60 s, and the restate puts right what went down it.) A town whose connection dies without a close stays "here" on the other side until it reconnects (the PC's
   18:12 drop showed on the Mac only as "PcTown has arrived" later). Changes sent to it meanwhile are lost to it,
   and the sync mended them after the reconnect. The relay could notice a stale socket from its pings.
 - `wrangler tail` samples a busy room's events, so its `[rows]` and alarm lines are not a count; measure a rate

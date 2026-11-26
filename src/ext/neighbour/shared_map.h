@@ -111,6 +111,8 @@ void Tick(Link* link, uint64_t frame);
 // what this game holds of them from before is forgotten at the end of that list (mirrorEnd).
 void OnWelcome();
 void OnJoined(Link* link);
+// The line to the relay dropped: no list goes until the next welcome (restate.h).
+void OnLineDown();
 // A loaded game's first join (hello `reload`): the relay forgets what this town's seat held, since the
 // save may be older than it. Once the neighbour's land is in (its `mirrorEnd`), this town's roads go
 // again: a claim for each road tile of its own, a road message for each finished one.

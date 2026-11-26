@@ -86,6 +86,11 @@ const kMaxNatQueue = 20_000;
 // not come back from the older record.
 const kNatShardBits = 12;
 const kMaxCell = kMaxMapDim * kMaxMapDim;
+// The restate (onInv): a town's whole list of what it holds, in parts of at most kInvChars a list (the game
+// keeps a part's lists under 12,000), at most kMaxInvParts parts and kMaxInvTiles tiles of land.
+const kInvChars = 15000;
+const kMaxInvParts = 512;   // room for kMaxRoadCells road tiles and kMaxBuildings structures at kInvChars a part
+const kMaxInvTiles = 250_000;
 // Flood guard: at most this many messages per socket in kWindowMs.
 // The game paces its shared-map messages to 40 a second (shared_map.cpp kSendRate), a burst of 120.
 const kBurst = 600;
@@ -125,6 +130,26 @@ function isWebSocketUpgrade(request) {
 function clean(text, max) {
   if (typeof text !== "string") return "";
   return text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+// Tiles (y * kMaxMapDim + x) as rectangles, a row's run of them in one, at most kMaxClaimRects a string
+// (the game takes at most 64 rectangles a message).
+function tileRuns(tiles) {
+  const sorted = [...tiles].sort((p, q) => p - q);
+  const out = [];
+  let rects = [];
+  for (let i = 0; i < sorted.length;) {
+    let j = i + 1;
+    while (j < sorted.length && sorted[j] === sorted[j - 1] + 1 && sorted[j] % kMaxMapDim !== 0) j++;
+    rects.push(`${sorted[i] % kMaxMapDim},${Math.floor(sorted[i] / kMaxMapDim)},${j - i},1`);
+    if (rects.length === kMaxClaimRects) {
+      out.push(rects.join(";"));
+      rects = [];
+    }
+    i = j;
+  }
+  if (rects.length > 0) out.push(rects.join(";"));
+  return out;
 }
 
 async function sha256Hex(text) {
@@ -394,6 +419,10 @@ export class Room {
     this.ctx = ctx;
     this.env = env;
     this.store = new BufferedStore(ctx);
+    this.inv = new Array(kSeats).fill(null);   // a town's list coming in, part by part (onInv)
+    // Buildings refused for standing on the neighbour's land, per seat: the restate does not ask for them
+    // (they would be refused again, and the player told, once a minute). Kept in memory only.
+    this.refused = Array.from({ length: kSeats }, () => new Set());
     // Pings are answered without waking the object (the hibernation API's auto-response).
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
   }
@@ -490,6 +519,7 @@ export class Room {
     if (msg.t === "unbuild") return this.onUnbuild(ws, a, msg);
     if (msg.t === "road") return this.onRoad(ws, a, msg);
     if (msg.t === "nat") return this.onNat(ws, a, msg);
+    if (msg.t === "inv") return this.onInv(ws, a, msg);
     if (msg.t === "pause") return this.onPause(ws, a, msg);
     if (msg.t === "speed") return this.onSpeed(ws, a, msg);
     if (msg.t === "walkers") return this.onWalkers(ws, a, msg);
@@ -701,6 +731,7 @@ export class Room {
         return true;
       });
       if (!clear) {
+        this.refused[a.seat].add(id);   // the restate does not ask for it again (onInv)
         this.send(ws, { t: "buildRefused", id, why: "your neighbor holds that land" });
         return;
       }
@@ -708,6 +739,7 @@ export class Room {
     const key = `mirror:${a.seat}`;
     const all = (await this.store.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
+    this.refused[a.seat].delete(id);
     all[id] = rec;
     await this.store.put(key, all);
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "build", ...rec });
@@ -830,6 +862,7 @@ export class Room {
         `${cell},${type},${tt},${idx(tmpls, tmpl)},${mat ? idx(mats, mat) : -1}`);
       this.send(ws, { t: "roadBatch", tmpls: [...tmpls.keys()].join("\n"), mats: [...mats.keys()].join("\n"), list: parts.join(";") });
     }
+    return rows.length;
   }
 
   // ---- shared natural resources (M3) -------------------------------------------------------------
@@ -989,6 +1022,212 @@ export class Room {
     this.send(ws, { t: "mirrorEnd", count: Object.keys(all).length });
   }
 
+  // ---- the restate: a town's whole list of what it holds ------------------------------------------
+  // A change sent down a line that died without closing never reached the room (a demolition, land given
+  // back, a road laid or taken up), and nothing would send it again: the neighbour would keep a building
+  // that is gone for good. So a town sends its whole list -- its buildings and their stages, its finished
+  // road tiles, its land -- a little after every join and once a minute (`inv`, in parts), and the room's
+  // record is put right from it. What the record holds and the list does not name is taken down, the
+  // neighbour told and a building's land given back (where the list does not name it); what the list names
+  // and the record lacks, or holds at another stage or road type, is asked for again (`want`); free land the
+  // list names is claimed. A list that matches the record writes nothing.
+  async onInv(ws, a, msg) {
+    const seat = a.seat;
+    if (!Number.isInteger(msg.gen) || !Number.isInteger(msg.part) || msg.part < 0 || msg.part >= kMaxInvParts) {
+      return this.fail(ws, "bad inventory", false);
+    }
+    if (msg.part === 0) {
+      // What the record holds as the list begins: a building or road that arrives while the list does is
+      // newer than the list, and stays.
+      const mirror = (await this.store.get(`mirror:${seat}`)) || {};
+      const roads = (await this.store.get(`roads:${seat}`)) || {};
+      // `dim`, the map's side, turns a road cell into its tile (0: unknown, no road is taken up).
+      const dim = Number.isInteger(msg.dim) && msg.dim > 0 && msg.dim <= kMaxMapDim ? msg.dim : 0;
+      this.inv[seat] = { gen: msg.gen, next: 0, dim, builds: new Map(), roads: new Map(), tiles: new Set(),
+                         heldBuilds: Object.keys(mirror), heldRoads: Object.keys(roads) };
+    }
+    const acc = this.inv[seat];
+    // A part out of turn (the object restarted mid-list, or a newer list began): this list is dropped; the
+    // next one, a minute on, is whole.
+    if (!acc || acc.gen !== msg.gen || acc.next !== msg.part) {
+      this.inv[seat] = null;
+      return;
+    }
+    acc.next++;
+    if (!this.readInv(acc, msg)) {
+      this.inv[seat] = null;
+      return this.fail(ws, "bad inventory", false);
+    }
+    if (msg.last !== true) return;
+    this.inv[seat] = null;
+    await this.restate(ws, a, acc);
+  }
+
+  // One part's lists into `acc`: b = "id:built;...", r = "cell:type;..." (finished road tiles),
+  // l = "x,y,w,h;..." (land). -> false for anything malformed.
+  readInv(acc, msg) {
+    for (const f of ["b", "r", "l"]) {
+      if (msg[f] !== undefined && (typeof msg[f] !== "string" || msg[f].length > kInvChars)) return false;
+    }
+    for (const e of msg.b ? msg.b.split(";") : []) {
+      const i = e.indexOf(":");
+      const id = e.slice(0, i);
+      const built = Number(e.slice(i + 1));
+      if (i < 1 || !kBuildingId.test(id) || !Number.isInteger(built) || Math.abs(built) > 10_000_000) return false;
+      if (!acc.builds.has(id) && acc.builds.size >= kMaxBuildings) return false;
+      acc.builds.set(id, built);
+    }
+    for (const e of msg.r ? msg.r.split(";") : []) {
+      const n = e.split(":").map(Number);
+      if (n.length !== 2 || !Number.isInteger(n[0]) || n[0] < 0 || n[0] >= kMaxCell || !Number.isInteger(n[1]) ||
+          n[1] < 0 || n[1] > 254) return false;
+      if (!acc.roads.has(String(n[0])) && acc.roads.size >= kMaxRoadCells) return false;
+      acc.roads.set(String(n[0]), n[1]);
+    }
+    for (const e of msg.l ? msg.l.split(";") : []) {
+      const n = e.split(",").map(Number);
+      if (n.length !== 4 || n.some((v) => !Number.isInteger(v) || v < 0 || v > kMaxMapDim)) return false;
+      const [x, y, w, h] = n;
+      if (w < 1 || h < 1 || x + w > kMaxMapDim || y + h > kMaxMapDim || acc.tiles.size + w * h > kMaxInvTiles) return false;
+      for (let ty = y; ty < y + h; ty++) for (let tx = x; tx < x + w; tx++) acc.tiles.add(ty * kMaxMapDim + tx);
+    }
+    return true;
+  }
+
+  async restate(ws, a, acc) {
+    const seat = a.seat;
+    const peers = this.socketsFor(1 - seat);
+    // Buildings: taken down, or asked for.
+    const mkey = `mirror:${seat}`;
+    const mirror = (await this.store.get(mkey)) || {};
+    const down = acc.heldBuilds.filter((id) => id in mirror && !acc.builds.has(id));
+    const freed = [];
+    for (const id of down) {
+      const r = mirror[id];
+      if (r.tw > 0 && r.th > 0 && r.tw * r.th <= 4096) freed.push(r);
+      delete mirror[id];
+    }
+    if (down.length > 0) {
+      await this.store.put(mkey, mirror);
+      for (const p of peers) for (const id of down) this.send(p, { t: "unbuild", id });
+    }
+    const wantB = [...acc.builds]
+      .filter(([id, built]) => (!(id in mirror) || mirror[id].built !== built) && !this.refused[seat].has(id))
+      .map(([id]) => id);
+
+    // Road tiles: taken up (and kept as taken up, as onRoad does), or asked for. Not one on the neighbour's
+    // land: the town's list names only the roads on land the neighbour does not hold (its copy cannot tell
+    // its own road there from the neighbour's), so a tile both towns laid a road on, where the neighbour won
+    // the land, is not the town's to take up; taking it up would take up the neighbour's road too.
+    const rkey = `roads:${seat}`;
+    const roads = (await this.store.get(rkey)) || {};
+    const theirs = String(1 - seat);
+    const blocks = new Map();
+    const up = [];
+    for (const c of acc.heldRoads) {
+      if (!(c in roads) || acc.roads.has(c) || acc.dim === 0) continue;
+      const n = Number(c);
+      if ((await this.tileHolder(n % acc.dim, Math.floor(n / acc.dim), blocks)) === theirs) continue;
+      up.push(c);
+    }
+    if (up.length > 0) {
+      for (const c of up) delete roads[c];
+      await this.store.put(rkey, roads);
+      const cells = up.map(Number);
+      await this.noteRoadsOff(seat, cells, true);
+      if (peers.length > 0) {
+        for (let i = 0; i < cells.length; i += 1800) {
+          for (const p of peers) this.send(p, { t: "roadsOff", cells: cells.slice(i, i + 1800).join(",") });
+        }
+      } else {
+        await this.queueRoadOffs(1 - seat, cells);
+      }
+    }
+    const wantR = [...acc.roads].filter(([c, type]) => !(c in roads) || roads[c][0] !== type).map(([c]) => c);
+
+    // Land: what the list names and nobody holds is claimed; a taken-down building's footprint, where the
+    // list does not name it, is given back. (Road tiles keep their land once laid, as they always have: a
+    // copy of the land tells the neighbour's road from its own by who holds the tile.)
+    const mine = String(seat);
+    const claimed = await this.changeTiles(acc.tiles, (ch) => (ch === "." ? mine : null));
+    const give = [];
+    for (const r of freed) {
+      for (let y = r.ty; y < r.ty + r.th; y++) {
+        for (let x = r.tx; x < r.tx + r.tw; x++) {
+          const t = y * kMaxMapDim + x;
+          if (x >= 0 && y >= 0 && x < kMaxMapDim && y < kMaxMapDim && !acc.tiles.has(t)) give.push(t);
+        }
+      }
+    }
+    const released = await this.changeTiles(give, (ch) => (ch === mine ? "." : null));
+    for (const rects of tileRuns(claimed)) for (const p of peers) this.send(p, { t: "claims", seat, rects });
+    for (const rects of tileRuns(released)) for (const p of peers) this.send(p, { t: "released", seat, rects });
+
+    // What the town is to send again, in messages well under a frame.
+    for (const [field, list] of [["b", wantB], ["r", wantR]]) {
+      let part = [];
+      let chars = 0;
+      for (const v of list) {
+        if (chars + v.length + 1 > 12000) {
+          this.send(ws, { t: "want", [field]: part.join(",") });
+          part = [];
+          chars = 0;
+        }
+        part.push(v);
+        chars += v.length + 1;
+      }
+      if (part.length > 0) this.send(ws, { t: "want", [field]: part.join(",") });
+    }
+    if (down.length + up.length + claimed.length + released.length + wantB.length + wantR.length > 0) {
+      console.log(`[restate] room ${a.room}, seat ${seat}: ${down.length} building(s) taken down, ${up.length} road tile(s) ` +
+                  `taken up, ${claimed.length} tile(s) claimed, ${released.length} given back; asked again for ` +
+                  `${wantB.length} building(s), ${wantR.length} road tile(s)`);
+    }
+  }
+
+  // Who holds tile x, y: a seat's digit or "."; `cache` keeps the blocks read.
+  async tileHolder(x, y, cache) {
+    if (x < 0 || y < 0 || x >= kMaxMapDim || y >= kMaxMapDim) return ".";
+    const key = `claims:${Math.floor(x / kClaimBlock)}:${Math.floor(y / kClaimBlock)}`;
+    if (!cache.has(key)) cache.set(key, (await this.store.get(key)) || null);
+    const v = cache.get(key);
+    return v ? v[(y % kClaimBlock) * kClaimBlock + (x % kClaimBlock)] : ".";
+  }
+
+  // Claim tiles (y * kMaxMapDim + x) set to `to(char)` where it gives a char (null: left as it is); only
+  // blocks that change are written. -> the tiles changed.
+  async changeTiles(tiles, to) {
+    const byBlock = new Map();
+    for (const t of tiles) {
+      const key = `claims:${Math.floor((t % kMaxMapDim) / kClaimBlock)}:${Math.floor(Math.floor(t / kMaxMapDim) / kClaimBlock)}`;
+      if (!byBlock.has(key)) byBlock.set(key, []);
+      byBlock.get(key).push(t);
+    }
+    const changed = [];
+    let batch = {};
+    for (const [key, list] of byBlock) {
+      const v = (await this.store.get(key)) || ".".repeat(kClaimBlock * kClaimBlock);
+      const b = v.split("");
+      let any = false;
+      for (const t of list) {
+        const off = (Math.floor(t / kMaxMapDim) % kClaimBlock) * kClaimBlock + ((t % kMaxMapDim) % kClaimBlock);
+        const next = to(b[off]);
+        if (next === null || next === b[off]) continue;
+        b[off] = next;
+        any = true;
+        changed.push(t);
+      }
+      if (!any) continue;
+      batch[key] = b.join("");
+      if (Object.keys(batch).length === 100) {   // storage.put takes at most 128 keys at once
+        await this.store.put(batch);
+        batch = {};
+      }
+    }
+    if (Object.keys(batch).length > 0) await this.store.put(batch);
+    return changed;
+  }
+
   async onHash(ws, a, msg) {
     if (typeof msg.hash !== "string" || !/^[0-9a-fA-F]{1,32}$/.test(msg.hash)) return this.fail(ws, "bad world hash", false);
     const meta = await this.meta();
@@ -1106,8 +1345,11 @@ export class Room {
     if (meta.created) {
       await this.sendClaims(ws, seat);
       await this.sendMirror(ws, seat);
-      await this.sendRoads(ws, seat);
+      const roadCount = await this.sendRoads(ws, seat);
       await this.sendRoadQueue(ws, seat);
+      // Every road the neighbour holds is in: what else of theirs the town's copy still has was taken up
+      // while its line was down (the game takes those up; shared_map.cpp OnMessage "roadsEnd").
+      this.send(ws, { t: "roadsEnd", count: roadCount });
       await this.sendNatQueue(ws, seat);
       // A new game or a loaded save in this seat: its copy of the land may lack changes it once had.
       if (msg.fresh === true || msg.reload === true) {

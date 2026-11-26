@@ -9,6 +9,16 @@
 
 namespace Neighbour {
 
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+int64_t NowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+}
+
+}  // namespace
+
 void Link::Start(const Options& options) {
     if (worker_.joinable()) return;
     {
@@ -119,6 +129,7 @@ void Link::WorkerMain() {
             for (;;) {
                 const Transport::Recv r = raw->Receive(text);
                 if (r != Transport::Recv::Text) break;
+                heardMs_.store(NowMs());
                 Incoming in;
                 if (Parse(text, in.message)) Push(std::move(in));   // malformed: dropped
             }
@@ -129,28 +140,44 @@ void Link::WorkerMain() {
             cv_.notify_all();
         });
 
-        // The writer: the hello, then the queue, until the reader ends or Stop.
-        // A quiet line gets a ping every kPingMs, so idle-connection timeouts on the way
-        // (proxies, the relay's host) never see it as dead.
+        // The writer: the hello, then the queue, until the reader ends or Stop. A ping every pingMs,
+        // busy or not: idle-connection timeouts on the way (proxies, the relay's host) never see the line
+        // as dead, and its pong shows this end the line is alive (Options::deadMs).
+        heardMs_.store(NowMs());
+        Clock::time_point pingAt = Clock::now() + std::chrono::milliseconds(options_.pingMs);
+        bool quiet = false;   // nothing came for deadMs
         bool ok = t->Send(hello);
         while (ok) {
             std::string next;
             bool queued = false;   // `next` came off the queue (a ping did not)
             {
                 std::unique_lock<std::mutex> lock(mu_);
-                const bool woke = cv_.wait_for(lock, std::chrono::milliseconds(options_.pingMs), [this] {
+                const Clock::time_point heard{std::chrono::milliseconds(heardMs_.load())};
+                Clock::time_point wakeAt = pingAt;
+                if (options_.deadMs > 0 && heard + std::chrono::milliseconds(options_.deadMs) < wakeAt)
+                    wakeAt = heard + std::chrono::milliseconds(options_.deadMs);
+                cv_.wait_until(lock, wakeAt, [this] {
                     return stop_.load() || readerDone_ || !newest_.empty() || !outgoing_.empty();
                 });
                 if (stop_.load() || readerDone_) break;
-                if (woke && !newest_.empty()) {   // the newest villagers first, never resent
+                const Clock::time_point now = Clock::now();
+                const Clock::time_point heardNow{std::chrono::milliseconds(heardMs_.load())};
+                if (options_.deadMs > 0 && now - heardNow >= std::chrono::milliseconds(options_.deadMs)) {
+                    quiet = true;
+                    break;
+                }
+                if (now >= pingAt) {
+                    next = Message("ping").Encode();
+                    pingAt = now + std::chrono::milliseconds(options_.pingMs);
+                } else if (!newest_.empty()) {   // the newest villagers first, never resent
                     next = std::move(newest_.begin()->second);
                     newest_.erase(newest_.begin());
-                } else if (woke) {
+                } else if (!outgoing_.empty()) {
                     next = std::move(outgoing_.front());
                     outgoing_.pop_front();
                     queued = true;
                 } else {
-                    next = Message("ping").Encode();
+                    continue;   // woke for the dead-line check alone
                 }
             }
             ok = t->Send(next);
@@ -171,7 +198,7 @@ void Link::WorkerMain() {
 
         Incoming in;
         in.kind = Incoming::Kind::Disconnected;
-        in.detail = stop_.load() ? "" : "connection lost";
+        in.detail = stop_.load() ? "" : (quiet ? "the relay went quiet" : "connection lost");
         Push(std::move(in));
         if (stop_.load()) break;
         if (PauseOrStop(retryMs)) break;

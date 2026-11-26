@@ -114,3 +114,9 @@ keys and writes nature records at most once a minute, so two towns at 10x cost a
 hour; `npx wrangler tail <worker>` shows each busy room's rate in a `[rows]` line once a minute. A day
 spent at 50x, or several rooms playing at once, can still use it up: the rooms then cannot save until
 the next UTC day, and the nature sync mends the towns afterwards.
+
+**The restate.** Each town sends its whole list of buildings, roads and land once a minute, and the room
+puts its record right from it (`docs/fork/NEIGHBOUR_PROTOCOL.md`, `inv`). A list that matches the record
+writes nothing, so it costs reads only. When the room had to correct something, the log has a `[restate]`
+line saying what it took down, claimed, gave back or asked for again; one now and then after a lost line
+is expected, and one every minute means something keeps drifting.
