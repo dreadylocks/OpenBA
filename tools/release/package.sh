@@ -25,6 +25,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 texts() { # <stage dir>
   cp -f README.md LICENSE THIRD_PARTY_NOTICES.md "$1/"
+  cp -f third_party/monocypher/LICENCE.md "$1/Monocypher-LICENCE.md"   # BSD-2-Clause: ext.auto_update's Ed25519
   cp -f "$FONTS/FrancophilSans.ttf" "$FONTS/FrancophilSans-Bold.ttf" "$FONTS/FrancophilSans_README.txt" "$1/"
 }
 no_game_content() { # <stage dir>

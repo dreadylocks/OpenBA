@@ -373,6 +373,7 @@ extern "C" int GameUpdateLoop_CurrentFrame() { return s_frameNum; }
 extern "C" void ToolHarness_Tick(PlayerToolManager* entityUI, int frameNum);
 #include "pausemenu_harness.h"   // PauseMenuHarness_Tick (src/diag)
 #include "devloop_harness.h"     // DevLoopHarness_Tick (src/diag)
+#include "ext/auto_update/auto_update.h"   // EXT SEAM (NOT RETAIL): AutoUpdate::GameTick
 extern "C" void FoodPanel_Tick(PlayerToolManager* entityUI, int frameNum);  // src/diag/food_panel_harness.cpp
 extern "C" void FoodPlace_Tick(int frameNum);                  // src/diag/food_placement_harness.cpp
 extern "C" void StartTown_DeferredSpawn_Tick(int frameNum);    // src/game/Game/starttown.cpp
@@ -655,6 +656,10 @@ bool GameUpdateLoop::Update(const System::Time& timeRef) {
     // new build and load the save again. No-op unless BANISHED_DEVLOOP is set
     // (src/diag/devloop_harness.cpp, docs/extensions/DEVLOOP.md).
     DevLoopHarness_Tick(this);
+
+    // EXT SEAM (NOT RETAIL, docs/fork/AUTO_UPDATE.md): ext.auto_update's event-log row when a new build
+    // has downloaded, and Restart to update's save before it quits.
+    AutoUpdate::GameTick(this);
 
     // Fire / citizen-disease / crop-infestation / tornado on demand. Every disaster
     // rolls its own dice inside its own component tick, and those chances are

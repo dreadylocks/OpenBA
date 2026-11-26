@@ -74,6 +74,7 @@
 #include <SDL3/SDL_messagebox.h>
 #include "rt_crt.h"   // rtcrt::StrICmp, retail's _stricmp (D.4 Q9)
 #include "ext/crash_report/crash_report.h"   // ext.crash_reports: KeepLastCrash, before the logs reopen
+#include "ext/auto_update/auto_update.h"     // ext.auto_update: AtLaunch first, AtExit last
 
 // WAVE 14 LANE SAVEMETA -- src/engine/save/saveload_meta.cpp.
 // ============================================================
@@ -1002,6 +1003,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     // top-level window shifts the CW_USEDEFAULT cascade that places the engine
     // window at creation time, and it sat on top of the game window during the
     // pre-Present part of boot.
+    //
+    // NOT RETAIL (ext.auto_update, docs/fork/AUTO_UPDATE.md §6): install a staged build or hand over
+    // to the installed one, before anything else (the logs included). -1 carries on. Windows reads
+    // its own command line (GetCommandLineW), so the arguments here are unused.
+    {
+        const int updateExit = AutoUpdate::AtLaunch(0, nullptr);
+        if (updateExit >= 0) return updateExit;
+    }
     // NOT RETAIL (ext.crash_reports): a crashed run's logs are kept before they are reopened.
     CrashReport::KeepLastCrash();
     freopen("standalone_debug.log", "w", stdout);
@@ -1143,6 +1152,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     Platform::App::Shutdown();
     SDL_Quit();
     SDL_UnregisterApp();
+    AutoUpdate::AtExit();   // NOT RETAIL (ext.auto_update): Restart now's restart, after a clean shutdown
     return rc;
 }
 
@@ -1167,6 +1177,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 // it for Application::PlatformStartup, whose window is SDL's (Phase D.4 SDL W3).
 // ============================================================
 int main(int argc, char** argv) {
+    // NOT RETAIL (ext.auto_update): as in WinMain, first.
+    {
+        const int updateExit = AutoUpdate::AtLaunch(argc, argv);
+        if (updateExit >= 0) return updateExit;
+    }
     // NOT RETAIL (ext.crash_reports): a crashed run's logs are kept before they are reopened.
     CrashReport::KeepLastCrash();
     freopen("standalone_debug.log", "w", stdout);
@@ -1236,6 +1251,7 @@ int main(int argc, char** argv) {
 
     Platform::App::Shutdown();
     SDL_Quit();
+    AutoUpdate::AtExit();   // NOT RETAIL (ext.auto_update): as in WinMain (POSIX: execv)
     return rc;
 }
 #endif  // _WIN32

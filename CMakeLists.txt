@@ -125,6 +125,14 @@ list(APPEND GAME_SRCS ${EXT_SRCS})
 set(OPENBA_CRASH_DSN "" CACHE STRING "Default crash report address (a Sentry DSN), empty for none")
 set_source_files_properties(${CMAKE_SOURCE_DIR}/src/ext/crash_report/crash_report.cpp
   PROPERTIES COMPILE_DEFINITIONS "OPENBA_CRASH_DSN=\"${OPENBA_CRASH_DSN}\"")
+# ext.auto_update (docs/fork/AUTO_UPDATE.md): where a released build looks for newer releases, the
+# folder its openba-update-<platform>.txt manifests are read from (a trailing '/'). Empty by default:
+# a build without a feed never checks and never installs anything, so dev builds, tools/build.sh deploy
+# and the dev loop never replace themselves. tools/release/publish_update.sh sets it to the fork's
+# https://github.com/dreadylocks/OpenBA/releases/latest/download/.
+set(OPENBA_UPDATE_FEED "" CACHE STRING "Update feed for ext.auto_update (empty: this build never updates itself)")
+set_source_files_properties(${CMAKE_SOURCE_DIR}/src/ext/auto_update/auto_update.cpp
+  PROPERTIES COMPILE_DEFINITIONS "OPENBA_UPDATE_FEED=\"${OPENBA_UPDATE_FEED}\"")
 # The extension UI resources are built from OUR .rsc text inside the exe (docs/extensions/
 # KITFREE.md, block RSCTEXT): tools/ext_rsc_embed.py turns the sources under src/ext/ui/ into
 # one generated header of string literals, <build>/gen/ext_rsc_text.h, read by
@@ -263,6 +271,11 @@ endif()
 # (src/engine/audio/xwma_decode.cpp and its test).
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/wmadec ${CMAKE_BINARY_DIR}/third_party/wmadec EXCLUDE_FROM_ALL)
 
+# Monocypher 4.0.2 (third_party/monocypher/README.banished.md; CC0 or BSD-2-Clause): Ed25519 for
+# ext.auto_update's manifest signature (src/ext/auto_update/manifest.cpp). A static C library with its
+# own fixed flags; OpenBA, unit and update_sign link it.
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/monocypher ${CMAKE_BINARY_DIR}/third_party/monocypher EXCLUDE_FROM_ALL)
+
 # FreeType (the pinned submodule third_party/freetype, VER-2-13-3; third_party/freetype_build has
 # the minimal module set and the licence note): the run-time font rasteriser's engine off Windows
 # (src/platform/posix/font_raster_posix.cpp) and the GDI comparison on it
@@ -303,6 +316,8 @@ target_link_libraries(OpenBA PRIVATE winhttp)
 target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static)
 # xWMA -> PCM (third_party/wmadec): the target carries its include directory
 target_link_libraries(OpenBA PRIVATE wmadec)
+# Ed25519 (third_party/monocypher): ext.auto_update's manifest signature
+target_link_libraries(OpenBA PRIVATE monocypher)
 # FreeType (third_party/freetype_build): src/platform/common/font_raster_freetype.cpp
 target_link_libraries(OpenBA PRIVATE freetype_min)
 if(BANISHED_TWEAK_OVERLAY)
@@ -376,11 +391,11 @@ if(RENDER_BACKEND_READY)
   # loaded (matched by SONAME).
   if(APPLE)
     # Metal needs no dlopened SDL: SDL3 is static, and libairconv.dylib is found beside the exe.
-    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-static wmadec freetype_min monocypher Threads::Threads ${CMAKE_DL_LIBS})
     # Network.framework: the WebSocket seam (src/platform/darwin/websocket_darwin.cpp) for ext.neighbour.
     target_link_libraries(OpenBA PRIVATE "-framework Network")
   else()
-    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(OpenBA PRIVATE SDL3::SDL3-shared wmadec freetype_min monocypher Threads::Threads ${CMAKE_DL_LIBS})
     # OpenSSL, the system's shared libssl / libcrypto (libssl-dev): wss:// for the WebSocket seam
     # (src/platform/posix/websocket_posix.cpp) for ext.neighbour. Linux only: Windows and macOS
     # use the OS's own client (WinHTTP, Network.framework).
@@ -446,7 +461,28 @@ endif()
 target_link_libraries(unit PRIVATE wmadec)
 # tests/unit/ext_font_raster_test.cpp: the FreeType rasteriser (and, on Windows, its GDI comparison)
 target_link_libraries(unit PRIVATE freetype_min)
+# tests/unit/auto_update_test.cpp: the manifest's Ed25519 signature
+target_link_libraries(unit PRIVATE monocypher)
 add_custom_target(run-unit COMMAND unit DEPENDS unit WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# ---------------------------------------------------------------------------------------
+# update_sign (ext.auto_update, docs/fork/AUTO_UPDATE.md §10): the release tool that makes the update
+# signing key and writes and signs a package's openba-update-<platform>.txt. Built for the machine
+# that publishes (tools/release/publish_update.sh builds it in the host's build tree); never shipped.
+#   cmake --build build/mac-release -t update_sign
+# ---------------------------------------------------------------------------------------
+add_executable(update_sign EXCLUDE_FROM_ALL
+  ${CMAKE_SOURCE_DIR}/tools/release/update_sign.cpp
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/manifest.cpp
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/sha256.cpp)
+set_target_properties(update_sign PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+target_include_directories(update_sign PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(update_sign PRIVATE -O2 -Wall -Wextra)
+target_link_libraries(update_sign PRIVATE monocypher)
+if(WIN32)
+  target_link_options(update_sign PRIVATE -static -static-libgcc -static-libstdc++)
+  target_link_libraries(update_sign PRIVATE bcrypt)
+endif()
 
 # ---------------------------------------------------------------------------------------
 # font_dump (KITFREE RSCFONT): the run-time font rasteriser's by-eye harness, a standalone

@@ -110,6 +110,7 @@ struct Extensions {
     bool stream_cache = false; // class A, next start: src/ext/stream_cache/, seams Object::ExternalFactory::_extLoadBegin/_extLoadEnd, IO::CompressedStream::_extReadTap, Engine::LoaderLoop::_extLoadDone, CreateOnDemand::g_altLocate/g_altSkip + the derived cache (docs/extensions/handins/STREAMCACHE.md)
     bool neighbour = false; // class C: src/ext/neighbour/ (docs/fork/NEIGHBOUR_TOWNS.md): two towns, one relay
     bool crash_reports = false; // class A, read at boot: src/ext/crash_report/ (docs/fork/CRASH_REPORTS.md)
+    bool auto_update = false;   // class A, read at boot: src/ext/auto_update/ (docs/fork/AUTO_UPDATE.md)
 #ifdef BANISHED_UNIT_TEST
     // tests/unit/ext_registry_test.cpp only: one extension per class, so the
     // lock semantics are tested before a real extension exists. Not in the exe.

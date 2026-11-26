@@ -21,13 +21,15 @@
 // No SIGPIPE: plain sends pass MSG_NOSIGNAL, and TLS writes through the small socket BIO below,
 // which does the same (OpenSSL's own socket BIO calls write()).
 //
-// Platform::HttpPost (platform_http.h) lives here too: the same connect and TLS, one HTTP/1.1 POST.
+// Platform::HttpPost and Platform::HttpGet (platform_http.h) live here too: the same connect and TLS,
+// one HTTP/1.1 POST, or GETs read by src/platform/common/http_reader.h.
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
 #include "platform/common/platform_http.h"
 
 #include "platform/common/websocket_frames.h"
+#include "platform/common/http_reader.h"   // HttpGet: the request, the answer, redirects
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -52,11 +54,13 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 namespace Platform {
 
@@ -703,6 +707,41 @@ int HttpPost(const char* url, const char* contentType, const std::string& body, 
     const int status = WSF::HttpStatus(head);
     if (status == 0) error = head.empty() ? kTimedOut : "the server did not answer with HTTP";
     return status;
+}
+
+int HttpGet(const char* url, uint64_t maxBytes, uint32_t timeoutMs,
+            const std::function<bool(const char* data, size_t size)>& sink, std::string& error) {
+    // One exchange per hop (http_reader.h does the request, the answer and the redirects): the same
+    // connect and TLS as HttpPost, then every byte to `onBytes` until it has had enough or the line
+    // ends. Each wait for data gives up after `timeoutMs`.
+    const HttpReader::Exchange exchange = [timeoutMs](const WSF::Url& where, const std::string& request,
+                                                      const std::function<bool(const char*, size_t)>& onBytes,
+                                                      std::string& lineError) {
+        addrinfo* addresses = nullptr;
+        if (!Resolve(where, timeoutMs, addresses, lineError)) return false;
+        std::unique_ptr<WebSocketObject> o(new WebSocketObject());
+        const bool connected = OpenWakePipe(o.get(), lineError) && ConnectAny(o.get(), addresses, timeoutMs, lineError);
+        freeaddrinfo(addresses);
+        if (!connected) return false;
+        if (where.secure && !StartTls(o.get(), where.host, After(timeoutMs), lineError)) return false;
+        bool started = false;
+        if (WriteAll(o.get(), request.data(), request.size(), After(timeoutMs), false, started) != Got::Done) {
+            lineError = "sending to the server failed";
+            return false;
+        }
+        std::vector<char> buf(kReadChunk);
+        for (;;) {
+            size_t    got = 0;
+            const Got r = ReadSome(o.get(), buf.data(), buf.size(), got, After(timeoutMs));
+            if (r == Got::End) return true;   // the peer closed the line
+            if (r != Got::Done) {
+                lineError = r == Got::Timeout ? "the server stopped answering" : "the line to the server failed";
+                return false;
+            }
+            if (!onBytes(buf.data(), got)) return true;
+        }
+    };
+    return HttpReader::Get(url != nullptr ? url : "", maxBytes, exchange, sink, error);
 }
 
 }  // namespace Platform

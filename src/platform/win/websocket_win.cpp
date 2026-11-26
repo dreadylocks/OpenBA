@@ -8,7 +8,9 @@
 // WinHTTP aborts a synchronous call in flight; a blocked receive then fails and reads as
 // Closed.
 //
-// Platform::HttpPost (platform_http.h) lives here too: the same WinHTTP session, a POST.
+// Platform::HttpPost and Platform::HttpGet (platform_http.h) live here too: the same WinHTTP session,
+// a POST or a GET. WinHTTP follows the GET's redirects itself (its default policy: never from https
+// to http).
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
@@ -18,6 +20,8 @@
 #include <winhttp.h>
 
 #include <atomic>
+#include <functional>
+#include <string>
 #include <vector>
 
 namespace Platform {
@@ -230,6 +234,107 @@ int HttpPost(const char* url, const char* contentType, const std::string& body, 
     }
     WinHttpCloseHandle(req);
     CloseAll(&handles);
+    return static_cast<int>(status);
+}
+
+int HttpGet(const char* url, uint64_t maxBytes, uint32_t timeoutMs,
+            const std::function<bool(const char* data, size_t size)>& sink, std::string& error) {
+    error.clear();
+    const std::wstring wurl = Widen(url != nullptr ? url : "");
+    if (wurl.compare(0, 8, L"https://") != 0 && wurl.compare(0, 7, L"http://") != 0) {
+        error = "the address must start with http:// or https://";
+        return 0;
+    }
+    URL_COMPONENTS uc = {};
+    uc.dwStructSize = sizeof(uc);
+    wchar_t host[256] = {};
+    wchar_t path[2048] = {};
+    wchar_t extra[2048] = {};
+    uc.lpszHostName = host;
+    uc.dwHostNameLength = 255;
+    uc.lpszUrlPath = path;
+    uc.dwUrlPathLength = 2047;
+    uc.lpszExtraInfo = extra;
+    uc.dwExtraInfoLength = 2047;
+    if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &uc)) {
+        error = "the address is not a valid URL";
+        return 0;
+    }
+    std::wstring target = path[0] ? path : L"/";
+    target += extra;
+
+    WebSocketObject handles;   // its session and connect, closed by CloseAll
+    handles.session = WinHttpOpen(L"OpenBA/1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+                                  WINHTTP_NO_PROXY_BYPASS, 0);
+    if (handles.session == nullptr) {
+        error = Why("WinHttpOpen");
+        return 0;
+    }
+    const int t = static_cast<int>(timeoutMs);
+    WinHttpSetTimeouts(handles.session, t, t, t, t);
+    handles.connect = WinHttpConnect(handles.session, host, uc.nPort, 0);
+    if (handles.connect == nullptr) {
+        error = Why("WinHttpConnect");
+        CloseAll(&handles);
+        return 0;
+    }
+    HINTERNET req = WinHttpOpenRequest(handles.connect, L"GET", target.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                       WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                       uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+    if (req == nullptr) {
+        error = Why("WinHttpOpenRequest");
+        CloseAll(&handles);
+        return 0;
+    }
+    DWORD status = 0;
+    bool  ok = false;
+    if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        error = Why("sending");
+    } else if (!WinHttpReceiveResponse(req, nullptr)) {
+        error = Why("waiting for the answer");
+    } else {
+        DWORD statusSize = sizeof(status);
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                            &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
+        if (status != 200) {
+            error = "the server answered " + std::to_string(status);
+        } else {
+            ok = true;
+            uint64_t          total = 0;
+            std::vector<char> buf(64 * 1024);
+            for (;;) {
+                DWORD avail = 0;
+                if (!WinHttpQueryDataAvailable(req, &avail)) {
+                    error = Why("reading the answer");
+                    ok = false;
+                    break;
+                }
+                if (avail == 0) break;   // the whole body is in
+                DWORD want = avail < buf.size() ? avail : static_cast<DWORD>(buf.size());
+                DWORD got = 0;
+                if (!WinHttpReadData(req, buf.data(), want, &got)) {
+                    error = Why("reading the answer");
+                    ok = false;
+                    break;
+                }
+                if (got == 0) break;
+                total += got;
+                if (total > maxBytes) {
+                    error = "the answer is longer than " + std::to_string(maxBytes) + " bytes";
+                    ok = false;
+                    break;
+                }
+                if (!sink(buf.data(), got)) {
+                    error = "stopped";
+                    ok = false;
+                    break;
+                }
+            }
+        }
+    }
+    WinHttpCloseHandle(req);
+    CloseAll(&handles);
+    if (status == 200 && !ok) return 0;
     return static_cast<int>(status);
 }
 

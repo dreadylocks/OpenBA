@@ -45,6 +45,7 @@
 #include "Game/WorldGeometry.h"     // _sceneGeometry's class (the device-lost pair)
 #include "Object/exe_type.h"      // DEFINE_EXE_VTABLE
 #include "autostart.h"
+#include "ext/auto_update/auto_update.h"   // EXT SEAM (NOT RETAIL): AutoUpdate::MenuTick
 #include "drive_harness.h"     // NOT RETAIL: BANISHED_DRIVE front-end screenshots
 #include <cstdio>
 #include <cstdint>
@@ -357,6 +358,9 @@ bool MenuDialogLoopT::Update(const System::Time& timeRef) {
     // Harness hooks (env-gated, no-ops on a plain run): the autostart click driver and the
     // modal driver's arming. Not retail; they sit where they always sat.
     AutoStart::TickMenu(this);
+    // EXT SEAM (NOT RETAIL, docs/fork/AUTO_UPDATE.md): ext.auto_update records that this build reached its
+    // menu, and after Restart to update loads the save back.
+    AutoUpdate::MenuTick(this);
     if (ModalDriver::Enabled())
         ModalDriver::Poll();
 

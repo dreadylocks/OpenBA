@@ -1,11 +1,13 @@
-# Updates: OpenBA checks, downloads and installs its own builds (design)
+# Updates: OpenBA checks, downloads and installs its own builds
 
-Opened 2026-11-25. A design for review: nothing is built yet.
+Opened 2026-11-25. The design below was agreed with the maintainer on 2026-11-25: signed manifests,
+the Mac builds and publishes both required platforms, Linux only if cheap. It is built as described:
+extension `ext.auto_update`, code in `src/ext/auto_update/`. §14 records how it was tested.
 
 **The goal.** A player installs one update-capable build by hand: the zip from the releases page,
 with the usual first-run prompts (Gatekeeper, SmartScreen). After that, getting a new build takes
 at most a restart of the game. The player downloads, unzips, installs and builds nothing. Windows
-and macOS are required. Linux comes second, if it is cheap (§11).
+and macOS are required. Linux came almost free and is included (§11).
 
 This is not the dev loop (`docs/extensions/DEVLOOP.md`). The dev loop rebuilds from source and
 needs the repo and the toolchain on the machine. A player has neither. Two parts of it are reused:
@@ -129,8 +131,13 @@ that installs it, before the logs reopen and before any engine code runs.
 |---|---|---|
 | Staging | `<exe folder>\OpenBA-update\`: the same volume as the exe, so every move is a rename | `~/Library/Application Support/OpenBA/Updates/` |
 | Install | Rename the running `OpenBA.exe` to `OpenBA-update\previous\OpenBA.exe`. Windows allows renaming a running exe; it forbids overwriting or deleting one. Then move the new files into the folder. | Rename `Updates/staging/<ver>` to `Updates/<ver>`, then write `Updates/current` = `<ver>`. Nothing is written into any `.app` the player installed, and nothing into a bundle that is running. |
-| Start it | Start the new `OpenBA.exe` with the same command line and folder. The old process stays as a **supervisor**: it waits for the new one's "started" or its exit (§8). | `execv` the new bundle's own launcher, `Updates/<ver>/OpenBA.app/Contents/MacOS/OpenBA`, with `BANISHED_AIRCONV` cleared. The new launcher re-links `Run/OpenBA` to its own engine. Same process, same Dock icon. |
+| Start it | Start the new `OpenBA.exe` with the same command line and folder. The old process stays as a **supervisor**: it waits for the new one's "started" or its exit (§8). | Point the `Run/OpenBA` link at the new bundle's engine, set `BANISHED_AIRCONV` to that bundle's converter (what the launcher does), and `execv` the link. Same process, same Dock icon. |
 | Every later launch | The new exe is simply `OpenBA.exe`. | The player's own bundle starts its engine. That engine's AtLaunch sees `current` is newer than itself and hands over to it with the same `execv`: two extra execs, under 0.1 s. |
+
+The player's own launcher (`packaging/macos/launcher.mm`) is unchanged and keeps running at every
+start: it finds the game data and makes `Run/`. Only what comes after it is updated. A future change
+that needs a new launcher is the one kind that still needs a manual install; everything the
+launcher hands the engine can be redone engine-side.
 
 **Why the Mac stages outside the player's `.app`.** No admin rights are needed, even when the app
 sits in `/Applications`. App Translocation (a quarantined app run from Downloads runs from a
@@ -153,13 +160,16 @@ your account can't write there."
   game it runs the dev loop harness's sequence, moved into the updater: the retail autosave
   (`AutoSaveDialog::Autosave`, written to `Auto.sav`), a wait until the asynchronous write is over
   (`Save::SaveLoad::GetOperation`), then `<staging>/resume` = `Auto` and the game's own PID, then
-  `Application::Quit`. Quitting writes `settings.cfg` as on any quit. Just before it quits, the game
-  starts its successor: on Windows `OpenBA.exe` again, on the Mac `open -n` on the player's bundle.
-- **The successor** waits for that PID to exit, so `settings.cfg` and the save are complete before it
-  reads them. Its AtLaunch then installs the build. At the new build's first main-menu frame it reads
-  `resume`, deletes it and loads that save as a player would. This is *not* `BANISHED_AUTOLOAD`,
-  which marks the boot unattended and answers the player's modals for them. In neighbour towns the
-  loaded save rejoins the room as any reload does.
+  `Application::Quit`. Quitting writes `settings.cfg` as on any quit. In the front end there is
+  nothing to save, so it quits at once.
+- **The restart** happens after the clean shutdown, as the last thing before `main` returns
+  (`AutoUpdate::AtExit`). On the Mac and Linux it `execv`s the program again: the same process and
+  Dock icon. On Windows it starts `OpenBA.exe` again, and the new process waits for the old PID
+  (written to `restart`) before it reads anything. AtLaunch then installs the build. At the new
+  build's first main-menu frame it reads `resume`, deletes it and loads that save as a player would
+  (the menu's Load, the save, Load). This is *not* `BANISHED_AUTOLOAD`, which marks the boot
+  unattended and answers the player's modals for them. In neighbour towns the loaded save rejoins
+  the room as any reload does.
 - **A plain restart works too.** Quitting and starting the game again installs the ready build.
   Restart now only spares the player the reload.
 
@@ -208,8 +218,10 @@ resume. It records `started <version>` in the staging folder.
 
 ## 10. Publishing, so there is always something to update to
 
-**One script, `tools/release/publish_update.sh`, run on each machine for its own platform.** CI can
-run the same steps once Actions is on:
+**One script, `tools/release/publish_update.sh`.** On the Mac it builds both required platforms:
+macOS natively and Windows with mingw-w64 (`tools/build.sh build release --cross`), the
+maintainer's choice of 2026-11-25. On a PC or a Linux machine it builds that machine's own platform,
+and can add it to the same draft. CI can run the same steps once Actions is on:
 
 1. Refuse unless the tree is clean, `HEAD` is a commit on `origin/main` and the tag `v<VERSION>` is
    not already published.
@@ -223,13 +235,14 @@ run the same steps once Actions is on:
    the other cannot have yet.
 
 A release is therefore: a PR bumping `VERSION` plus a `CHANGELOG.md` section, merged; then
-`publish_update.sh` on the Mac (and the PC). The Mac can build both required platforms (Windows via
-`--cross`), which would make it one command on one machine. But the reference Windows toolchain is
-MSYS2 on the PC, and the Windows gate runs there. The first release made this way should go through
-the PC's gate before the Mac publishes Windows builds alone.
+`tools/release/publish_update.sh` on the Mac. `--dry-run` does everything but the GitHub steps.
+The reference Windows toolchain is still MSYS2 on the PC, where the Windows gate runs: the
+cross-built exe of the first release made this way should be run once on the PC before players get
+it.
 
-`release.yml` gets the same manifest and signing step for when Actions is on. The key would then be
-a repository secret.
+`release.yml` has the same feed and a signing step for when Actions is on. The key is then the
+repository secret `OPENBA_UPDATE_SIGNING_KEY`; without it a CI release has no manifests, and no game
+updates to it.
 
 ## 11. Settings, code layout, rules
 
@@ -241,16 +254,22 @@ a repository secret.
   feed, as `crashreport.dsn` does for crash reports.
 - **No new environment flag.** The restart handover passes its PID and save name in files in the
   staging folder.
-- **Code.** `src/ext/auto_update/`: the pure parts (manifest, version compare, the AtLaunch
-  decisions as a function of the staging folder's state), the check thread and the notices. AtLaunch
-  is one call at the top of both entry points in `src/app/main.cpp`. Platform work sits behind a new
-  `src/platform/common/platform_update.h`: GET to a file, unpack, the swap and start, wait for a PID.
-  Its bodies are in the `win`, `darwin` and `posix` twins (no `#if _WIN32` in app or ext code). The
-  Mac GET uses `NSURLSession` (`.mm`, redirects and proxies from the OS) rather than more hand-written
-  HTTP on Network.framework. Monocypher goes under `third_party/monocypher/`.
-- **Linux.** It uses the Windows design with POSIX renames. Its GET would be new code on the existing
-  OpenSSL client (redirects, a length or chunked body). Until that exists the platform answers "not
-  supported" and the row is hidden there. It is a follow-up unless it turns out small.
+- **Code.** `src/ext/auto_update/`: the pure parts (`manifest.cpp`: versions and the manifest;
+  `sha256.cpp`; `launch_plan.cpp`: the launch decisions as a function of the staging folder's
+  state), `staging.cpp` (the state files), `auto_update.cpp` (AtLaunch, the supervisor, the check
+  thread, AtExit) and `auto_update_ui.cpp` (the button, the build line, the event-log row, Restart
+  now's save, the resume). The hooks: AtLaunch and AtExit in both entry points of
+  `src/app/main.cpp`; EXT SEAMs in `MainMenuDialog::OnOpened` / `OnCommand`, the menu loop's and the
+  game loop's ticks; `CheckSoon` from ext.neighbour's `compat` handler. The OS work sits behind
+  `src/platform/common/platform_update.h` (`update_win.cpp`, `update_darwin.cpp`, `update_posix.cpp`;
+  child processes in `src/platform/posix/spawn_posix.cpp`) and `Platform::HttpGet` beside
+  `HttpPost` in `platform_http.h`. No `#if _WIN32` in app or ext code. Monocypher is under
+  `third_party/monocypher/`; the release tool is `tools/release/update_sign.cpp` (CMake target
+  `update_sign`).
+- **The GET.** WinHTTP does all of it on Windows, redirects included. On the Mac and Linux the twin
+  only connects (Network.framework; sockets plus OpenSSL) and moves bytes. The request, the answer's
+  framing (a length, chunked, or until the close) and the redirects are one shared, unit-tested
+  reader, `src/platform/common/http_reader.cpp`. That made Linux cheap, so it is included.
 
 ## 12. How it is tested
 

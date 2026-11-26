@@ -22,6 +22,7 @@
 #include "ext/large_packages/large_packages.h"   // fix.large_packages: the FileSystem mount seam
 #include "ext/package_cache/package_cache.h"       // ext.package_cache: the FileSystem index seams
 #include "ext/crash_report/crash_report.h"         // ext.crash_reports: the kept crashes go, at boot
+#include "ext/auto_update/auto_update.h"           // ext.auto_update: the background check, at boot
 #include "ext/decode_ahead/decode_ahead.h"       // ext.decode_ahead: the CompressedStream decode seam
 #include "ext/async_gpu_create/async_gpu_create.h"   // ext.async_gpu_create: the backend's request follows the toggle
 #include "ext/compress_ao/compress_ao.h"   // ext.compress_ao: the backend's request + the derived cache, at boot
@@ -138,6 +139,12 @@ void InitFromSettings() {
         std::string dsn;
         PersistenceLookup(nullptr, "crashreport.dsn", dsn);
         CrashReport::Start(dsn);
+    }
+    // ext.auto_update: the background check (settings.cfg's update.feed, or the build's own feed).
+    {
+        std::string feed;
+        PersistenceLookup(nullptr, "update.feed", feed);
+        AutoUpdate::Start(feed);
     }
     // The save's pseudo-mods (EXT SEAM, Save::SaveLoad::_extExtraMods). Installed
     // ONCE here: the profile is fixed for the run (settings key or /profile at

@@ -46,6 +46,11 @@ env:
   # player's settings.cfg names no address, a Sentry DSN. The repository variable (Settings > Secrets
   # and variables > Actions > Variables); unset = released builds send none.
   CRASH_DSN_ARG: -DOPENBA_CRASH_DSN=${{ vars.OPENBA_CRASH_DSN }}
+  # ext.auto_update (docs/fork/AUTO_UPDATE.md): released builds look for newer releases here. The
+  # release job signs a manifest per package with the OPENBA_UPDATE_SIGNING_KEY secret (the 64 hex
+  # digits of ~/.config/openba/update_signing.key); without it the release has no manifests and no
+  # game updates to it. tools/release/publish_update.sh is the same path without Actions.
+  UPDATE_FEED_ARG: -DOPENBA_UPDATE_FEED=https://github.com/${{ github.repository }}/releases/latest/download/
 jobs:
   version:
     name: Version and notes
@@ -112,7 +117,7 @@ jobs:
           key: ccache-release-windows-${{ github.sha }}
           restore-keys: ccache-release-windows-
       - name: Build OpenBA (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/build.sh build release
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG $UPDATE_FEED_ARG" tools/build.sh build release
       - name: Unit tests (release)
         run: tools/build.sh unit release
       # SignPath's origin verification takes the exe from this run's own artifact, so it must be
@@ -192,7 +197,7 @@ jobs:
       - name: Fetch dxvk-native
         run: tools/fetch_dxvk_native.sh
       - name: Build OpenBA (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/build.sh build release
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG $UPDATE_FEED_ARG" tools/build.sh build release
       - name: Unit tests (release)
         run: tools/build.sh unit release
       - name: Package
@@ -235,7 +240,7 @@ jobs:
             third_party/airconv_build
           key: airconv-${{ hashFiles('tools/macos/setup_deps.sh') }}
       - name: App bundle (release)
-        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG" tools/macos/make_app.sh dist/OpenBA.app
+        run: CMAKE_EXTRA="$CCACHE_LAUNCHERS $CRASH_DSN_ARG $UPDATE_FEED_ARG" tools/macos/make_app.sh dist/OpenBA.app
       - name: Release zip
         run: |
           tools/macos/make_release_zip.sh dist/OpenBA.app dist
@@ -276,6 +281,33 @@ jobs:
         run: |
           printf '\n---\n[Code signing policy](%s/%s/blob/%s/CODE_SIGNING.md): free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).\n' \
             "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> artifacts/release-notes/notes.md
+      # ext.auto_update: openba-update-<platform>.txt for each package, signed (tools/release/update_sign.cpp,
+      # built here on its own: it needs only the manifest code and Monocypher).
+      - name: Update manifests
+        env:
+          SIGNING_KEY: ${{ secrets.OPENBA_UPDATE_SIGNING_KEY }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VER: ${{ needs.version.outputs.version }}
+        if: env.SIGNING_KEY != ''
+        run: |
+          mkdir -p artifacts/manifests sign
+          cc -O2 -c third_party/monocypher/src/monocypher.c -o sign/m.o
+          cc -O2 -Ithird_party/monocypher/src -c third_party/monocypher/src/optional/monocypher-ed25519.c -o sign/e.o
+          c++ -std=c++17 -O2 -Isrc -Ithird_party/monocypher/src -Ithird_party/monocypher/src/optional \
+            tools/release/update_sign.cpp src/ext/auto_update/manifest.cpp src/ext/auto_update/sha256.cpp \
+            sign/m.o sign/e.o -o sign/update_sign
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > sign/key
+          SHORT="$(git rev-parse --short=12 HEAD)"
+          BASE="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
+          for pair in "windows-x64 package-windows/OpenBA-v$VER.zip" \
+                      "linux-x64 package-linux/OpenBA-v$VER-linux-x64.tar.gz" \
+                      "macos-arm64 package-macos/OpenBA-v$VER-mac-arm64.zip"; do
+            set -- $pair
+            sign/update_sign manifest sign/key "artifacts/$2" "$VER" "$SHORT" "$1" "$BASE/$(basename "$2")" \
+              "artifacts/manifests/openba-update-$1.txt"
+          done
+          rm -f sign/key
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -284,4 +316,5 @@ jobs:
           ls -lR artifacts
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "OpenBA $TAG" --notes-file artifacts/release-notes/notes.md \
-            artifacts/package-windows/* artifacts/package-linux/* artifacts/package-macos/*
+            artifacts/package-windows/* artifacts/package-linux/* artifacts/package-macos/* \
+            $(ls artifacts/manifests/* 2>/dev/null)

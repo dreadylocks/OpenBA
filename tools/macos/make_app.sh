@@ -89,6 +89,7 @@ cp "$ROOT/third_party/llvm15_arm64/source/llvm/LICENSE.TXT" "$LICENSES/LLVM-LICE
 cp "$ROOT/third_party/SDL/LICENSE.txt" "$LICENSES/SDL-LICENSE.txt"
 cp "$ROOT/third_party/freetype/LICENSE.TXT" "$LICENSES/FreeType-LICENSE.TXT"
 cp "$ROOT/third_party/freetype/docs/FTL.TXT" "$LICENSES/FreeType-FTL.TXT"
+cp "$ROOT/third_party/monocypher/LICENCE.md" "$LICENSES/Monocypher-LICENCE.md"
 cp "$ROOT/src/render/dx11/ao/assao/LICENSE" "$LICENSES/ASSAO-LICENSE"
 
 # Ad-hoc signature, inside out.

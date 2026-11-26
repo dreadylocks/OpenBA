@@ -118,8 +118,8 @@ UNIT_TEST(ext_rsc_text_parse_enhanced_and_strings) {
     CHECK(ParseEmbedded("Dialog/ExtensionsStringTable.rsc", s));
     CHECK(s.objects.size() == 1 && s.objects[0].type == "StringTable" && s.objects[0].name == "resource");
     const Field* strings = s.objects[0].body.Find("_strings");
-    CHECK(strings && strings->blocks.size() == 62);   // upstream's 33 + ext.neighbour's 28 + the copy / move tool's 1 (this fork)
-    if (strings && strings->blocks.size() == 62) {
+    CHECK(strings && strings->blocks.size() == 64);   // upstream's 33 + ext.neighbour's 28 + the copy / move tool's 1 + ext.auto_update's 2 (this fork)
+    if (strings && strings->blocks.size() == 64) {
         // The load notice with two parameters (found by its text: the window and page keys sit before the
         // notices, so an index into the list moves whenever one is added).
         bool found = false;

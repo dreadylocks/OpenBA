@@ -65,6 +65,9 @@ StringTable resource
 		// the Multiplayer lobby (ExtensionsLobby.rsc, ext.neighbour M2)
 		{ String _name = "LobbyButton";			String _text = "Multiplayer"; }
 		{ String _name = "LobbyTip";			String _text = "Play next to a friend's town: create a room or join one."; }
+		// the Restart to update button (ExtensionsLobby.rsc, ext.auto_update)
+		{ String _name = "UpdateButton";		String _text = "Restart to update"; }
+		{ String _name = "UpdateTip";			String _text = "A new OpenBA has downloaded. Restart now to install it: a game in progress is saved first and loaded again."; }
 		{ String _name = "LobbyTitle";			String _text = "Neighbor towns"; }
 		{ String _name = "LobbyRoom";			String _text = "Room name"; }
 		{ String _name = "LobbyPassword";		String _text = "Room password"; }

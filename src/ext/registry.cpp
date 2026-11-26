@@ -352,6 +352,17 @@ const Entry kEntries[] = {
       "report address (crashreport.dsn in settings.cfg, or the one this build came with), with your "
       "user name taken out of file paths. A copy of each crash stays in the crash_reports folder either way.",
       0, [](State& s) -> bool& { return s.ext.crash_reports; } },
+    // UPDATES (this fork; docs/fork/AUTO_UPDATE.md): a release build checks its feed (the GitHub
+    // release's manifest), downloads a newer build in the background, checks its signature and installs
+    // it at the next start. Class A: nothing in the game or the save; read at boot (the install itself
+    // reads the key from settings.cfg before the settings store exists). ON by default: the point is that
+    // a player never installs a build by hand again; a dev build has no feed and never updates.
+    { "auto_update", Tier::Extension, Class::A, true,
+      "Update automatically",
+      "Checks for a new OpenBA release, downloads it in the background and installs it the next time you "
+      "start the game (Restart to update in the menu does it now and keeps your town). Only builds from the "
+      "releases page update; turn this off to stay on the build you have.",
+      0, [](State& s) -> bool& { return s.ext.auto_update; } },
 
 #ifdef BANISHED_UNIT_TEST
     // The unit tests' three classes (registry.h). Not compiled into the exe.

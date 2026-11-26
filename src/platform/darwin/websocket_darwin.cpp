@@ -14,11 +14,14 @@
 //
 // Platform::HttpPost (platform_http.h) lives here too: a TCP (+ TLS) nw_connection carrying one
 // HTTP/1.1 POST (websocket_frames.h writes the request and reads the status), released the same way.
+// So does Platform::HttpGet: one such connection per hop, its bytes read by
+// src/platform/common/http_reader.h (the request, the answer's framing, the redirects).
 // ============================================================================
 
 #include "platform/common/platform_websocket.h"
 #include "platform/common/platform_http.h"
 #include "platform/common/websocket_frames.h"
+#include "platform/common/http_reader.h"
 
 #include <Network/Network.h>
 #include <dispatch/dispatch.h>
@@ -27,6 +30,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,6 +48,7 @@ struct WebSocketObject {
     bool                    cancelRequested = false;
     std::string             error;
     std::deque<std::string> inbox;
+    bool                    getArmed = false;    // HttpGet: a receive is waiting for bytes
 };
 
 namespace {
@@ -376,6 +381,135 @@ int HttpPost(const char* url, const char* contentType, const std::string& body, 
     }
     ReleaseAll(ws);
     return status;
+}
+
+namespace {
+
+constexpr size_t kGetPiece = 65536;
+
+// HttpGet's receive: one piece into the inbox, armed again by the reading thread once it has taken
+// what is there (so at most one piece waits).
+void ArmGetReceive(WebSocketObject* ws) {
+    nw_connection_receive(ws->conn, 1, kGetPiece, ^(dispatch_data_t content, nw_content_context_t /*context*/,
+                                                    bool isComplete, nw_error_t error) {
+        std::lock_guard<std::mutex> lock(ws->mu);
+        ws->getArmed = false;
+        if (content != nullptr) {
+            ws->inbox.emplace_back();
+            std::string* got = &ws->inbox.back();   // a pointer: a block copies what it captures
+            dispatch_data_apply(content, ^bool(dispatch_data_t /*region*/, size_t /*offset*/, const void* buffer,
+                                               size_t size) {
+                got->append(static_cast<const char*>(buffer), size);
+                return true;
+            });
+        }
+        if (error != nullptr && ws->error.empty()) ws->error = Describe(error, "the line to the server failed");
+        if (error != nullptr || isComplete) ws->finished = true;
+        ws->cv.notify_all();
+    });
+}
+
+// One exchange (http_reader.h Exchange): connect, send `request`, hand every byte to `onBytes`.
+bool GetExchange(const WebSocketFrames::Url& where, const std::string& request,
+                 const std::function<bool(const char*, size_t)>& onBytes, uint32_t timeoutMs, std::string& error) {
+    nw_endpoint_t   endpoint = nw_endpoint_create_host(where.host.c_str(), std::to_string(where.port).c_str());
+    nw_parameters_t params = nw_parameters_create_secure_tcp(
+        where.secure ? NW_PARAMETERS_DEFAULT_CONFIGURATION : NW_PARAMETERS_DISABLE_PROTOCOL,
+        NW_PARAMETERS_DEFAULT_CONFIGURATION);
+    WebSocketObject* ws = new WebSocketObject();
+    ws->queue = dispatch_queue_create("openba.httpget", DISPATCH_QUEUE_SERIAL);
+    ws->conn = nw_connection_create(endpoint, params);
+    nw_release(endpoint);
+    nw_release(params);
+    nw_connection_set_queue(ws->conn, ws->queue);
+    nw_connection_set_state_changed_handler(ws->conn, ^(nw_connection_state_t state, nw_error_t err) {
+        std::lock_guard<std::mutex> lock(ws->mu);
+        switch (state) {
+        case nw_connection_state_ready:
+            ws->ready = true;
+            break;
+        case nw_connection_state_waiting:
+        case nw_connection_state_failed:
+            if (ws->error.empty()) ws->error = Describe(err, "cannot reach the server");
+            ws->finished = true;
+            break;
+        case nw_connection_state_cancelled:
+            ws->finished = true;
+            ws->cancelled = true;
+            break;
+        default:
+            break;
+        }
+        ws->cv.notify_all();
+    });
+    nw_connection_start(ws->conn);
+    {
+        std::unique_lock<std::mutex> lock(ws->mu);
+        ws->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [ws] { return ws->ready || ws->finished; });
+        if (!ws->ready || ws->finished) {
+            error = !ws->error.empty() ? ws->error : std::string("the server did not answer in time");
+            lock.unlock();
+            ReleaseAll(ws);
+            return false;
+        }
+    }
+    dispatch_data_t data = dispatch_data_create(request.data(), request.size(), nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    nw_connection_send(ws->conn, data, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t sendError) {
+        if (sendError == nullptr) return;
+        std::lock_guard<std::mutex> lock(ws->mu);
+        if (ws->error.empty()) ws->error = Describe(sendError, "sending to the server failed");
+        ws->finished = true;
+        ws->cv.notify_all();
+    });
+    dispatch_release(data);
+    bool ok = true;
+    for (;;) {
+        std::deque<std::string> pieces;
+        bool                    ended = false;
+        {
+            std::unique_lock<std::mutex> lock(ws->mu);
+            if (ws->inbox.empty() && !ws->finished && !ws->getArmed) {
+                ws->getArmed = true;
+                ArmGetReceive(ws);
+            }
+            const bool woke = ws->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                              [ws] { return !ws->inbox.empty() || ws->finished; });
+            if (!woke) {
+                error = "the server stopped answering";
+                ok = false;
+                break;
+            }
+            pieces.swap(ws->inbox);
+            ended = ws->finished;
+            if (ended && !ws->error.empty()) error = ws->error;
+        }
+        bool enough = false;
+        for (const std::string& piece : pieces) {
+            if (!onBytes(piece.data(), piece.size())) {
+                enough = true;
+                break;
+            }
+        }
+        if (enough) break;
+        if (ended) {
+            ok = error.empty();
+            break;
+        }
+    }
+    ReleaseAll(ws);
+    return ok;
+}
+
+}  // namespace
+
+int HttpGet(const char* url, uint64_t maxBytes, uint32_t timeoutMs,
+            const std::function<bool(const char* data, size_t size)>& sink, std::string& error) {
+    const HttpReader::Exchange exchange = [timeoutMs](const WebSocketFrames::Url& where, const std::string& request,
+                                                      const std::function<bool(const char*, size_t)>& onBytes,
+                                                      std::string& lineError) {
+        return GetExchange(where, request, onBytes, timeoutMs, lineError);
+    };
+    return HttpReader::Get(url != nullptr ? url : "", maxBytes, exchange, sink, error);
 }
 
 }  // namespace Platform

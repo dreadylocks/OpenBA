@@ -27,6 +27,7 @@
 #include "Dialog/ModDialog.h"
 #include "Dialog/ExtensionsDialog.h"   // EXT SEAM (NOT RETAIL, docs/extensions/handins/EXTSCAFFOLD.md): the Extensions button
 #include "ext/neighbour/lobby_panel.h"    // EXT SEAM (NOT RETAIL, docs/fork/NEIGHBOUR_TOWNS.md): ext.neighbour's Multiplayer button
+#include "ext/auto_update/auto_update.h"  // EXT SEAM (NOT RETAIL, docs/fork/AUTO_UPDATE.md): Restart to update, the build line's note
 #include "Dialog/NewGameDialog.h"
 #include "Dialog/MapParamsDialog.h"
 #include "Dialog/AchievementDialog.h"
@@ -535,6 +536,7 @@ void MainMenuDialog::OnOpened() {
         // CMake project VERSION; the commit and date come from the header the
         // openba-build-info target regenerates on every build.
         buildIdStr += "  OpenBA v" OPENBA_VERSION " " OPENBA_GIT_HASH " " OPENBA_BUILD_DATE;
+        buildIdStr += AutoUpdate::BuildLineNote().c_str();   // EXT SEAM (NOT RETAIL): "" unless a build is ready
         printf("[BuildId] build text \"%s\"\n", buildIdStr._data);
         textBuildNotice->SetParameter(1, buildIdStr);
     }
@@ -544,6 +546,7 @@ void MainMenuDialog::OnOpened() {
     // the gate's command-line faithful profile this adds nothing.
     ExtensionsDialog_AttachMenuButton(this);
     Neighbour::Lobby_AttachMenuButton(this);   // EXT SEAM: Multiplayer, front end only (NOT RETAIL)
+    AutoUpdate::AttachMenuButton(this);        // EXT SEAM: Restart to update, while a build is ready (NOT RETAIL)
 }
 
 // ============================================================
@@ -667,6 +670,11 @@ void MainMenuDialog::OnElementEvent(Object::InternalPtr<UI::Element>* /*element*
         // EXT SEAM (NOT RETAIL): ext.neighbour's Multiplayer button (lobby_panel.cpp). Retail has no id 14.
         printf("[MainMenuDialog::OnCommand] -> Multiplayer lobby\n");
         Neighbour::Lobby_Open(this, std::string());
+        break;
+    case AutoUpdate::kRestartMenuButtonId:
+        // EXT SEAM (NOT RETAIL): ext.auto_update's Restart to update button (auto_update_ui.cpp). Retail has no id 15.
+        printf("[MainMenuDialog::OnCommand] -> Restart to update\n");
+        AutoUpdate::OnRestartButton(this);
         break;
     default:
         printf("[MainMenuDialog::OnCommand] button id=%d not yet wired in standalone\n", id);

@@ -86,6 +86,11 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/platform/common/websocket_frames.cpp    # websocket_frames_test.cpp (the Linux WebSocket seam's wire format)
   ${CMAKE_SOURCE_DIR}/src/diag/drive_script.cpp                  # drive_script_test.cpp (BANISHED_DRIVE's input script)
   ${CMAKE_SOURCE_DIR}/src/ext/crash_report/report.cpp            # ext_crash_report_test.cpp (ext.crash_reports)
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/manifest.cpp           # auto_update_test.cpp (ext.auto_update): versions, the manifest
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/sha256.cpp             #   the package's SHA-256
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/launch_plan.cpp        #   the launch decisions
+  ${CMAKE_SOURCE_DIR}/src/ext/auto_update/staging.cpp            #   the staging folder's state files
+  ${CMAKE_SOURCE_DIR}/src/platform/common/http_reader.cpp        # http_reader_test.cpp (Platform::HttpGet's answers on macOS / Linux)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/dxbc.cpp            # ext_better_trees_test.cpp (block FAA-CORE)
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/cutout_rewrite.cpp
   ${CMAKE_SOURCE_DIR}/src/render/common/better_trees/receiver_rewrite.cpp   # ext_better_trees_test.cpp (block TS-CORE)

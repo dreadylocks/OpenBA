@@ -184,3 +184,20 @@ LabelDescription labelMultiplayer : "MainMenu.rsc:labelMod"
 	StringTable _stringTable = "ExtensionsStringTable.rsc"; String _text = "LobbyButton";
 	SpriteSheet _spriteSheet = "ExtensionsSprites.rsc"; String _spriteName = "ExtensionsIcon";
 }
+
+// ---------------------------------------------------------------------------------------------
+// The main menu's and pause menu's Restart to update button (ext.auto_update, docs/fork/AUTO_UPDATE.md;
+// src/ext/auto_update/auto_update_ui.cpp), shown while a downloaded build is ready. It lives here
+// beside the Multiplayer button because it is the same shape.
+// ---------------------------------------------------------------------------------------------
+ButtonDescription buttonUpdate : "MainMenu.rsc:buttonMod"
+{
+	ElementDescription _content = "labelUpdate";
+	StringTable _toolTipStringTable = "ExtensionsStringTable.rsc"; String _toolTipText = "UpdateTip";
+}
+
+LabelDescription labelUpdate : "MainMenu.rsc:labelMod"
+{
+	StringTable _stringTable = "ExtensionsStringTable.rsc"; String _text = "UpdateButton";
+	SpriteSheet _spriteSheet = "ExtensionsSprites.rsc"; String _spriteName = "ExtensionsIcon";
+}

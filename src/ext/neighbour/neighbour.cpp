@@ -20,6 +20,7 @@
 #include "ext/neighbour/shared_map.h"
 #include "ext/neighbour/walkers.h"      // the neighbour's villagers, seen
 #include "ext/registry.h"   // Ext::Ext().neighbour
+#include "ext/auto_update/auto_update.h"   // CheckSoon, when the neighbour plays another version
 #include "ext/neighbour/save_state.h"   // the saved state, shared with the save-tail codec
 #include "ext/neighbour/seat_store.h"   // seat tokens kept beside settings.cfg
 #include "ext/neighbour/world_maths.h"  // SetPortableWorldMaths: a shared map is built with the ported maths
@@ -503,6 +504,9 @@ void OnMessage(const Message& m) {
         // relay says it on every join and every arrival of the neighbour: once a game is enough.
         const std::string warn = Sanitize(m.GetOr("warn", "Your game and your neighbor's differ."), kMaxChatChars);
         if (s_compatSaid.insert(warn).second) Post(warn, kColourProblem);
+        // "<neighbour> plays openba 1.2.1; you play openba 1.2.0." (the relay's compareCompat): a newer
+        // build may be out, so ext.auto_update looks now rather than at its next two-hour check.
+        if (warn.find("; you play ") != std::string::npos) AutoUpdate::CheckSoon("the neighbour plays another version");
     } else if (m.type == "error") {
         bool fatal = false;
         m.GetBool("fatal", fatal);
