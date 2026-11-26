@@ -469,6 +469,71 @@ check(!fa5.inbox.some((m) => m.t === "nat" && m.replay), "a plain reconnect is n
 fa5.ws.close();
 fb2.ws.close();
 
+// The restate (inv / want): a town's whole list puts the room's record right after changes that never
+// reached it (sent down a line that died without closing).
+const restRoom = `restatetest-${Date.now()}`;
+const rs = opener(restRoom, { t: "create", pass: "pw6", name: "Restater", ...settings });
+await tryWait(rs.wait((m) => m.t === "welcome"));
+const rw = opener(restRoom, { t: "hello", pass: "pw6", name: "Watcher", join: true });
+await tryWait(rw.wait((m) => m.t === "mirrorEnd"));
+const rsSend = (m) => rs.ws.send(JSON.stringify(m));
+const house = (id, tx, ty, w, built) => ({ t: "build", id, tmpl: "Template\\WoodHouse.rsc", x: 0, y: 0, z: 0, rot: 0, tx, ty, tw: w, th: w, built });
+rsSend({ t: "claim", id: "rc1", rects: "100,100,2,2;110,110,1,1" });
+rsSend(house("rb1", 100, 100, 2, 100));
+rsSend(house("rb2", 110, 110, 1, 50));
+rsSend({ t: "road", cell: 5000, type: 1, tt: 6, tmpl: "Template\\RoadDirt.rsc" });
+rsSend({ t: "road", cell: 5001, type: 1, tt: 6, tmpl: "Template\\RoadDirt.rsc" });
+await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5001));
+// The town's list: rb1 is gone (its unbuild and release were lost), rb2 is further on, rb3 is new (lost too),
+// road 5001 is taken up and 5002 laid (both lost), and a tile at 120,120 is new land.
+rsSend({ t: "inv", gen: 1, part: 0, b: "rb2:60;rb3:100", r: "5000:1" });
+rsSend({ t: "inv", gen: 1, part: 1, last: true, r: "5002:0", l: "110,110,1,1;120,120,1,1" });
+const rdown = await tryWait(rw.wait((m) => m.t === "unbuild" && m.id === "rb1"));
+check(!!rdown, "a building the town's list does not name is taken down, and the neighbour told");
+const rup = await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5001 && m.off === true));
+check(!!rup && !rw.inbox.some((m) => m.t === "road" && m.cell === 5000 && m.off), "a road tile the list does not name is taken up (only that one)");
+const rfree = await tryWait(rw.wait((m) => m.t === "released" && m.seat === 0 && /^100,100,2,1;100,101,2,1$/.test(m.rects)));
+check(!!rfree, "the gone building's land is given back");
+const rnew = await tryWait(rw.wait((m) => m.t === "claims" && m.seat === 0 && m.rects === "120,120,1,1"));
+check(!!rnew, "free land the list names is claimed, and the neighbour told");
+const wantedB = await tryWait(rs.wait((m) => m.t === "want" && typeof m.b === "string"));
+check(wantedB && wantedB.b.split(",").sort().join(",") === "rb2,rb3", "the buildings the record lacks or holds at another stage are asked for again");
+const wantedR = await tryWait(rs.wait((m) => m.t === "want" && typeof m.r === "string"));
+check(wantedR && wantedR.r === "5002", "and the road tiles it lacks");
+// The town sends them again; then the same list matches and nothing happens.
+rsSend(house("rb2", 110, 110, 1, 60));
+rsSend({ t: "claim", id: "rc2", rects: "130,130,1,1" });
+await tryWait(rs.wait((m) => m.t === "claimed" && m.id === "rc2"));
+rsSend(house("rb3", 130, 130, 1, 100));
+rsSend({ t: "road", cell: 5002, type: 0, tt: 6, tmpl: "Template\\RoadStone.rsc" });
+await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5002));
+const seenRs = rs.inbox.length;
+const seenRw = rw.inbox.length;
+rsSend({ t: "inv", gen: 2, part: 0, last: true, b: "rb2:60;rb3:100", r: "5000:1;5002:0", l: "110,110,1,1;120,120,1,1;130,130,1,1" });
+await new Promise((r) => setTimeout(r, 500));
+check(rs.inbox.length === seenRs && rw.inbox.length === seenRw, "a list that matches the record changes nothing and asks for nothing");
+// A building that arrives while a list is coming in is newer than the list: it stays.
+rsSend({ t: "inv", gen: 3, part: 0, b: "rb2:60" });
+rsSend(house("rb4", 140, 140, 1, 10));
+rsSend({ t: "inv", gen: 3, part: 1, last: true, b: "rb3:100", r: "5000:1;5002:0", l: "110,110,1,1;120,120,1,1;130,130,1,1" });
+await new Promise((r) => setTimeout(r, 500));
+check(!rw.inbox.some((m) => m.t === "unbuild" && m.id === "rb4"), "a building placed while the list comes in is not taken down");
+// A part out of turn drops the list; a malformed one is refused.
+rsSend({ t: "inv", gen: 4, part: 1, last: true, b: "" });
+await new Promise((r) => setTimeout(r, 300));
+check(!rw.inbox.some((m) => m.t === "unbuild" && (m.id === "rb2" || m.id === "rb3")), "a list missing its first part changes nothing");
+rsSend({ t: "inv", gen: 5, part: 0, last: true, b: "Bad Id:5" });
+check(!!(await tryWait(rs.wait((m) => m.t === "error" && /inventory/.test(m.why)))), "a malformed list is refused");
+// Every join ends the neighbour's roads with roadsEnd (the game takes up the ones its copy has besides).
+rw.ws.close();
+await new Promise((r) => setTimeout(r, 300));
+const rw2 = opener(restRoom, { t: "hello", pass: "pw6", name: "Watcher", join: true });
+const rend = await tryWait(rw2.wait((m) => m.t === "roadsEnd"));
+check(rend && rend.count === 2 && !rw2.inbox.some((m) => m.t === "road" && m.cell === 5001 && !m.off),
+      "a joining town gets the neighbour's roads, then roadsEnd with their count");
+rs.ws.close();
+rw2.ws.close();
+
 // A lobby probe (the lobby's own check of a room just before the game connects) is not announced to
 // the neighbour, arriving or leaving, and does not replace the town's game line.
 const probeRoom = `probetest-${Date.now()}`;

@@ -347,6 +347,83 @@ UNIT_TEST(ext_neighbour_link_hello_send_receive) {
     g_net = nullptr;
 }
 
+// A line that died without closing: writes still "succeed", nothing comes back. The pings get no pong, so
+// after deadMs the link closes it and connects again (where the replay and the restate put things right).
+UNIT_TEST(ext_neighbour_link_a_quiet_line_is_closed_and_joined_again) {
+    FakeNet net;
+    g_net = &net;
+    Neighbour::Link link(&MakeFake);
+    Neighbour::Link::Options opt;
+    opt.url = "ws://fake";
+    opt.hello = Message("hello").Set("room", "r");
+    opt.pingMs = 50;
+    opt.deadMs = 300;
+    opt.firstRetryMs = 10;
+    link.Start(opt);
+    std::vector<Neighbour::Incoming> got;
+    auto count = [](const std::vector<Neighbour::Incoming>& v, Neighbour::Incoming::Kind k) {
+        int n = 0;
+        for (const Neighbour::Incoming& in : v) n += in.kind == k ? 1 : 0;
+        return n;
+    };
+    CHECK(PollUntil(link, got, [&](const std::vector<Neighbour::Incoming>& v) {
+        return count(v, Neighbour::Incoming::Kind::Connected) >= 2;
+    }));
+    bool quiet = false;
+    for (const Neighbour::Incoming& in : got)
+        quiet = quiet || (in.kind == Neighbour::Incoming::Kind::Disconnected && in.detail == "the relay went quiet");
+    CHECK(quiet);
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        bool pinged = false;
+        for (const std::string& s : net.sent) pinged = pinged || s == "{\"t\":\"ping\"}";
+        CHECK(pinged);   // pings go on a quiet line (and match the relay's auto-response exactly)
+        CHECK(net.connects >= 2);
+    }
+    link.Stop();
+    g_net = nullptr;
+}
+
+// A line that keeps bringing frames stays up however long it runs, and pings go even while the queue is
+// busy (so a town that only sends still hears the relay's pong).
+UNIT_TEST(ext_neighbour_link_a_live_line_stays_up_and_pings_while_busy) {
+    FakeNet net;
+    g_net = &net;
+    Neighbour::Link link(&MakeFake);
+    Neighbour::Link::Options opt;
+    opt.url = "ws://fake";
+    opt.hello = Message("hello").Set("room", "r");
+    opt.pingMs = 50;
+    opt.deadMs = 300;
+    link.Start(opt);
+    std::vector<Neighbour::Incoming> got;
+    CHECK(PollUntil(link, got, [](const std::vector<Neighbour::Incoming>& v) {
+        return !v.empty() && v[0].kind == Neighbour::Incoming::Kind::Connected;
+    }));
+    for (int i = 0; i < 40; ++i) {   // 800 ms: well past deadMs
+        link.Send(Message("chat").Set("text", "busy"));
+        {
+            std::lock_guard<std::mutex> lock(net.mu);
+            net.toReceive.push_back("{\"t\":\"pong\"}");
+            net.cv.notify_all();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        link.Poll(got);
+    }
+    bool dropped = false;
+    for (const Neighbour::Incoming& in : got) dropped = dropped || in.kind == Neighbour::Incoming::Kind::Disconnected;
+    CHECK(!dropped);
+    {
+        std::lock_guard<std::mutex> lock(net.mu);
+        int pings = 0;
+        for (const std::string& s : net.sent) pings += s == "{\"t\":\"ping\"}" ? 1 : 0;
+        CHECK(pings >= 5);
+        CHECK_EQ(net.connects, 1);
+    }
+    link.Stop();
+    g_net = nullptr;
+}
+
 UNIT_TEST(ext_neighbour_link_reconnects) {
     FakeNet net;
     net.failFirst = 1;   // the first connect fails, the second works

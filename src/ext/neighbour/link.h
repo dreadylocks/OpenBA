@@ -62,7 +62,12 @@ public:
         // generous bound, so nothing that matters is lost; the shared map stops handing over more while
         // Queued() is high (backpressure), and keeps its own backlog, which the save holds.
         size_t      maxQueued    = 20000;
-        uint32_t    pingMs       = 25000; // a {"t":"ping"} after this long with nothing sent
+        // A {"t":"ping"} every pingMs, whatever else goes, and the relay answers each at once (a pong,
+        // without waking the room). So a line that brings nothing for deadMs died without closing (the OS
+        // takes minutes to notice; writes into it go nowhere): it is closed, and the next connection's
+        // replay and restate put right what went down it. 0: never.
+        uint32_t    pingMs       = 25000;
+        uint32_t    deadMs       = 60000;
     };
 
     explicit Link(TransportFactory factory) : factory_(factory) {}
@@ -101,6 +106,7 @@ private:
     std::atomic<bool>     stop_{false};
     std::atomic<bool>     connected_{false};
     std::atomic<uint64_t> dropped_{0};
+    std::atomic<int64_t>  heardMs_{0};   // when the current line last brought a frame (steady clock, ms)
 
     std::mutex              mu_;          // guards everything below
     std::condition_variable cv_;

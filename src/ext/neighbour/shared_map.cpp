@@ -51,6 +51,7 @@
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/nature_sync.h"
 #include "ext/neighbour/protocol.h"
+#include "ext/neighbour/restate.h"
 
 namespace Neighbour {
 namespace SharedMap {
@@ -133,6 +134,18 @@ std::map<int, std::string> s_roadTmpl;      // the road tool's template per road
 // this game has not used the road tool since it was loaded.
 const char* const kRoadTmplDefault[2] = {"Template\\StoneRoad.rsc:resource", "Template\\DirtRoad.rsc:resource"};
 bool s_rescanRoads = false;                 // a loaded game's first join: its roads again at mirrorEnd
+// The restate (restate.h): this town's whole list goes to the relay kInvFirstSeconds after every join and
+// every kInvEverySeconds after that, once its own queued changes have gone (at most kInvMaxWaitSeconds late).
+constexpr double kInvFirstSeconds = 15.0;
+constexpr double kInvEverySeconds = 60.0;
+constexpr double kInvMaxWaitSeconds = 120.0;
+constexpr size_t kInvChars = 12000;         // a part's three lists, well under the relay's 16 KB frame
+bool s_invScheduled = false;                // a welcome came on this line: lists are due
+std::chrono::steady_clock::time_point s_invDue;
+uint64_t s_invGen = 0;
+uint64_t s_invLoggedJoin = 0;               // the join whose first list was logged
+std::vector<uint32_t> s_roadSeen;           // per cell: the join whose replay last named the neighbour's road there
+uint64_t s_roadsReplayed = 0;               // the neighbour's road tiles replayed in this join (roadsEnd's count)
 std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: not news
 std::vector<Message> s_pending;             // road / resource messages for the relay
 uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
@@ -154,6 +167,7 @@ bool EnsureGrid() {
     if (s_dim != map->size) {
         s_dim = map->size;
         s_peer.assign(static_cast<size_t>(s_dim) * s_dim, 0);
+        s_roadSeen.assign(static_cast<size_t>(s_dim) * s_dim, 0);
     }
     return true;
 }
@@ -438,6 +452,16 @@ void SetRoadLook(Message& r, uint8_t type) {
     if (!mat.empty()) r.Set("mat", mat);
 }
 
+// A finished road tile of this town's as a `road` message (ScanRoads, the relay's `want`).
+Message OwnRoadMessage(size_t i, const MapCell& c) {
+    Message r("road");
+    r.SetInt("cell", static_cast<int64_t>(i))
+     .SetInt("type", c.field_0x2A)
+     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f));
+    SetRoadLook(r, c.field_0x2A);
+    return r;
+}
+
 // A loaded game's roads, sent again (ExpectReload): every road tile of this town's -- a road here on land
 // the neighbour does not hold -- is claimed (a row's run of them in one rectangle), and a finished one is
 // sent as a road. One being built goes when it is finished.
@@ -456,12 +480,7 @@ void ScanRoads() {
                 ++claimed;
                 const MapCell& c = cells[i];
                 if (c.field_0x2B != 0x80) {
-                    Message r("road");
-                    r.SetInt("cell", static_cast<int64_t>(i))
-                     .SetInt("type", c.field_0x2A)
-                     .SetInt("tt", static_cast<int64_t>(c.terrainType & 0x1f));
-                    SetRoadLook(r, c.field_0x2A);
-                    Queue(r);
+                    Queue(OwnRoadMessage(i, c));
                     ++sent;
                 }
             } else if (runStart >= 0) {
@@ -473,6 +492,120 @@ void ScanRoads() {
     ++s_waitingAdds;
     fprintf(stderr, "[Neighbour] shared map: the loaded town's roads again: %d tile(s) claimed, %d finished sent\n",
             claimed, sent);
+}
+
+// This town's whole list to the relay (restate.h): its structures and their stages, its finished road
+// tiles, and its land -- the structures' footprints and every road tile, finished or not, on land the
+// neighbour does not hold.
+void SendInventory(Link* link) {
+    Map* map = TheMap();
+    if (map == nullptr || !EnsureGrid()) return;
+    std::vector<std::string> builds;
+    std::vector<std::string> roads;
+    std::vector<std::string> land;
+    builds.reserve(s_mine.size());
+    for (const auto& kv : s_mine) {
+        int64_t built = 0;
+        kv.second.build.GetInt("built", built);
+        builds.push_back(kv.first + ":" + std::to_string(built));
+        const TileRect& r = kv.second.rect;
+        if (r.w > 0 && r.h > 0)
+            land.push_back(std::to_string(r.x) + "," + std::to_string(r.y) + "," + std::to_string(r.w) + "," +
+                           std::to_string(r.h));
+    }
+    const size_t n = static_cast<size_t>(s_dim) * s_dim;
+    const MapCell* cells = map->cells.GetData();
+    std::vector<uint8_t> roadLand(n, 0);
+    for (size_t i = 0; i < n; ++i) {
+        if (cells[i].field_0x2A == 0xFF || s_peer[i] != 0) continue;
+        roadLand[i] = 1;
+        if (cells[i].field_0x2B != 0x80) roads.push_back(std::to_string(i) + ":" + std::to_string(cells[i].field_0x2A));
+    }
+    const size_t structures = land.size();
+    for (std::string& run : Restate::RowRuns(roadLand, s_dim)) land.push_back(std::move(run));
+    const std::vector<Restate::Part> parts = Restate::Pack(builds, roads, land, kInvChars);
+    ++s_invGen;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        Message m("inv");
+        m.SetInt("gen", static_cast<int64_t>(s_invGen)).SetInt("part", static_cast<int64_t>(i));
+        if (!parts[i].builds.empty()) m.Set("b", parts[i].builds);
+        if (!parts[i].roads.empty()) m.Set("r", parts[i].roads);
+        if (!parts[i].land.empty()) m.Set("l", parts[i].land);
+        if (i + 1 == parts.size()) m.SetBool("last", true);
+        link->Send(m);
+    }
+    if (s_invLoggedJoin != s_joinCount) {   // the first list of each join: once a minute would be noise
+        s_invLoggedJoin = s_joinCount;
+        fprintf(stderr, "[Neighbour] shared map: this town's list to the relay: %zu structure(s), %zu finished road "
+                        "tile(s), land in %zu footprint(s) and %zu road run(s), %zu part(s)\n",
+                builds.size(), roads.size(), structures, land.size() - structures, parts.size());
+    }
+}
+
+// The list is due (a little after the join, then once a minute) once this town's own changes have gone: a
+// list sent while they still wait would only have the relay ask for them again.
+void InvTick(Link* link) {
+    if (!s_invScheduled) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_invDue) return;
+    const bool waiting = !s_claimQueue.empty() || !s_releaseQueue.empty() || !s_buildQueue.empty() ||
+                         !s_unbuildQueue.empty() || !s_pending.empty() || link->Queued() > kLinkLowWater;
+    if (waiting && std::chrono::duration<double>(now - s_invDue).count() < kInvMaxWaitSeconds) return;
+    SendInventory(link);
+    s_invDue = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                         std::chrono::duration<double>(kInvEverySeconds));
+}
+
+// The relay's record lacks these of ours, or holds them at another stage or road type (`want`): sent again.
+void OnWant(const Message& m) {
+    Map* map = TheMap();
+    if (map == nullptr || !EnsureGrid()) return;
+    size_t builds = 0;
+    size_t roads = 0;
+    for (const std::string& id : Restate::WantedIds(m.GetOr("b", ""))) {
+        if (s_mine.count(id) == 0) continue;   // gone since the list: its unbuild is on the way
+        s_buildQueue.push_back(id);
+        ++builds;
+    }
+    const MapCell* cells = map->cells.GetData();
+    for (int cell : Restate::WantedCells(m.GetOr("r", ""), s_dim * s_dim)) {
+        const MapCell& c = cells[cell];
+        if (c.field_0x2A == 0xFF || c.field_0x2B == 0x80 || s_peer[static_cast<size_t>(cell)] != 0) continue;
+        Queue(OwnRoadMessage(static_cast<size_t>(cell), c));
+        ++roads;
+    }
+    ++s_waitingAdds;
+    fprintf(stderr, "[Neighbour] shared map: the relay's record lacked %zu structure(s) and %zu road tile(s) of this "
+                    "town's: sent again\n", builds, roads);
+}
+
+// The join's replay of the neighbour's roads is in (`roadsEnd`): a road of theirs this copy still holds and
+// the replay did not name was taken up while the line was down, and its removal never came. Only when every
+// replayed tile arrived (the count says so). The neighbour's roads are the road tiles on land it holds, as
+// ScanRoads tells this town's own from theirs.
+void TakeUpStaleRoads(int64_t count) {
+    Map* map = TheMap();
+    if (map == nullptr || !EnsureGrid()) return;
+    if (count < 0 || static_cast<uint64_t>(count) != s_roadsReplayed) {
+        fprintf(stderr, "[Neighbour] shared map: the relay replayed %lld of the neighbor's road tile(s) and %llu "
+                        "arrived: none taken up\n",
+                static_cast<long long>(count), static_cast<unsigned long long>(s_roadsReplayed));
+        return;
+    }
+    const size_t n = static_cast<size_t>(s_dim) * s_dim;
+    const MapCell* cells = map->cells.GetData();
+    std::vector<uint8_t> road(n, 0);
+    for (size_t i = 0; i < n; ++i) road[i] = (cells[i].field_0x2A != 0xFF && cells[i].field_0x2B != 0x80) ? 1 : 0;
+    const std::vector<int> stale = Restate::StaleRoads(s_peer, road, s_roadSeen, static_cast<uint32_t>(s_joinCount));
+    if (stale.empty()) return;
+    s_applying = true;
+    for (int cell : stale) {
+        map->FinishRoadCell(cell, 0, 2);
+        ++s_applied.unroads;
+    }
+    s_applying = false;
+    fprintf(stderr, "[Neighbour] shared map: %zu of the neighbor's road tile(s) taken up while away removed\n",
+            stale.size());
 }
 
 Graphics::MaterialInstance* RoadDecal(const std::string& tmpl) {
@@ -497,6 +630,9 @@ void ApplyRoad(const Message& m) {
     MapCell& c = map->cells.GetData()[cell];
     bool off = false;
     m.GetBool("off", off);
+    // The neighbour holds a road here (this join's roadsEnd keeps it).
+    if (!off && static_cast<size_t>(cell) < s_roadSeen.size())
+        s_roadSeen[static_cast<size_t>(cell)] = static_cast<uint32_t>(s_joinCount);
     s_applying = true;
     if (off) {
         if (c.field_0x2A != 0xFF && c.field_0x2B != 0x80) {
@@ -775,6 +911,7 @@ void ApplyBatch(const Message& m) {
             ApplyNat(n);
         } else {   // roadBatch: cell, type, tt, template, material (-1 none)
             if (f.size() != 5 || v[3] < 0 || v[3] >= static_cast<int64_t>(tmpls.size())) continue;
+            ++s_roadsReplayed;
             Message r("road");
             r.SetInt("cell", v[0]).SetInt("type", v[1]).SetInt("tt", v[2]).Set("tmpl", tmpls[static_cast<size_t>(v[3])]);
             if (v[4] >= 0 && v[4] < static_cast<int64_t>(mats.size())) r.Set("mat", mats[static_cast<size_t>(v[4])]);
@@ -872,6 +1009,10 @@ void End() {
     s_pending.clear();
     s_roadTmpl.clear();
     s_rescanRoads = false;
+    s_invScheduled = false;
+    s_invLoggedJoin = 0;
+    s_roadSeen.clear();
+    s_roadsReplayed = 0;
     s_applied = Applied();
     s_appliedLogged = Applied();
     s_tokens = kSendBurst;
@@ -1617,6 +1758,7 @@ void Tick(Link* link, uint64_t frame) {
         }
     }
     if (!link->Connected()) return;   // the queues wait; OnJoined sends the structures again
+    InvTick(link);
     // Backpressure: the link writes one message at a time, and a slow line (the Mac's waits for each
     // write) fell behind and once dropped what it held. Hand it more only when it is nearly empty; the
     // backlog stays in these queues, which the save keeps.
@@ -1652,6 +1794,15 @@ void OnWelcome() {
     // A round in flight went with the old line: the next one starts a little after this join.
     s_round = SyncRound();
     s_syncScheduled = false;
+    // The replay of the neighbour's roads starts (roadsEnd counts it); this town's list goes a little after.
+    s_roadsReplayed = 0;
+    s_invScheduled = true;
+    s_invDue = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                      std::chrono::duration<double>(kInvFirstSeconds));
+}
+
+void OnLineDown() {
+    s_invScheduled = false;   // the next welcome schedules the next list
 }
 
 void OnJoined(Link* link) {
@@ -1780,6 +1931,13 @@ bool OnMessage(const Message& m, std::string* notice) {
         }
         return true;
     }
+    if (m.type == "roadsEnd") {   // every road the neighbour holds is in (restate.h)
+        int64_t count = -1;
+        m.GetInt("count", count);
+        TakeUpStaleRoads(count);
+        return true;
+    }
+    if (m.type == "want") { OnWant(m); return true; }
     if (m.type == "road") { ApplyRoad(m); return true; }
     if (m.type == "nat") { ApplyNat(m); return true; }
     if (m.type == "natBatch" || m.type == "roadBatch" || m.type == "roadsOff") { ApplyBatch(m); return true; }
