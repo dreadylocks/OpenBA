@@ -89,7 +89,7 @@ const kMaxCell = kMaxMapDim * kMaxMapDim;
 // The restate (onInv): a town's whole list of what it holds, in parts of at most kInvChars a list (the game
 // keeps a part's lists under 12,000), at most kMaxInvParts parts and kMaxInvTiles tiles of land.
 const kInvChars = 15000;
-const kMaxInvParts = 128;
+const kMaxInvParts = 512;   // room for kMaxRoadCells road tiles and kMaxBuildings structures at kInvChars a part
 const kMaxInvTiles = 250_000;
 // Flood guard: at most this many messages per socket in kWindowMs.
 // The game paces its shared-map messages to 40 a second (shared_map.cpp kSendRate), a burst of 120.
@@ -420,6 +420,9 @@ export class Room {
     this.env = env;
     this.store = new BufferedStore(ctx);
     this.inv = new Array(kSeats).fill(null);   // a town's list coming in, part by part (onInv)
+    // Buildings refused for standing on the neighbour's land, per seat: the restate does not ask for them
+    // (they would be refused again, and the player told, once a minute). Kept in memory only.
+    this.refused = Array.from({ length: kSeats }, () => new Set());
     // Pings are answered without waking the object (the hibernation API's auto-response).
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
   }
@@ -728,6 +731,7 @@ export class Room {
         return true;
       });
       if (!clear) {
+        this.refused[a.seat].add(id);   // the restate does not ask for it again (onInv)
         this.send(ws, { t: "buildRefused", id, why: "your neighbor holds that land" });
         return;
       }
@@ -735,6 +739,7 @@ export class Room {
     const key = `mirror:${a.seat}`;
     const all = (await this.store.get(key)) || {};
     if (!(id in all) && Object.keys(all).length >= kMaxBuildings) return this.fail(ws, "too many buildings to mirror", false);
+    this.refused[a.seat].delete(id);
     all[id] = rec;
     await this.store.put(key, all);
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "build", ...rec });
@@ -1036,7 +1041,9 @@ export class Room {
       // newer than the list, and stays.
       const mirror = (await this.store.get(`mirror:${seat}`)) || {};
       const roads = (await this.store.get(`roads:${seat}`)) || {};
-      this.inv[seat] = { gen: msg.gen, next: 0, builds: new Map(), roads: new Map(), tiles: new Set(),
+      // `dim`, the map's side, turns a road cell into its tile (0: unknown, no road is taken up).
+      const dim = Number.isInteger(msg.dim) && msg.dim > 0 && msg.dim <= kMaxMapDim ? msg.dim : 0;
+      this.inv[seat] = { gen: msg.gen, next: 0, dim, builds: new Map(), roads: new Map(), tiles: new Set(),
                          heldBuilds: Object.keys(mirror), heldRoads: Object.keys(roads) };
     }
     const acc = this.inv[seat];
@@ -1104,12 +1111,25 @@ export class Room {
       await this.store.put(mkey, mirror);
       for (const p of peers) for (const id of down) this.send(p, { t: "unbuild", id });
     }
-    const wantB = [...acc.builds].filter(([id, built]) => !(id in mirror) || mirror[id].built !== built).map(([id]) => id);
+    const wantB = [...acc.builds]
+      .filter(([id, built]) => (!(id in mirror) || mirror[id].built !== built) && !this.refused[seat].has(id))
+      .map(([id]) => id);
 
-    // Road tiles: taken up (and kept as taken up, as onRoad does), or asked for.
+    // Road tiles: taken up (and kept as taken up, as onRoad does), or asked for. Not one on the neighbour's
+    // land: the town's list names only the roads on land the neighbour does not hold (its copy cannot tell
+    // its own road there from the neighbour's), so a tile both towns laid a road on, where the neighbour won
+    // the land, is not the town's to take up; taking it up would take up the neighbour's road too.
     const rkey = `roads:${seat}`;
     const roads = (await this.store.get(rkey)) || {};
-    const up = acc.heldRoads.filter((c) => c in roads && !acc.roads.has(c));
+    const theirs = String(1 - seat);
+    const blocks = new Map();
+    const up = [];
+    for (const c of acc.heldRoads) {
+      if (!(c in roads) || acc.roads.has(c) || acc.dim === 0) continue;
+      const n = Number(c);
+      if ((await this.tileHolder(n % acc.dim, Math.floor(n / acc.dim), blocks)) === theirs) continue;
+      up.push(c);
+    }
     if (up.length > 0) {
       for (const c of up) delete roads[c];
       await this.store.put(rkey, roads);
@@ -1163,6 +1183,15 @@ export class Room {
                   `taken up, ${claimed.length} tile(s) claimed, ${released.length} given back; asked again for ` +
                   `${wantB.length} building(s), ${wantR.length} road tile(s)`);
     }
+  }
+
+  // Who holds tile x, y: a seat's digit or "."; `cache` keeps the blocks read.
+  async tileHolder(x, y, cache) {
+    if (x < 0 || y < 0 || x >= kMaxMapDim || y >= kMaxMapDim) return ".";
+    const key = `claims:${Math.floor(x / kClaimBlock)}:${Math.floor(y / kClaimBlock)}`;
+    if (!cache.has(key)) cache.set(key, (await this.store.get(key)) || null);
+    const v = cache.get(key);
+    return v ? v[(y % kClaimBlock) * kClaimBlock + (x % kClaimBlock)] : ".";
   }
 
   // Claim tiles (y * kMaxMapDim + x) set to `to(char)` where it gives a char (null: left as it is); only

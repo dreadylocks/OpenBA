@@ -486,7 +486,7 @@ rsSend({ t: "road", cell: 5001, type: 1, tt: 6, tmpl: "Template\\RoadDirt.rsc" }
 await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5001));
 // The town's list: rb1 is gone (its unbuild and release were lost), rb2 is further on, rb3 is new (lost too),
 // road 5001 is taken up and 5002 laid (both lost), and a tile at 120,120 is new land.
-rsSend({ t: "inv", gen: 1, part: 0, b: "rb2:60;rb3:100", r: "5000:1" });
+rsSend({ t: "inv", gen: 1, part: 0, dim: 384, b: "rb2:60;rb3:100", r: "5000:1" });
 rsSend({ t: "inv", gen: 1, part: 1, last: true, r: "5002:0", l: "110,110,1,1;120,120,1,1" });
 const rdown = await tryWait(rw.wait((m) => m.t === "unbuild" && m.id === "rb1"));
 check(!!rdown, "a building the town's list does not name is taken down, and the neighbour told");
@@ -507,13 +507,23 @@ await tryWait(rs.wait((m) => m.t === "claimed" && m.id === "rc2"));
 rsSend(house("rb3", 130, 130, 1, 100));
 rsSend({ t: "road", cell: 5002, type: 0, tt: 6, tmpl: "Template\\RoadStone.rsc" });
 await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5002));
+// A road of the town's on land the neighbour won (cell 5003 is tile 11,13 on a 384 map), which its list
+// cannot name, and a building of its refused for standing on the neighbour's land.
+rw.ws.send(JSON.stringify({ t: "claim", id: "wc1", rects: "11,13,1,1;20,20,2,2" }));
+await tryWait(rw.wait((m) => m.t === "claimed" && m.id === "wc1"));
+rsSend({ t: "road", cell: 5003, type: 1, tt: 6, tmpl: "Template\\RoadDirt.rsc" });
+await tryWait(rw.wait((m) => m.t === "road" && m.cell === 5003));
+rsSend(house("rb9", 20, 20, 2, 100));
+await tryWait(rs.wait((m) => m.t === "buildRefused" && m.id === "rb9"));
 const seenRs = rs.inbox.length;
 const seenRw = rw.inbox.length;
-rsSend({ t: "inv", gen: 2, part: 0, last: true, b: "rb2:60;rb3:100", r: "5000:1;5002:0", l: "110,110,1,1;120,120,1,1;130,130,1,1" });
+rsSend({ t: "inv", gen: 2, part: 0, last: true, dim: 384, b: "rb2:60;rb3:100;rb9:100", r: "5000:1;5002:0", l: "110,110,1,1;120,120,1,1;130,130,1,1" });
 await new Promise((r) => setTimeout(r, 500));
 check(rs.inbox.length === seenRs && rw.inbox.length === seenRw, "a list that matches the record changes nothing and asks for nothing");
+check(!rw.inbox.some((m) => m.t === "road" && m.cell === 5003 && m.off), "a road of the town's on the neighbour's land is not taken up");
+check(!rs.inbox.some((m) => m.t === "want" && /rb9/.test(m.b || "")), "a building the relay refused is not asked for again");
 // A building that arrives while a list is coming in is newer than the list: it stays.
-rsSend({ t: "inv", gen: 3, part: 0, b: "rb2:60" });
+rsSend({ t: "inv", gen: 3, part: 0, dim: 384, b: "rb2:60;rb9:100" });
 rsSend(house("rb4", 140, 140, 1, 10));
 rsSend({ t: "inv", gen: 3, part: 1, last: true, b: "rb3:100", r: "5000:1;5002:0", l: "110,110,1,1;120,120,1,1;130,130,1,1" });
 await new Promise((r) => setTimeout(r, 500));
@@ -529,7 +539,7 @@ rw.ws.close();
 await new Promise((r) => setTimeout(r, 300));
 const rw2 = opener(restRoom, { t: "hello", pass: "pw6", name: "Watcher", join: true });
 const rend = await tryWait(rw2.wait((m) => m.t === "roadsEnd"));
-check(rend && rend.count === 2 && !rw2.inbox.some((m) => m.t === "road" && m.cell === 5001 && !m.off),
+check(rend && rend.count === 3 && !rw2.inbox.some((m) => m.t === "road" && m.cell === 5001 && !m.off),
       "a joining town gets the neighbour's roads, then roadsEnd with their count");
 rs.ws.close();
 rw2.ws.close();

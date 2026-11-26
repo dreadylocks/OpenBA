@@ -64,7 +64,8 @@ std::vector<std::string> RowRuns(const std::vector<uint8_t>& mask, int dim) {
             if (in && start < 0) {
                 start = x;
             } else if (!in && start >= 0) {
-                out.push_back(std::to_string(start) + "," + std::to_string(y) + "," + std::to_string(x - start) + ",1");
+                out.push_back(std::to_string(start) + "," + std::to_string(y) + "," + std::to_string(x - start) +
+                              ",1");
                 start = -1;
             }
         }

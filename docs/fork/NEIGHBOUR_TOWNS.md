@@ -863,5 +863,5 @@ the nature sync mended anything then, because neither town was building.
     the neighbour got `unbuild`, `roadsOff` and the house's land `released`.
   - An older stage of one of the game's buildings, planted the same way, was asked for (`want`) and sent
     again.
-  - relay selftest 79 checks; unit tests for the list's parts, row runs, stale roads, the `want` lists
+  - relay selftest 81 checks; unit tests for the list's parts, row runs, stale roads, the `want` lists
     and the dead-line check.

@@ -370,8 +370,10 @@ UNIT_TEST(ext_neighbour_link_a_quiet_line_is_closed_and_joined_again) {
         return count(v, Neighbour::Incoming::Kind::Connected) >= 2;
     }));
     bool quiet = false;
-    for (const Neighbour::Incoming& in : got)
-        quiet = quiet || (in.kind == Neighbour::Incoming::Kind::Disconnected && in.detail == "the relay went quiet");
+    for (const Neighbour::Incoming& in : got) {
+        if (in.kind == Neighbour::Incoming::Kind::Disconnected && in.detail == "the relay went quiet")
+            quiet = true;
+    }
     CHECK(quiet);
     {
         std::lock_guard<std::mutex> lock(net.mu);
@@ -394,13 +396,13 @@ UNIT_TEST(ext_neighbour_link_a_live_line_stays_up_and_pings_while_busy) {
     opt.url = "ws://fake";
     opt.hello = Message("hello").Set("room", "r");
     opt.pingMs = 50;
-    opt.deadMs = 300;
+    opt.deadMs = 1000;   // far above the 20 ms between frames, so a busy machine does not trip it
     link.Start(opt);
     std::vector<Neighbour::Incoming> got;
     CHECK(PollUntil(link, got, [](const std::vector<Neighbour::Incoming>& v) {
         return !v.empty() && v[0].kind == Neighbour::Incoming::Kind::Connected;
     }));
-    for (int i = 0; i < 40; ++i) {   // 800 ms: well past deadMs
+    for (int i = 0; i < 75; ++i) {   // 1.5 s: past deadMs
         link.Send(Message("chat").Set("text", "busy"));
         {
             std::lock_guard<std::mutex> lock(net.mu);
@@ -411,7 +413,9 @@ UNIT_TEST(ext_neighbour_link_a_live_line_stays_up_and_pings_while_busy) {
         link.Poll(got);
     }
     bool dropped = false;
-    for (const Neighbour::Incoming& in : got) dropped = dropped || in.kind == Neighbour::Incoming::Kind::Disconnected;
+    for (const Neighbour::Incoming& in : got) {
+        if (in.kind == Neighbour::Incoming::Kind::Disconnected) dropped = true;
+    }
     CHECK(!dropped);
     {
         std::lock_guard<std::mutex> lock(net.mu);

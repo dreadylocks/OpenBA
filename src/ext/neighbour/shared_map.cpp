@@ -144,8 +144,14 @@ bool s_invScheduled = false;                // a welcome came on this line: list
 std::chrono::steady_clock::time_point s_invDue;
 uint64_t s_invGen = 0;
 uint64_t s_invLoggedJoin = 0;               // the join whose first list was logged
-std::vector<uint32_t> s_roadSeen;           // per cell: the join whose replay last named the neighbour's road there
-uint64_t s_roadsReplayed = 0;               // the neighbour's road tiles replayed in this join (roadsEnd's count)
+// Structures of ours the relay refused to mirror on this line (buildRefused: they stand on the neighbour's
+// land). A `want` for one is not answered, or it would be refused, and the player told, once a minute; the
+// next join sends every structure again (OnJoined), and the list always names them, so none is taken down.
+std::set<std::string> s_refusedIds;
+// Per cell: the join whose replay last named the neighbour's road there; and how many of its road tiles this
+// join's replay brought (roadsEnd's count).
+std::vector<uint32_t> s_roadSeen;
+uint64_t s_roadsReplayed = 0;
 std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: not news
 std::vector<Message> s_pending;             // road / resource messages for the relay
 uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
@@ -519,7 +525,8 @@ void SendInventory(Link* link) {
     for (size_t i = 0; i < n; ++i) {
         if (cells[i].field_0x2A == 0xFF || s_peer[i] != 0) continue;
         roadLand[i] = 1;
-        if (cells[i].field_0x2B != 0x80) roads.push_back(std::to_string(i) + ":" + std::to_string(cells[i].field_0x2A));
+        if (cells[i].field_0x2B != 0x80)
+            roads.push_back(std::to_string(i) + ":" + std::to_string(cells[i].field_0x2A));
     }
     const size_t structures = land.size();
     for (std::string& run : Restate::RowRuns(roadLand, s_dim)) land.push_back(std::move(run));
@@ -528,6 +535,7 @@ void SendInventory(Link* link) {
     for (size_t i = 0; i < parts.size(); ++i) {
         Message m("inv");
         m.SetInt("gen", static_cast<int64_t>(s_invGen)).SetInt("part", static_cast<int64_t>(i));
+        if (i == 0) m.SetInt("dim", s_dim);   // the relay reads a road cell's tile with it
         if (!parts[i].builds.empty()) m.Set("b", parts[i].builds);
         if (!parts[i].roads.empty()) m.Set("r", parts[i].roads);
         if (!parts[i].land.empty()) m.Set("l", parts[i].land);
@@ -536,8 +544,8 @@ void SendInventory(Link* link) {
     }
     if (s_invLoggedJoin != s_joinCount) {   // the first list of each join: once a minute would be noise
         s_invLoggedJoin = s_joinCount;
-        fprintf(stderr, "[Neighbour] shared map: this town's list to the relay: %zu structure(s), %zu finished road "
-                        "tile(s), land in %zu footprint(s) and %zu road run(s), %zu part(s)\n",
+        fprintf(stderr, "[Neighbour] shared map: this town's list to the relay: %zu structure(s), "
+                        "%zu finished road tile(s), land in %zu footprint(s) and %zu road run(s), %zu part(s)\n",
                 builds.size(), roads.size(), structures, land.size() - structures, parts.size());
     }
 }
@@ -564,6 +572,7 @@ void OnWant(const Message& m) {
     size_t roads = 0;
     for (const std::string& id : Restate::WantedIds(m.GetOr("b", ""))) {
         if (s_mine.count(id) == 0) continue;   // gone since the list: its unbuild is on the way
+        if (s_refusedIds.count(id) > 0) continue;
         s_buildQueue.push_back(id);
         ++builds;
     }
@@ -574,9 +583,11 @@ void OnWant(const Message& m) {
         Queue(OwnRoadMessage(static_cast<size_t>(cell), c));
         ++roads;
     }
+    if (builds + roads == 0) return;
     ++s_waitingAdds;
-    fprintf(stderr, "[Neighbour] shared map: the relay's record lacked %zu structure(s) and %zu road tile(s) of this "
-                    "town's: sent again\n", builds, roads);
+    fprintf(stderr, "[Neighbour] shared map: the relay's record lacked %zu structure(s) and %zu road tile(s) "
+                    "of this town's: sent again\n",
+            builds, roads);
 }
 
 // The join's replay of the neighbour's roads is in (`roadsEnd`): a road of theirs this copy still holds and
@@ -587,8 +598,8 @@ void TakeUpStaleRoads(int64_t count) {
     Map* map = TheMap();
     if (map == nullptr || !EnsureGrid()) return;
     if (count < 0 || static_cast<uint64_t>(count) != s_roadsReplayed) {
-        fprintf(stderr, "[Neighbour] shared map: the relay replayed %lld of the neighbor's road tile(s) and %llu "
-                        "arrived: none taken up\n",
+        fprintf(stderr, "[Neighbour] shared map: the relay replayed %lld of the neighbor's road tile(s) "
+                        "and %llu arrived: none taken up\n",
                 static_cast<long long>(count), static_cast<unsigned long long>(s_roadsReplayed));
         return;
     }
@@ -596,7 +607,8 @@ void TakeUpStaleRoads(int64_t count) {
     const MapCell* cells = map->cells.GetData();
     std::vector<uint8_t> road(n, 0);
     for (size_t i = 0; i < n; ++i) road[i] = (cells[i].field_0x2A != 0xFF && cells[i].field_0x2B != 0x80) ? 1 : 0;
-    const std::vector<int> stale = Restate::StaleRoads(s_peer, road, s_roadSeen, static_cast<uint32_t>(s_joinCount));
+    const std::vector<int> stale =
+        Restate::StaleRoads(s_peer, road, s_roadSeen, static_cast<uint32_t>(s_joinCount));
     if (stale.empty()) return;
     s_applying = true;
     for (int cell : stale) {
@@ -1011,6 +1023,7 @@ void End() {
     s_rescanRoads = false;
     s_invScheduled = false;
     s_invLoggedJoin = 0;
+    s_refusedIds.clear();
     s_roadSeen.clear();
     s_roadsReplayed = 0;
     s_applied = Applied();
@@ -1795,10 +1808,13 @@ void OnWelcome() {
     s_round = SyncRound();
     s_syncScheduled = false;
     // The replay of the neighbour's roads starts (roadsEnd counts it); this town's list goes a little after.
+    // Every structure goes again (OnJoined): a refusal on the old line says nothing about this one.
     s_roadsReplayed = 0;
+    s_refusedIds.clear();
     s_invScheduled = true;
-    s_invDue = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                                      std::chrono::duration<double>(kInvFirstSeconds));
+    s_invDue = std::chrono::steady_clock::now() +
+               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                   std::chrono::duration<double>(kInvFirstSeconds));
 }
 
 void OnLineDown() {
@@ -1890,6 +1906,7 @@ bool OnMessage(const Message& m, std::string* notice) {
         // player is told.
         const std::string id = m.GetOr("id", "");
         auto it = s_mine.find(id);
+        if (it != s_mine.end()) s_refusedIds.insert(id);
         ComponentEntity* e = it != s_mine.end() ? it->second.entity.Get() : nullptr;
         GameUpdateLoop* g = GameUpdateLoop::_singleton;
         const double age = it != s_mine.end()
