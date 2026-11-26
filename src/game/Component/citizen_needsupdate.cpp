@@ -8,7 +8,7 @@
 //   0x1401121e0  CitizenComponent_helper_21e0   — msg 0: if the target entity has
 //                a ResidenceComponent (finder 0x140008090, type DAT_1401c7cf0)
 //                that passes the warm-house check FUN_14012ac30, zero the
-//                citizen's thirst (+0x48).
+//                citizen's coldness (+0x48).
 //
 // msg 2 (EAT) delegates to CitizenComp_ReleaseWorkplace (0x1401152e0) in
 // citizencomponent.cpp — NOTE the retail Ghidra label "ReleaseWorkplace" is a

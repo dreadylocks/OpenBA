@@ -67,6 +67,7 @@
 #include "Game/PlayerToolManager.h"
 #include "ui/DialogController.h"
 #include "Entity/ComponentEntity.h"   // B4 S4 RT2: InternalPtr<ComponentEntity>::Get() needs the class complete
+#include "ext/registry.h"   // Ext::Fix().createbar_scale
 
 namespace {
 
@@ -386,7 +387,11 @@ void PlayerToolManager::UpdateCreateBar(int param_2, int param_3,
         *cachedY = static_cast<float>(screenY);
     }
 
-    dialog->SetUpperLeft(static_cast<int>(*cachedX), static_cast<int>(*cachedY), true);
+    // FIX createbar_scale (docs/retail_bugs.md section 11): fe960 already scaled the projected rectangle
+    // by the UI scale (pixels * uiScale / 100, the UI's own units), and retail's `true` here scales it
+    // again, so at any UI scale but 100% the label lands at scale^2 of the pixel position (half of it on
+    // a Retina Mac, whose default scale is 50%). With the fix the position goes in unscaled.
+    dialog->SetUpperLeft(static_cast<int>(*cachedX), static_cast<int>(*cachedY), !Ext::Fix().createbar_scale);
     {
         static bool s_posLogged = false;
         if (!s_posLogged) {

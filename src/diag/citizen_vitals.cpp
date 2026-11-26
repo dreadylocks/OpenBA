@@ -4,7 +4,7 @@
 // CitizenComponent::Update pick between four of them by field value:
 //   +0x3C age    vs  +0x40 maxAge   -> HandleLifeEvent(2)  old age
 //   +0x44 hunger vs  desc+0xD0 cap  -> HandleLifeEvent(0)  starvation
-//   +0x48 thirst vs  desc+0xF0 cap  -> HandleLifeEvent(1)  thirst
+//   +0x48 cold   vs  desc+0xF0 cap  -> HandleLifeEvent(1)  freezing
 //   health                          -> HandleLifeEvent(3)
 // Burials all logged flags=0x80 ("death with no grave, eventType != 2"), which
 // already rules out old age — so this samples the two accumulators directly and
@@ -61,8 +61,8 @@ void CitizenVitals_Tick(GameUpdateLoop* gameWorld) {
     if (!due) return;
 
     int live = 0, busy = 0, has238 = 0, has248 = 0, hasChar = 0;
-    float ageMax = 0, hungerMax = 0, thirstMax = 0;
-    double ageSum = 0, hungerSum = 0, thirstSum = 0;
+    float ageMax = 0, hungerMax = 0, coldMax = 0;
+    double ageSum = 0, hungerSum = 0, coldSum = 0;
     float maxAgeOf0 = 0;
 
     for (int i = 0; i < n; ++i) {
@@ -71,13 +71,13 @@ void CitizenVitals_Tick(GameUpdateLoop* gameWorld) {
         const float age    = c->age;        // +0x3C
         const float maxAge = c->maxAge;     // +0x40
         const float hunger = c->hunger;     // +0x44
-        const float thirst = c->coldness;   // +0x48 (the header's name; this file calls it thirst)
+        const float cold   = c->coldness;   // +0x48
         if (live == 0) maxAgeOf0 = maxAge;
         ++live;
-        ageSum += age; hungerSum += hunger; thirstSum += thirst;
+        ageSum += age; hungerSum += hunger; coldSum += cold;
         if (age > ageMax)       ageMax = age;
         if (hunger > hungerMax) hungerMax = hunger;
-        if (thirst > thirstMax) thirstMax = thirst;
+        if (cold > coldMax)     coldMax = cold;
 
         // "Frozen" has two very different causes and this separates them:
         //   busy == 0 every sample  -> the AI never issues an action at all
@@ -114,10 +114,10 @@ void CitizenVitals_Tick(GameUpdateLoop* gameWorld) {
 
     std::fprintf(stderr,
         "[Vitals] frame=%d citizens=%d  age mean=%.2f max=%.2f (maxAge[0]=%.2f)  "
-        "hunger mean=%.1f max=%.1f  thirst mean=%.1f max=%.1f  "
+        "hunger mean=%.1f max=%.1f  cold mean=%.1f max=%.1f  "
         "char=%d busy=%d ibp238=%d ibp248=%d\n",
         frame, live, ageSum / live, ageMax, maxAgeOf0,
-        hungerSum / live, hungerMax, thirstSum / live, thirstMax,
+        hungerSum / live, hungerMax, coldSum / live, coldMax,
         hasChar, busy, has238, has248);
     std::fflush(stderr);
 }

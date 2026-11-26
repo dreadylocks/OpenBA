@@ -45,7 +45,7 @@ UNIT_TEST(ext_registry_table_shape) {
     // The three fixes block FIXPILOT wires, default ON, no class.
     for (const char* id : {"icon_slide", "residence_goto", "tavern_counter", "start_barn_height",
                            "ui_scale_layout", "rock_seat", "terrain_resort",
-                           "large_packages"}) {
+                           "large_packages", "createbar_scale"}) {
         const Ext::Entry& e = E(id);
         CHECK(e.tier == Ext::Tier::Fix);
         CHECK(e.cls == Ext::Class::None);

@@ -198,3 +198,61 @@ that print the same nature hash hold the same natural resources, tile and templa
 - Unstamped records from before this run decide a tie for the removal, so a tile where one town removed
   a plant and the other planted the same kind again later loses that plant once on a reload (about 10 of
   15,000 in val-5).
+
+## Results, 2026-11-25 (Mac against Windows, room val-6, test relay)
+
+val-6: seed 9465646, Medium, CC Lake Waters, Mediterranean (No Snow), disasters off, CC Medium+ start; Mac
+seat 0 at 160,198, PC seat 1 at 240,192. Both games on the dev loop, so every pushed fix relaunched both
+mid-game (four times), which doubled as a quit-and-rejoin check each time.
+
+| # | Result | Notes |
+|---|---|---|
+| 7 | pass | Dirt roads both ways (Mac 168..200 east, PC 233..188 west, overlapping 188..200) and a planned stone road. Each town's finished tiles arrive as real roads (the fingerprints' road hashes matched at the same moment, roads 109 `95ec1381010a7d58`). The neighbour's road is refused by the removal tool, silently. Found the planned-road bug below. Not checked: the speed bonus. |
+| 9, 11 | pass | Crop fields, orchards, a pasture, a wool pen and forester lodges on both sides: the neighbour sees the field's soil, the orchard's ground, the lodge's foundation and the pasture's fence going up. An unbuilt pasture or pen draws nothing on its owner's map (both platforms); see below. |
+| 14 | pass | Goods both ways while paused: they leave storage at once and arrive at once. An adversarial double send (two clicks 0.1 s apart) arrived as exactly two parcels (+50). Three parcels (500 + 250 + 50) and a chat line sent while the Mac was out of the room arrived once each on its rejoin (+800 exactly). |
+| 15 | pass | A family of 3 Mac to PC (homeless until houses), a family of 4 PC to Mac sent during a 10x run: each arrived once, alive. |
+| 16 | pass | Quit to the menu and rejoin from the lobby, and four dev-loop relaunches: mirrors stayed drawn on the other map while a town was away; claims made while the other was away (two cabins) showed on its return; no refusals. |
+| 18 | pass | The Mac's town froze to death (see below), so it started over in its seat: on the PC its old cabins, field, pasture, lodge, 24 road tiles and land all vanished (roads 113 to 89); the PC then laid a road on that land with no refusal; the next sync round mended 37 blocks once and then matched. |
+| 8 | pass | Both towns marked the same 14 x 10 forest on the middle line; both felled into it at 5x and 10x: no crash, 0 "found nothing here", 0 "off the tile's slots", and the sync matched afterwards. |
+| 19 | pass | One hour at 10x, 17:34:43 to 18:35 UTC, after both towns had started over: no crash or hang on either machine, 0 dropped (queue full). Neither town survived it (both froze or starved in their first winter, unattended), so most of the hour was nature: the Mac sent 11,789 plants and 12,378 removals, the PC 12,702 and 12,360, 0 of them on the neighbour's half. Every sync round for the other's half matched, except the first round after a reconnect: each machine lost the relay once (PC about 18:12, Mac 18:34), reconnected by itself, and that round mended 17 and 1 blocks; the next matched. At rest after the hour both sides' last rounds said "matches" (218 and 223 blocks). Roads stayed equal (0; earlier 109 at the same moment). The relay wrote about 390 storage rows a minute (fixed below). |
+
+Found and fixed during the run:
+- **A planned road did not show** until some other road tile finished somewhere: `RoadTool::CalcPath` placed
+  the tiles (type and the queued marker 0x80, which the road mesh draws see-through) but never rebuilt the
+  mesh. A road laid while paused, or with nothing under construction, was invisible (the user's "when you
+  lay a road you can't tell"). It now rebuilds after its placement loop; both machines then showed a road
+  laid while paused at once, and kept it across a reload.
+- **The cost/size label of a dragged tool sat at half the cursor's position on the Mac**: retail scales the
+  label's rectangle by the UI scale twice (`docs/retail_bugs.md` section 11), which shows at any scale but
+  100%, and a Retina Mac defaults to 50%. `fix.createbar_scale`.
+- **Diagnostics called the cold meter thirst**: the Mac's town froze to death (half its firewood sent to the
+  PC, no woodcutter) and `[Burial]` said "thirst". Now `cold` / `freezing`.
+- **The relay wrote about 350 storage rows a minute at 10x** (counted by a new `[rows]` line in
+  `wrangler tail`): every nature shard touched in 5 s was a row. Cloudflare's free plan allows 100,000 a day
+  for the whole account, the live relay included, so a few hours of 10x play would have stopped every room.
+  Nature records now reach storage once a minute; roads, mirrors and the rest keep 5 s. A local relay with two
+  pretend towns sending 80 changes a second (ten times the hour's pace) then wrote 73 to 75 rows a minute.
+  A deploy does not reach a room already running: its object keeps the old code until it restarts.
+
+### Open after this run
+
+- An unbuilt pasture or animal pen draws nothing on its owner's own map (no outline, no fence ghosts), on
+  both platforms; the neighbour's mirror draws its ground. Unbuilt houses show only the dark foundation.
+  Whether retail shows more (a see-through model, fence ghosts) is not known: needs a look at retail.
+- Removing a planned road with "Remove Structures" (Colonial Charter) left its see-through strip drawn. The
+  removal tool's own path rebuilds the mesh when it takes a planned tile up, so the removal itself probably
+  did not apply to roads; not followed up.
+- A town on a shared map gets the room's last 20 chat lines again when it starts over (it has no saved chat
+  position). By design, but it reads like new messages.
+- The drive mailbox ends a press with its script (`Runner::Start` clears the held buttons), so a road drag
+  must be click-start, click-end, or press, moves and release in one script; a separate `shot` script sees
+  the button already up.
+- Speed steps are 1, 2, 5 and 10x, and play resumes at the last speed: "play" then one "faster" from a 5x
+  pause gives 10x, not 2x.
+- A town whose connection dies without a close stays "here" on the other side until it reconnects (the PC's
+  18:12 drop showed on the Mac only as "PcTown has arrived" later). Changes sent to it meanwhile are lost to it,
+  and the sync mended them after the reconnect. The relay could notice a stale socket from its pings.
+- `wrangler tail` samples a busy room's events, so its `[rows]` and alarm lines are not a count; measure a rate
+  on a local relay (`npm run dev`), whose log keeps every line.
+- Neither town survives an unattended hour at 10x from a CC Medium+ start (both froze or starved in their
+  first winters); the hour run's second half was nature only on the Mac's side.
