@@ -256,3 +256,63 @@ Found and fixed during the run:
   on a local relay (`npm run dev`), whose log keeps every line.
 - Neither town survives an unattended hour at 10x from a CC Medium+ start (both froze or starved in their
   first winters); the hour run's second half was nature only on the Mac's side.
+
+## Results, 2026-11-27 (Mac against Windows, room val-7, test relay): the restate
+
+The subject was PR 15 (NEIGHBOUR_TOWNS.md §14): a change sent down a line that died without closing is put
+right on the next join and by the town's minute list. Both machines ran 3ab9b1360 (the tree merged as
+116e8295e), and the test relay ran the same relay code. The Mac's game reached the relay through a proxy on
+the Mac that can silence a line both ways without closing it. While a line is silent, the proxy keeps the
+relay's side open, so the relay goes on treating the town as present and sending to it. It also silences
+every new line the game opens until the silence ends.
+
+- **Step (a), both lines up.** Each town laid a dirt road and a house site and ran at 5x until the road was
+  finished, then paused. At rest the fingerprints were the same on both machines: nature 25317
+  `3c4259923cd2d016`, roads 14 `6e98bbd9a2780919`. Each town drew the other's structures, and the Mac's lists
+  matched the relay's record every minute (no correction).
+- **Step (b), the Mac's line silent from 22:55:02 to 23:02:16 UTC.**
+  - The Mac removed its second house site (190,205). Its `unbuild` and `release` went down the silent line
+    and were dropped.
+  - The PC removed its Log Cabin site (242,189). The relay passed `unbuild` and `released` to the Mac's
+    silent line, and they were dropped.
+  - The Mac's game said "the relay went quiet" 60 s after it last heard anything, then retried every 62 s;
+    each new line was silenced until the end.
+- **After the Mac rejoined (23:02:16).**
+  - The relay replaced the old line (4001), which it had treated as present all along.
+  - The Mac dropped the PC's cabin site at `mirrorEnd` ("1 of the neighbor's structure(s) taken down while
+    away removed").
+  - The Mac's first list, 15 s later, had the relay take down the Mac's site and give back its 8 tiles
+    (`[restate] room val-7, seat 0: 1 building(s) taken down, 0 road tile(s) taken up, 0 tile(s) claimed,
+    8 given back; asked again for 0`).
+  - On the PC the Mac's empty foundation frame was gone: still drawn in its 14:58:29 (PC time) shot, gone
+    by 15:05:06, after the relay's correction at 15:02:31. No line said so (see below).
+  - After the next nature sync both machines printed the same fingerprint: nature 25317
+    `e84c2cfa80ec6d84`, roads 14 `6e98bbd9a2780919`.
+  - The lists after that matched: no further correction.
+  - The Mac's screenshot of PcTown shows the barn, the field's ground and the finished road, and no cabin
+    site.
+- **Not covered: taking up a road.** Remove Roads did not take up a finished Colonial Charter dirt road on
+  either machine: the area showed red ("Remove Roads 4x11"), and the road was still there after 25 s at 1x.
+  So the `roadsEnd` sweep was not exercised between two machines. It was on the Mac, against a scripted
+  neighbour (§14).
+
+### Found during this run
+
+- **On the PC, clicks on the map do nothing while the game is paused.** The toolbar and menus work; the road
+  tool's green hover tile follows the mouse, but a click starts nothing, and a right click does not cancel.
+  Unpaused at 1x, the same clicks work at once. On the Mac, placing a road and a house and Remove Structures
+  all worked while paused. This first looked like dead input after quitting val-6 to the menu and starting
+  val-7 in the same process, but the restart only happened to unpause.
+- **Remove Roads does not take up a finished road** (Colonial Charter dirt road, both machines). This is
+  probably the same as the Remove Structures item from 2026-11-25, and not followed up.
+- **The Mac's debug build was stopped by the 20 s hang watchdog** during the menu-to-game switch while the
+  machine was heavily loaded (load average 9 to 14, the game at 1.3 fps). The main thread was in
+  `Ext::DrawGather` `ExtClean`, under `Scene::Clean` and `MenuDialogLoopT::TickParticles`. The release build
+  then started at once. Probably one very slow frame rather than a deadlock; not followed up.
+- **A structure the neighbour took down was not logged** (seen on the PC): an `unbuild` changed no
+  counter, so the "from the neighbor so far" line still said "now 4 of their structure(s) drawn".
+  Fixed here: that line now counts the neighbour's structures taken down ("N structure(s) taken down")
+  and is printed again when one is. Built on the Mac; not run in a game.
+- **A player sees only the first list of each join in the log** ("this town's list to the relay"); later lists
+  are not logged, by design. The relay logs a `[restate]` line only when it corrects something, so its log,
+  or the game's "record lacked" line, is where a correction shows.
