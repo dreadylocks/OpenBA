@@ -156,8 +156,11 @@ std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: n
 std::vector<Message> s_pending;             // road / resource messages for the relay
 uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
 // What the neighbour's changes did here (logged when it changes): roads laid / taken up,
-// resources removed / planted, tiles marked solid, grounds painted under its structures.
-struct Applied { int roads = 0, unroads = 0, removed = 0, planted = 0, solid = 0, refused = 0, grounds = 0; } s_applied, s_appliedLogged;
+// resources removed / planted, tiles marked solid, grounds painted under its structures, its structures
+// taken down (an `unbuild`; one taken down while the line was down is logged at mirrorEnd).
+struct Applied {
+    int roads = 0, unroads = 0, removed = 0, planted = 0, solid = 0, refused = 0, grounds = 0, unbuilt = 0;
+} s_applied, s_appliedLogged;
 // Why the last change was not applied (logged with the counts).
 const char* s_lastRefusal = "";
 
@@ -937,6 +940,7 @@ void RemoveMirror(const std::string& id) {
     if (it == s_mirrors.end()) return;
     FreeMirror(it->second, true);
     s_mirrors.erase(it);
+    ++s_applied.unbuilt;   // counted in the "from the neighbor so far" line
 }
 
 double s_tokens = kSendBurst;
@@ -1739,16 +1743,17 @@ void Tick(Link* link, uint64_t frame) {
         const Applied& a = s_applied;
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
-            a.solid != l.solid || a.refused != l.refused || a.grounds != l.grounds) {
+            a.solid != l.solid || a.refused != l.refused || a.grounds != l.grounds || a.unbuilt != l.unbuilt) {
             // Structures, solid tiles and grounds as they stand now (a rejoin re-sends the same buildings,
             // which replace their mirrors: a running total would count them again).
             size_t solidNow = 0, groundsNow = 0;
             for (uint8_t ref : s_solidRef) solidNow += ref > 0 ? 1 : 0;
             for (const auto& kv : s_mirrors) groundsNow += kv.second.decalId >= 0 ? 1 : 0;
             fprintf(stderr, "[Neighbour] shared map: from the neighbor so far: %d road tile(s) laid, %d taken up, "
-                            "%d resource(s) gone, %d planted; now %zu of their structure(s) drawn, %zu tile(s) solid, "
-                            "%zu ground(s) painted; %d not applied%s%s\n",
-                    a.roads, a.unroads, a.removed, a.planted, s_mirrors.size(), solidNow, groundsNow, a.refused,
+                            "%d resource(s) gone, %d planted, %d structure(s) taken down; now %zu of their "
+                            "structure(s) drawn, %zu tile(s) solid, %zu ground(s) painted; %d not applied%s%s\n",
+                    a.roads, a.unroads, a.removed, a.planted, a.unbuilt, s_mirrors.size(), solidNow, groundsNow,
+                    a.refused,
                     a.refused > 0 ? " (last: " : "", a.refused > 0 ? (std::string(s_lastRefusal) + ")").c_str() : "");
             s_appliedLogged = s_applied;
         }
