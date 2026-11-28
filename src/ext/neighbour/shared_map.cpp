@@ -238,7 +238,8 @@ void MarkSolid(uint32_t cell, bool on) {
 void FreePiles(Mirror& m, bool sceneAlive) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     for (size_t i = 0; i < m.piles.size(); ++i) {
-        if (sceneAlive && g != nullptr && g->m_graphicsScene != nullptr) g->m_graphicsScene->RemoveObject(m.pileScene[i]);
+        if (sceneAlive && g != nullptr && g->m_graphicsScene != nullptr)
+            g->m_graphicsScene->RemoveObject(m.pileScene[i]);
         m.piles[i]->~MeshInstance();
         System::MemoryAllocator::MemFree(m.piles[i]);
     }
@@ -336,7 +337,8 @@ bool DrawPiles(Mirror& mir, const std::string& goodList, const std::string& pile
         const size_t k = static_cast<size_t>(p.good);
         if (!looked[k]) {
             looked[k] = true;
-            ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(System::Filename(goods[k].c_str()));
+            const System::Filename path(goods[k].c_str());
+            ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(path);
             const ModelDescription* md = ::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())
                                              ? desc->FindDescription<ModelDescription>()
                                              : nullptr;
@@ -359,7 +361,8 @@ bool DrawPiles(Mirror& mir, const std::string& goodList, const std::string& pile
         if (mem == nullptr) break;
         Graphics::MeshInstance* mesh = ::new (mem) Graphics::MeshInstance();
         mesh->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(gm));
-        mesh->SetTransform(Math::Transform::FromYawPitchOffset(yaw, 0.0f, Math::Vector3(world[0], world[1], 0.0f)));
+        const Math::Vector3 at(world[0], world[1], 0.0f);
+        mesh->SetTransform(Math::Transform::FromYawPitchOffset(yaw, 0.0f, at));
         mesh->UpdateHierarchy();
         mesh->_opacity = kMirrorOpacity;
         mesh->_opacityPrev = kMirrorOpacity;
@@ -371,10 +374,22 @@ bool DrawPiles(Mirror& mir, const std::string& goodList, const std::string& pile
     return true;
 }
 
-// `piles` for a structure not drawn yet (a join's replay sends the structures after): drawn with it.
-struct PendingPiles { std::string goods, list; };
+// `piles` for a structure not drawn yet (a join's replay sends the structures after): drawn with it, or
+// dropped at mirrorEnd when the join's list did not name it. At most kMaxPendingPileChars between them.
+struct PendingPiles {
+    std::string goods;
+    std::string list;
+};
 std::map<std::string, PendingPiles> s_pendingPiles;
-constexpr size_t kMaxPendingPiles = 4000;
+size_t s_pendingPileChars = 0;
+constexpr size_t kMaxPendingPileChars = 1u << 20;
+
+void DropPendingPiles(const std::string& id) {
+    auto it = s_pendingPiles.find(id);
+    if (it == s_pendingPiles.end()) return;
+    s_pendingPileChars -= it->second.goods.size() + it->second.list.size();
+    s_pendingPiles.erase(it);
+}
 
 // A stockpile's piles (mirror_look.h) go to the neighbour as `piles`, passed on by the relay and kept
 // nowhere: checked every kPilesCheckSeconds and sent when they changed, and all of them again every
@@ -441,7 +456,7 @@ void AddMirror(const Message& m) {
     auto pending = s_pendingPiles.find(id);
     if (pending != s_pendingPiles.end()) {
         keep = pending->second;
-        s_pendingPiles.erase(pending);
+        DropPendingPiles(id);
     }
     Mirror mir;
     if (gm != nullptr) {
@@ -462,10 +477,16 @@ void AddMirror(const Message& m) {
     mir.join = s_joinCount;
     if (mir.decalId >= 0) ++s_applied.grounds;
     {
-        int64_t tx = 0, ty = 0, tw = 0, th = 0;
-        if (m.GetInt("tx", tx) && m.GetInt("ty", ty) && m.GetInt("tw", tw) && m.GetInt("th", th) && tw > 0 && th > 0 &&
-            tw <= kMaxMapDim && th <= kMaxMapDim)
-            mir.rect = TileRect{static_cast<int>(tx), static_cast<int>(ty), static_cast<int>(tw), static_cast<int>(th)};
+        int64_t tx = 0;
+        int64_t ty = 0;
+        int64_t tw = 0;
+        int64_t th = 0;
+        const bool have =
+            m.GetInt("tx", tx) && m.GetInt("ty", ty) && m.GetInt("tw", tw) && m.GetInt("th", th);
+        if (have && tw > 0 && th > 0 && tw <= kMaxMapDim && th <= kMaxMapDim) {
+            mir.rect = TileRect{static_cast<int>(tx), static_cast<int>(ty), static_cast<int>(tw),
+                                static_cast<int>(th)};
+        }
     }
     s_mirrors[id] = mir;
     if (!keep.goods.empty() || !keep.list.empty()) DrawPiles(s_mirrors[id], keep.goods, keep.list);
@@ -1156,6 +1177,7 @@ void End() {
     s_roadSeen.clear();
     s_roadsReplayed = 0;
     s_pendingPiles.clear();
+    s_pendingPileChars = 0;
     s_livestock.clear();
     s_pilesAll = true;
     s_pilesTooLong = false;
@@ -1891,7 +1913,8 @@ bool PilesOf(ComponentEntity* e, std::string* goodList, std::string* pileList) {
             if (md == nullptr || md->_meshGroups == nullptr || md->_meshGroupCount < 2) continue;
             const ModelMeshGroup& mg = md->_meshGroups[1];   // SetPileMesh's group
             const std::string path = PathOf(item._resource);
-            if (mg.meshes == nullptr || path.empty() || path.size() > 200 || path.find('|') != std::string::npos) continue;
+            const bool usable = path.size() <= 200 && path.find('|') == std::string::npos;
+            if (mg.meshes == nullptr || path.empty() || !usable) continue;
             int good = -1;
             for (size_t k = 0; k < goods.size(); ++k)
                 if (goods[k] == path) good = static_cast<int>(k);
@@ -1903,7 +1926,8 @@ bool PilesOf(ComponentEntity* e, std::string* goodList, std::string* pileList) {
                 if (mg.meshes[k] != nullptr) meshes.emplace(mg.meshes[k], MirrorLook::Pile{good, k});
         }
     }
-    std::vector<MirrorLook::Pile> piles(static_cast<size_t>(display->piles._size > 0 ? display->piles._size : 0));
+    const int tiles = display->piles._size > 0 ? display->piles._size : 0;
+    std::vector<MirrorLook::Pile> piles(static_cast<size_t>(tiles));
     for (size_t i = 0; i < piles.size(); ++i) {
         const StorageDisplayComponent::Pile& p = display->piles._data[i];
         if (p.sceneId < 0) continue;
@@ -1948,8 +1972,8 @@ void PilesTick(Link* link) {
         if (goods.size() + list.size() > kMaxPileChars) {
             if (!s_pilesTooLong) {
                 s_pilesTooLong = true;
-                fprintf(stderr, "[Neighbour] shared map: %s's piles do not fit a message (%zu chars); not sent\n",
-                        kv.first.c_str(), goods.size() + list.size());
+                fprintf(stderr, "[Neighbour] shared map: %s's piles do not fit a message (%zu chars); "
+                                "not sent\n", kv.first.c_str(), goods.size() + list.size());
             }
             continue;
         }
@@ -1960,6 +1984,8 @@ void PilesTick(Link* link) {
         Message p("piles");
         p.Set("id", kv.first).Set("goods", goods).Set("list", list);
         link->Send(p, /*ephemeral=*/true);
+        // Taken as sent: an ephemeral message the link drops (a line going down) is put right by the
+        // next full round (kPilesEverySeconds, or the neighbour arriving again).
         mine.pilesSent = sig;
     }
     if (s_pilesAll && allSent) {
@@ -1975,7 +2001,10 @@ void OnPiles(const Message& m) {
         return;
     auto it = s_mirrors.find(id);
     if (it == s_mirrors.end()) {
-        if (s_pendingPiles.size() < kMaxPendingPiles || s_pendingPiles.count(id) != 0) s_pendingPiles[id] = {goods, list};
+        DropPendingPiles(id);
+        if (s_pendingPileChars + goods.size() + list.size() > kMaxPendingPileChars) return;
+        s_pendingPiles[id] = PendingPiles{goods, list};
+        s_pendingPileChars += goods.size() + list.size();
         return;
     }
     if (it->second.pileGoods == goods && it->second.pileList == list) return;
@@ -2205,7 +2234,7 @@ bool OnMessage(const Message& m, std::string* notice) {
     }
     if (m.type == "build") { AddMirror(m); return true; }
     if (m.type == "unbuild") {
-        s_pendingPiles.erase(m.GetOr("id", ""));
+        DropPendingPiles(m.GetOr("id", ""));
         RemoveMirror(m.GetOr("id", ""));
         return true;
     }
@@ -2226,6 +2255,15 @@ bool OnMessage(const Message& m, std::string* notice) {
         if (gone > 0)
             fprintf(stderr, "[Neighbour] shared map: %zu of the neighbor's structure(s) taken down while away removed\n",
                     gone);
+        // Piles for a structure the list did not name will not be drawn: the neighbour has no such structure.
+        for (auto it = s_pendingPiles.begin(); it != s_pendingPiles.end();) {
+            if (s_mirrors.count(it->first) != 0) {
+                ++it;
+                continue;
+            }
+            s_pendingPileChars -= it->second.goods.size() + it->second.list.size();
+            it = s_pendingPiles.erase(it);
+        }
         if (s_rescanRoads) {
             s_rescanRoads = false;
             ScanRoads();

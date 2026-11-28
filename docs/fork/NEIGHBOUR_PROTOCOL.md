@@ -116,7 +116,9 @@ others working), the mesh group (0 man, 1 woman), the size x 100 (100 adult, 83 
 model colour's fourth channel x 100 (a villager's clothes index; an animal's size). One message per
 template, its list at most about 12,000 characters: a town of more than about 300 villagers sends its first
 ~300 (walkers.cpp kMaxListChars), and at most 200 animals. The relay passes it on and keeps nothing; the
-neighbour draws each one see-through and lets one no message names for 4 s go.
+neighbour draws each one see-through and lets one no message names for 4 s go. Builds before
+2026-11-27 sent the fourth channel as a whole number: a game of either age draws the other's villagers in
+the wrong clothes (the relay's compat warning names the other build).
 
 ### `piles`
 A stockpile's piles (`mirror_look.h`): `id` (the structure's), `goods` = the templates of the goods it

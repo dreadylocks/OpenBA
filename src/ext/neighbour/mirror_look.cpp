@@ -64,7 +64,8 @@ bool ParsePileList(const std::string& list, size_t maxTiles, int goodCount, std:
         if (end > at) {
             const size_t dot = list.find('.', at);
             if (dot == std::string::npos || dot >= end) return false;
-            if (!ReadNumber(list, at, dot, &p.good) || !ReadNumber(list, dot + 1, end, &p.mesh)) return false;
+            if (!ReadNumber(list, at, dot, &p.good)) return false;
+            if (!ReadNumber(list, dot + 1, end, &p.mesh)) return false;
             if (p.good >= goodCount || p.mesh > kMaxPileMesh) return false;
         }
         piles.push_back(p);

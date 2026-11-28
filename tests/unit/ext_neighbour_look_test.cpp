@@ -77,7 +77,8 @@ UNIT_TEST(ext_neighbour_look_a_bad_pile_list_is_refused) {
 }
 
 UNIT_TEST(ext_neighbour_look_goods_round_trip) {
-    const std::vector<std::string> goods = {"Template\\RawMaterialLogs.rsc", "Template\\RawMaterialStone.rsc"};
+    const std::vector<std::string> goods = {"Template\\RawMaterialLogs.rsc",
+                                            "Template\\RawMaterialStone.rsc"};
     const std::string list = ML::GoodList(goods);
     CHECK(list == "Template\\RawMaterialLogs.rsc|Template\\RawMaterialStone.rsc");
     std::vector<std::string> back;

@@ -892,4 +892,3 @@ neighbour's town looked different here than in its owner's game:
   was reported with its pieces, and once built it drew on the neighbour's map as on its owner's. With
   the colour change, a third room: the neighbour's sheep, lambs smaller, stood as on their owner's map.
 - Not fixed here: Remove Roads takes up no finished road (TWO_PLAYER_TESTING.md, 2026-11-27).
-

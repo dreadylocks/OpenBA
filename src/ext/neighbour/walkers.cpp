@@ -2,11 +2,11 @@
 // src/ext/neighbour/walkers.cpp -- NOT RETAIL. ext.neighbour: the neighbour's villagers, seen (walkers.h)
 // ============================================================================
 // Ours: CitizenBehavior's list (as town.cpp walks it), then our livestock, in a pasture or roaming free
-// (SharedMap::OwnLivestock), each moved by its CharacterComponent as a citizen is. Each one's ModelComponent
-// holds what the neighbour needs: the render position and yaw the move tick writes, the clip on its animation's newest
-// layer, the mesh group (gender), and _color (a citizen's rgb: the size scale, a: the clothes; an animal's
-// four: its size, AnimalComponent::UpdateBehavior). The fourth goes in hundredths: an animal's is a
-// fraction, which a whole number would not keep.
+// (SharedMap::OwnLivestock), each moved by its CharacterComponent as a citizen is. Each one's
+// ModelComponent holds what the neighbour needs: the render position and yaw the move tick writes, the
+// clip on its animation's newest layer, the mesh group (gender), and _color (a citizen's rgb: the size
+// scale, a: the clothes; an animal's four: its size, AnimalComponent::UpdateBehavior). The fourth goes in
+// hundredths: an animal's is a fraction, which a whole number would not keep.
 // Theirs: one Graphics::MeshInstance each, made as the building mirrors are (shared_map.cpp AddMirror),
 // see-through, its clip played as a layer of its own (not the shared instanced pose pool, which only
 // moves with this town's simulation clock), its time advanced here with real time.
@@ -177,9 +177,10 @@ void SendOurs(Link* link) {
         link->Send(m, /*ephemeral=*/true);   // only the newest positions matter
     }
     char line[256];
-    snprintf(line, sizeof line, "%zu of %d citizen(s) and %zu of %zu animal(s) in %zu message(s); skipped: %zu gone, "
-             "%zu not in the scene, %zu without a template", sent, tm->citizens._size, animals, herd.size(), lists.size(),
-             gone, noModel, noTemplate);
+    snprintf(line, sizeof line,
+             "%zu of %d citizen(s) and %zu of %zu animal(s) in %zu message(s); skipped: %zu gone, "
+             "%zu not in the scene, %zu without a template",
+             sent, tm->citizens._size, animals, herd.size(), lists.size(), gone, noModel, noTemplate);
     const Clock::time_point now = Clock::now();
     if (line != s_sendLogged && Seconds(now - s_sendLoggedAt) >= 10.0) {
         s_sendLogged = line;
