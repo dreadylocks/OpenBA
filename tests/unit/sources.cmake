@@ -84,6 +84,7 @@ set(UNIT_TREE_SRCS
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/continents.cpp            #   the Continents map's shape (§12)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/nature_sync.cpp           # ext_neighbour_sync_test.cpp (mending the shared nature)
   ${CMAKE_SOURCE_DIR}/src/ext/neighbour/restate.cpp               # ext_neighbour_restate_test.cpp (the restate on every join)
+  ${CMAKE_SOURCE_DIR}/src/ext/neighbour/mirror_look.cpp           # ext_neighbour_look_test.cpp (a mirror's stage and piles)
   ${CMAKE_SOURCE_DIR}/src/platform/common/websocket_frames.cpp    # websocket_frames_test.cpp (the Linux WebSocket seam's wire format)
   ${CMAKE_SOURCE_DIR}/src/diag/drive_script.cpp                  # drive_script_test.cpp (BANISHED_DRIVE's input script)
   ${CMAKE_SOURCE_DIR}/src/ext/crash_report/report.cpp            # ext_crash_report_test.cpp (ext.crash_reports)

@@ -72,6 +72,7 @@ const kClaimBlock = 32;
 const kMaxClaimRects = 64;
 const kMaxClaimTiles = 4096;   // per message
 const kMaxBuildings = 4000;    // per town
+const kMaxPileChars = 12000;   // a `piles` message's two lists (src/ext/neighbour/shared_map.cpp kMaxPileChars)
 const kBuildingId = /^[0-9a-z_-]{1,40}$/;
 // M3: shared roads and resources. A town's finished road tiles are kept (cell -> road) and handed
 // to a joining town; natural-resource changes (a tree felled, a deposit gone, a sapling planted)
@@ -523,6 +524,7 @@ export class Room {
     if (msg.t === "pause") return this.onPause(ws, a, msg);
     if (msg.t === "speed") return this.onSpeed(ws, a, msg);
     if (msg.t === "walkers") return this.onWalkers(ws, a, msg);
+    if (msg.t === "piles") return this.onPiles(ws, a, msg);
     if (msg.t === "natSyncReq" || msg.t === "natDigest" || msg.t === "natBlockReq" || msg.t === "natBlock") {
       return this.onNatSync(ws, a, msg);
     }
@@ -549,6 +551,19 @@ export class Room {
       return this.fail(ws, "bad walkers", false);
     }
     for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "walkers", tmpl: msg.tmpl, list: msg.list });
+  }
+
+  // A stockpile's piles (src/ext/neighbour/mirror_look.h): the goods it stores and each tile's pile.
+  // Passed straight to the neighbour if it is online, kept nowhere: the town sends them all again
+  // every minute and when the neighbour arrives.
+  onPiles(ws, a, msg) {
+    const id = typeof msg.id === "string" && kBuildingId.test(msg.id) ? msg.id : "";
+    if (!id || typeof msg.goods !== "string" || typeof msg.list !== "string" ||
+        msg.goods.length + msg.list.length > kMaxPileChars || !/^[0-9.,]*$/.test(msg.list) ||
+        /[\u0000-\u001f]/.test(msg.goods)) {
+      return this.fail(ws, "bad piles", false);
+    }
+    for (const peer of this.socketsFor(1 - a.seat)) this.send(peer, { t: "piles", id, goods: msg.goods, list: msg.list });
   }
 
   // The nature sync (src/ext/neighbour/nature_sync.h): the town that does not own a half of the map asks

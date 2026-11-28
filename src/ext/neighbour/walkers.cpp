@@ -1,9 +1,12 @@
 // ============================================================================
 // src/ext/neighbour/walkers.cpp -- NOT RETAIL. ext.neighbour: the neighbour's villagers, seen (walkers.h)
 // ============================================================================
-// Ours: CitizenBehavior's list (as town.cpp walks it). Each citizen's ModelComponent holds what the
-// neighbour needs: the render position and yaw the move tick writes, the clip on its animation's newest
-// layer, the mesh group (gender), and _color (rgb: the size scale, a: the clothes).
+// Ours: CitizenBehavior's list (as town.cpp walks it), then our livestock, in a pasture or roaming free
+// (SharedMap::OwnLivestock), each moved by its CharacterComponent as a citizen is. Each one's ModelComponent
+// holds what the neighbour needs: the render position and yaw the move tick writes, the clip on its animation's newest
+// layer, the mesh group (gender), and _color (a citizen's rgb: the size scale, a: the clothes; an animal's
+// four: its size, AnimalComponent::UpdateBehavior). The fourth goes in hundredths: an animal's is a
+// fraction, which a whole number would not keep.
 // Theirs: one Graphics::MeshInstance each, made as the building mirrors are (shared_map.cpp AddMirror),
 // see-through, its clip played as a layer of its own (not the shared instanced pose pool, which only
 // moves with this town's simulation clock), its time advanced here with real time.
@@ -42,6 +45,7 @@
 
 #include "ext/neighbour/link.h"
 #include "ext/neighbour/protocol.h"
+#include "ext/neighbour/shared_map.h"
 
 namespace Neighbour {
 namespace Walkers {
@@ -54,7 +58,8 @@ constexpr double kSendEvery    = 1.0;      // seconds between our samples
 constexpr double kGlide        = 1.0;      // a sample is reached over this long (one sample interval)
 constexpr double kForgetAfter  = 4.0;      // a villager no sample mentions for this long goes
 constexpr size_t kMaxSent      = 400;      // villagers we send (a bigger town: the first ones)
-constexpr size_t kMaxShown     = 400;      // the neighbour's we draw
+constexpr size_t kMaxAnimals   = 200;      // and our livestock
+constexpr size_t kMaxShown     = 600;      // the neighbour's we draw, villagers and animals
 constexpr size_t kMaxListChars = 12000;    // one message's list (the relay takes 16 KB frames)
 constexpr float  kOpacity      = 0.6f;     // see-through, a little more solid than the buildings
 
@@ -63,8 +68,9 @@ Clock::time_point s_lastSend;
 Clock::time_point s_lastTick;
 bool s_ticked = false;
 
-// Ours: a small id per citizen while it lives (a pointer seen again keeps its id).
-std::unordered_map<const CitizenComponent*, uint32_t> s_ids;
+// Ours: a small id per citizen or animal while it lives (its CitizenComponent or entity, seen again,
+// keeps its id).
+std::unordered_map<const void*, uint32_t> s_ids;
 uint32_t s_nextId = 1;
 
 // Theirs.
@@ -104,30 +110,50 @@ void SendOurs(Link* link) {
     GameUpdateLoop* g = GameUpdateLoop::_singleton;
     CitizenBehavior* tm = g != nullptr ? g->m_citizenList : nullptr;
     if (tm == nullptr) return;
-    std::unordered_map<const CitizenComponent*, uint32_t> ids;
+    std::unordered_map<const void*, uint32_t> ids;
     std::map<std::string, std::string> lists;   // template path -> "id,x,y,z,yaw,clip,grp,scale,cloth;..."
-    size_t sent = 0;
+    size_t sent = 0, animals = 0;
     size_t gone = 0, noModel = 0, noTemplate = 0;
-    for (int i = 0; i < tm->citizens._size && sent < kMaxSent; ++i) {
+    // The citizens, then our livestock: a body each, moved by its CharacterComponent.
+    std::vector<ComponentEntity*> bodies;
+    std::vector<CharacterComponent*> movers;
+    std::vector<const void*> keys;
+    for (int i = 0; i < tm->citizens._size; ++i) {
         CitizenComponent* c = tm->citizens._data[i].Get();
-        if (c == nullptr || c->_entity.Get() == nullptr || ((c->_entity->_entityFlags >> 10) & 1)) {
+        bodies.push_back(c != nullptr ? c->_entity.Get() : nullptr);
+        movers.push_back(c != nullptr ? c->character.Get() : nullptr);
+        keys.push_back(c);
+    }
+    const size_t citizenCount = bodies.size();
+    std::vector<ComponentEntity*> herd;
+    SharedMap::OwnLivestock(&herd);
+    for (ComponentEntity* a : herd) {
+        bodies.push_back(a);
+        movers.push_back(a->FindComponent<CharacterComponent>());
+        keys.push_back(a);
+    }
+    for (size_t i = 0; i < bodies.size(); ++i) {
+        const bool animal = i >= citizenCount;
+        if (animal ? animals >= kMaxAnimals : sent >= kMaxSent) continue;
+        ComponentEntity* body = bodies[i];
+        if (body == nullptr || ((body->_entityFlags >> 10) & 1)) {
             ++gone;
             continue;
         }
-        CharacterComponent* ch = c->character.Get();
+        CharacterComponent* ch = movers[i];
         ModelComponent* mc = ch != nullptr ? ch->modelComponent.Get() : nullptr;
         if (mc == nullptr || mc->modelId < 0) {   // not in the scene
             ++noModel;
             continue;
         }
-        const std::string tmpl = PathOf(c->_entity->_description);
+        const std::string tmpl = PathOf(body->_description);
         if (tmpl.empty()) {
             ++noTemplate;
             continue;
         }
-        auto known = s_ids.find(c);
+        auto known = s_ids.find(keys[i]);
         const uint32_t id = known != s_ids.end() ? known->second : s_nextId++;
-        ids[c] = id;
+        ids[keys[i]] = id;
         const Graphics::MeshInstance& mi = mc->meshInstance;
         const int clip = mi._animation._layers._size > 0 ? mi._animation._layers._data[0]._clipIndex : 0;
         const Math::Vector3& p = mc->transform.translation;
@@ -138,8 +164,11 @@ void SendOurs(Link* link) {
                std::to_string(std::lround(p.y * 100.0f)) + ',' + std::to_string(std::lround(p.z * 100.0f)) + ',' +
                std::to_string(std::lround(mc->yaw * 10.0f)) + ',' + std::to_string(clip) + ',' +
                std::to_string(mc->meshGroup) + ',' + std::to_string(std::lround(mi._color[0] * 100.0f)) + ',' +
-               std::to_string(std::lround(mi._color[3]));
-        ++sent;
+               std::to_string(std::lround(mi._color[3] * 100.0f));
+        if (animal)
+            ++animals;
+        else
+            ++sent;
     }
     s_ids.swap(ids);
     for (const auto& kv : lists) {
@@ -147,9 +176,10 @@ void SendOurs(Link* link) {
         m.Set("tmpl", kv.first).Set("list", kv.second);
         link->Send(m, /*ephemeral=*/true);   // only the newest positions matter
     }
-    char line[200];
-    snprintf(line, sizeof line, "%zu of %d citizen(s) in %zu message(s); skipped: %zu gone, %zu not in the scene, "
-             "%zu without a template", sent, tm->citizens._size, lists.size(), gone, noModel, noTemplate);
+    char line[256];
+    snprintf(line, sizeof line, "%zu of %d citizen(s) and %zu of %zu animal(s) in %zu message(s); skipped: %zu gone, "
+             "%zu not in the scene, %zu without a template", sent, tm->citizens._size, animals, herd.size(), lists.size(),
+             gone, noModel, noTemplate);
     const Clock::time_point now = Clock::now();
     if (line != s_sendLogged && Seconds(now - s_sendLoggedAt) >= 10.0) {
         s_sendLogged = line;
@@ -354,7 +384,7 @@ bool OnMessage(const Message& m) {
         const float yaw = static_cast<float>(v[4]) / 10.0f;
         float scale = static_cast<float>(v[7]) / 100.0f;
         if (scale < 0.3f || scale > 2.0f) scale = 1.0f;
-        const float cloth = static_cast<float>(v[8] < 0 ? 0 : (v[8] > 64 ? 64 : v[8]));
+        const float cloth = static_cast<float>(v[8] < 0 ? 0 : (v[8] > 6400 ? 6400 : v[8])) / 100.0f;
         auto it = s_ghosts.find(id);
         if (it == s_ghosts.end()) {
             if (s_ghosts.size() >= kMaxShown) continue;

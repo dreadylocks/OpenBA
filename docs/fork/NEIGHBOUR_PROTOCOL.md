@@ -108,13 +108,24 @@ game to 1x). The relay passes it to the neighbour, whose game takes the same spe
 the speed of the one already there. Nothing is kept.
 
 ### `walkers`
-This town's villagers, once a second while the neighbour is online (`walkers.h`): `tmpl` (the citizen
-template's path) and `list` = `id,x,y,z,yaw,clip,grp,scale,cloth;...`, integers: a small id per villager
-while it lives, the render position x 100, the yaw in degrees x 10, the animation clip it plays (0
-standing, 1-4 walking, others working), the mesh group (0 man, 1 woman), the size x 100 (100 adult, 83
-student, 66 child) and the clothes index. One message per template, its list at most about 12,000
-characters: a town of more than about 300 villagers sends its first ~300 (walkers.cpp kMaxListChars). The relay passes it on and keeps nothing; the neighbour draws each villager see-through and
-lets one no message names for 4 s go.
+This town's villagers and livestock (in a pasture or roaming free), once a second while the neighbour is
+online (`walkers.h`): `tmpl` (the citizen's or animal's template path) and `list` =
+`id,x,y,z,yaw,clip,grp,scale,cloth;...`, integers: a small id per villager or animal while it lives, the
+render position x 100, the yaw in degrees x 10, the animation clip it plays (0 standing, 1-4 walking,
+others working), the mesh group (0 man, 1 woman), the size x 100 (100 adult, 83 student, 66 child) and the
+model colour's fourth channel x 100 (a villager's clothes index; an animal's size). One message per
+template, its list at most about 12,000 characters: a town of more than about 300 villagers sends its first
+~300 (walkers.cpp kMaxListChars), and at most 200 animals. The relay passes it on and keeps nothing; the
+neighbour draws each one see-through and lets one no message names for 4 s go.
+
+### `piles`
+A stockpile's piles (`mirror_look.h`): `id` (the structure's), `goods` = the templates of the goods it
+stores, `|` between them, and `list` = one entry a footprint tile, in row order, comma-separated: empty for
+a tile with nothing on it, else `good.mesh`, the good's index in `goods` and the mesh of that good's pile
+model (its ModelDescription's group 1) the tile shows. The two lists together are at most 12,000
+characters. Sent when a stockpile's piles change (checked every 5 s), and all of them every minute and
+when the neighbour arrives. The relay passes it on and keeps nothing; the neighbour draws the piles on its
+mirror of the stockpile, and keeps them for a mirror that has not arrived yet.
 
 ### `ping`
 Every 25 s, whatever else the town is sending; answered `pong` at once (without waking the room). A game
@@ -135,7 +146,8 @@ restate put right what went down it.
 | `compat` | `warn` (a sentence for the event log) | a difference that only warns (another build, other mods) |
 | `pause` | `on`, `from` | the neighbour paused (`true`) or carried on (`false`): do the same |
 | `speed` | `x`, `from` | the neighbour changed the game speed: take the same |
-| `walkers` | `tmpl`, `list` | the neighbour's villagers, as above |
+| `walkers` | `tmpl`, `list` | the neighbour's villagers and livestock, as above |
+| `piles` | `id`, `goods`, `list` | the piles on one of the neighbour's stockpiles, as above |
 | `claimed` | `id`, `ok` (bool), `why` | the answer to a `claim` |
 | `claims` / `released` | `seat`, `rects` | the neighbour claimed / released land |
 | `claimBlock` | `bx`, `by`, `size`, `owner` (one char per tile: the neighbour's seat digit or `.`) | the neighbour's land, on join |

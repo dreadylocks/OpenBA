@@ -865,3 +865,31 @@ the nature sync mended anything then, because neither town was building.
     again.
   - relay selftest 81 checks; unit tests for the list's parts, row runs, stale roads, the `want` lists
     and the dead-line check.
+
+## 15. Mirrors look as their owner sees them (2026-11-27)
+The first game between two Windows PCs (TWO_PLAYER_TESTING.md, 2026-11-27 evening) found four ways the
+neighbour's town looked different here than in its owner's game:
+- **A site waiting for its materials drew its first foundation stage.** Its owner sees only the dark
+  ground: BuildComponent hides the site's model (mesh index -1) until every material is in. The stage
+  sent read the hidden model as stage 1. It is now 0, and a mirror at 0 draws its ground alone
+  (`mirror_look.h` `StagePercent`, `StageOf`).
+- **Bridges, and a mod's walkways and piers, drew nothing.** Such a structure is a whole with no mesh of
+  its own and pieces that are entities of their own (MultiObjectComponent's children). The bridge tool
+  registers the pieces first and reports only the whole, so the pieces were never sent. NoteStructure
+  now reports a whole's pieces with it (the fence tool already reported its pieces), and each piece is
+  mirrored, built and taken down as any structure is.
+- **Stockpiles drew their yard but not their goods.** A stockpile draws a pile on each footprint tile
+  (StorageDisplayComponent), each a mesh of the good's model for how full the tile is. The owner sends
+  which good and which mesh each tile shows (`piles`, NEIGHBOUR_PROTOCOL.md), when they change and every
+  minute; the relay keeps none of it.
+- **Livestock were not drawn.** The villager samples (`walkers`) now carry this town's livestock too, in a
+  pasture or roaming free (a start's cattle), found by a walk of the entity list every few seconds.
+  An animal's model colour is its size in all four channels, so the fourth goes in hundredths (it was
+  a whole number: a villager's clothes index).
+- Checked on the Mac (2026-11-27): two games in one room on a local relay. The neighbour's start
+  stockpile showed its piles, and its chickens followed their owner's. A log cabin site placed by the
+  neighbour drew only its dark ground on both. A wooden bridge across a channel (3 pieces over 6 tiles)
+  was reported with its pieces, and once built it drew on the neighbour's map as on its owner's. With
+  the colour change, a third room: the neighbour's sheep, lambs smaller, stood as on their owner's map.
+- Not fixed here: Remove Roads takes up no finished road (TWO_PLAYER_TESTING.md, 2026-11-27).
+

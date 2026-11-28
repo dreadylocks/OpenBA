@@ -364,6 +364,12 @@ const walkers = await tryWait(pb.wait((m) => m.t === "walkers"));
 pa.ws.send(JSON.stringify({ t: "walkers", tmpl: "Template\\Citizen.rsc", list: "1,a,b" }));
 const badWalkers = await tryWait(pa.wait((m) => m.t === "error" && /walkers/.test(m.why)));
 check(walkers && walkers.list.startsWith("1,100,-200") && !!badWalkers, "villagers reach the neighbour; a bad list is refused");
+pa.ws.send(JSON.stringify({ t: "piles", id: "s10_20_123", goods: "Template\\RawMaterialLogs.rsc|Template\\RawMaterialStone.rsc", list: "0.3,,1.0" }));
+const piles = await tryWait(pb.wait((m) => m.t === "piles"));
+pa.ws.send(JSON.stringify({ t: "piles", id: "s10_20_123", goods: "x", list: "0.3;rm" }));
+const badPiles = await tryWait(pa.wait((m) => m.t === "error" && /piles/.test(m.why)));
+check(piles && piles.id === "s10_20_123" && piles.list === "0.3,,1.0" && piles.goods.endsWith("Stone.rsc") && !!badPiles,
+      "a stockpile's piles reach the neighbour; a bad list is refused");
 
 // The nature sync: passed straight through both ways, a malformed one refused.
 pa.ws.send(JSON.stringify({ t: "natSyncReq", id: 7, half: 1 }));
