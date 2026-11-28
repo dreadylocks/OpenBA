@@ -4,15 +4,52 @@ One section per release, newest first. The section of the version being tagged i
 release's notes (`.github/workflows/release.yml` reads it with `tools/release/changelog_section.py`).
 Headings are `## vX.Y.Z (YYYY-MM-DD)`; the version is the CMake `VERSION` in `CMakeLists.txt`.
 
-## v1.1.2 (2026-10-25)
+## v1.1.2 (2026-11-27)
+
+Neighbor towns that stay in step, a copy and move tool, and crash reports.
+
+**Neighbor towns**
+- Most of what follows needs the relay from this release (`tools/neighbour_server`, `npx wrangler deploy`).
+  Against an older relay the towns still connect and play, but they don't restate themselves, compare
+  their nature or get the newer replay when you come back.
+- The two towns keep the same map. On every join and once a minute, each town restates what it has
+  (its buildings and their stages, its finished roads, its land), and the relay corrects the other
+  side. A line that goes quiet is dropped after about a minute and joined again.
+- Leaving and coming back no longer brings back trees felled or roads taken up after your last save,
+  or keeps buildings and land the neighbor gave up while you were away.
+- Nature stays the same in both copies. Each town grows the trees and plants on its own half of the
+  map and sends them to the other, the two copies compare themselves every 45 seconds and mend any
+  difference, and plants no longer die early on a shared map.
+- Roads of every kind reach the neighbor (no Colonial Charter road ever did), and you can't take up
+  the neighbor's road. Two towns placing on the same land at once no longer both get a building.
+- Villagers keep moving smoothly when a lot is being shared; the event log shows every event (every
+  other one was hidden); chat sends only on Enter or Send.
+
+**Building**
+- Copy and paste buildings, roads, fields, pastures, orchards and stockpiles, and move buildings and
+  roads: the new toolbar button (two houses), or Ctrl+C, Ctrl+X and Ctrl+V. A move is instant and keeps
+  a building's workers, residents and goods. Fields, pastures, orchards, stockpiles and unfinished sites
+  can be copied but not moved yet. How it works: `docs/fork/COPY_MOVE.md`.
+- A road you lay shows at once, even while paused (before, it appeared only when another road tile
+  finished somewhere).
+- The cost label of a road or field you drag sits beside the cursor at any UI scale (it drifted on a
+  Retina Mac).
 
 **Crash reports**
 - After a crash, the next start keeps that run's logs in a `crash_reports` folder beside the logs
   (before, starting again emptied the crash log).
-- With a crash report address (a Sentry DSN, in `settings.cfg` as `crashreport.dsn`, or the one a
-  release was built with), those logs are sent there in the background, with your user name taken out
-  of file paths. Turn it off with **Send crash reports** in the Extensions dialog. How it works and
-  what is sent: `docs/fork/CRASH_REPORTS.md`.
+- Those logs are then sent in the background to a crash report address, with your user name taken out
+  of file paths: this fork's Sentry project for the downloads below, or your own Sentry DSN in
+  `settings.cfg` as `crashreport.dsn`. Turn it off with **Send crash reports** in the Extensions
+  dialog. How it works and what is sent: `docs/fork/CRASH_REPORTS.md`.
+- Seen to arrive from the Mac. Windows and Linux send the same report but haven't been checked yet.
+
+**Known issues**
+- Remove Roads doesn't take up a finished road.
+- A pasture or pen that isn't built yet draws nothing on its owner's map.
+- A connection that dies without closing can show your neighbor as still there until it reconnects.
+- If `RKEditorChoiceEdition.pkm` is incomplete on disk, loading a save asks whether to load an "out of
+  date" mod. The file is cut short; download the mod again.
 
 ## v1.1.1 (2026-10-24)
 
