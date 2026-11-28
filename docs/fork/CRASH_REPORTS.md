@@ -67,5 +67,9 @@ symbolize); Mac and Linux crash logs name the functions.
   log and a 2.4 MB error log were kept in `crash_reports/`, sent as one envelope (event, crash log,
   the error log cut to 512 KB) with no user name left in it, and marked sent; the next start sent
   nothing; with `ext.crash_reports=0` the crash was kept and not sent.
-- Not yet: a real Sentry project over HTTPS; the Windows (WinHTTP) and Linux (OpenSSL) senders run
-  only in CI's build so far.
+- Against this fork's Sentry project over HTTPS (2026-11-27, the v1.1.2 Mac build at 905171f25, a
+  test folder of its own): the game at its main menu was sent SIGSEGV, the crash handler wrote the
+  crash log, and the next start kept it and sent it. It arrived as one issue ("SIGSEGV: signal 11 ...",
+  release openba@1.1.2), its stack readable (`FrameLimiter::Tick` -> `Platform::WaitTimerSleep`), with
+  the crash, error and debug logs attached and no user name in them.
+- Not yet: the Windows (WinHTTP) and Linux (OpenSSL) senders at run time; they are only built so far.
