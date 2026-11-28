@@ -316,3 +316,21 @@ every new line the game opens until the silence ends.
 - **A player sees only the first list of each join in the log** ("this town's list to the relay"); later lists
   are not logged, by design. The relay logs a `[restate]` line only when it corrects something, so its log,
   or the game's "record lacked" line, is where a correction shows.
+
+## Results, 2026-11-27 evening (two Windows PCs, test relay): the first game between two players
+
+Two players, each on their own Windows PC, played the v1.1.2 build from main 905171f25 (the cross-built
+zip, renamed beside an older OpenBA.exe) on the test relay. This is from the players' account, not from
+their logs. Nothing blocked play. What looked different in the neighbour's town than in its owner's:
+
+- **Stockpiles showed no goods**: the neighbour's yard was drawn, but not the piles on it.
+- **Animals were not drawn**: livestock of the kind kept in pastures.
+- **Walkways and bridges from a docks mod were not drawn**, while that mod's buildings were.
+- **A placed building nothing had been delivered to drew its first foundation stage.** Its owner sees only
+  a shadow until every material is in.
+- **One player could not remove their own road.** The other did not confirm it. This matches "Remove Roads
+  does not take up a finished road" from val-7.
+
+The first four are fixed in NEIGHBOUR_TOWNS.md §15 and were checked between two Mac games. The road removal
+is not fixed: the removal tool's road branch (`Map::RemovePendingRoad`, `keystone_a_removalcalcpath.cpp`)
+needs comparing with retail.

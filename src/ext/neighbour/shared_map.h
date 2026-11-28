@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 class ComponentEntity;
 class ComponentDescription;
@@ -103,6 +104,10 @@ void SetSeat(int seat);
 // Whether the neighbour's game is in the room (the welcome, then "peer"): the nature sync asks it, now
 // and then, how its half stands and mends this copy of that half (nature_sync.h).
 void SetPeerOnline(bool online);
+// This town's livestock (LivestockComponent: in a pasture or roaming free), for the villager samples
+// (walkers.h): the neighbour draws them as it draws our villagers. As of the last walk of the entity list
+// (every few seconds), less those removed since.
+void OwnLivestock(std::vector<ComponentEntity*>* out);
 
 // From Neighbour::BeginFrame: send what is queued, notice structures that are gone.
 void Tick(Link* link, uint64_t frame);

@@ -36,6 +36,10 @@
 #include "Component/RawMaterialComponent.h"     // goods dropped on the ground
 #include "Component/AnimalComponent.h"
 #include "Component/BuildComponent.h"        // a structure still being built (a refused one is taken back)
+#include "Component/MultiObjectComponent.h"  // a bridge's pieces (NoteStructure)
+#include "Component/StorageComponent.h"      // a stockpile's goods (PilesOf)
+#include "Component/StorageDisplayComponent.h"
+#include "Component/LivestockComponent.h"     // this town's livestock (OwnLivestock)
 #include "Action/PathSearch.h"
 #include "Game/PathfinderThread.h"
 #include "Game/WorldGeometry.h"
@@ -49,6 +53,7 @@
 #include "system/MemoryAllocator.h"
 
 #include "ext/neighbour/link.h"
+#include "ext/neighbour/mirror_look.h"
 #include "ext/neighbour/nature_sync.h"
 #include "ext/neighbour/protocol.h"
 #include "ext/neighbour/restate.h"
@@ -84,22 +89,23 @@ struct Mine {
     // is taken back when the relay refuses it (buildRefused); too young for anything to be hauled to it.
     bool                                  placedInPlay = false;
     std::chrono::steady_clock::time_point placedAt;
+    bool        display = false;   // a stockpile: it draws its goods as piles (StorageDisplayComponent)
+    std::string pilesSent;         // the piles last sent (goods + list), empty before the first
 };
 constexpr double kTakeBackSeconds = 5.0;   // a refusal comes back within a round trip; nothing hauled yet
 
 // How far along a structure's model is, in percent: its mesh index in the group's stages
-// (foundation first, the finished building last). No model or one stage: 100.
+// (foundation first, the finished building last). No model or one stage: 100. A site still waiting
+// for its materials has its model hidden: 0, drawn as its ground alone (mirror_look.h).
 int BuiltPercent(ComponentEntity* entity) {
     ModelComponent* model = entity->FindComponent<ModelComponent>();
     if (model == nullptr) return 100;
+    if (model->meshIndex < 0) return 0;
     const ModelDescription* md = ::Object::IsDerivedFromNullSafe(model->_description, ModelDescription::TypeId())
                                      ? static_cast<const ModelDescription*>(model->_description) : nullptr;
     if (md == nullptr || md->_meshGroups == nullptr || md->_meshGroupCount <= 0) return 100;
     const int g = (model->meshGroup >= 0 && model->meshGroup < md->_meshGroupCount) ? model->meshGroup : 0;
-    const int count = md->_meshGroups[g].meshCount;
-    if (count <= 1) return 100;
-    const int idx = model->meshIndex < 0 ? 0 : (model->meshIndex >= count ? count - 1 : model->meshIndex);
-    return ((idx + 1) * 100) / count;
+    return MirrorLook::StagePercent(model->meshIndex, md->_meshGroups[g].meshCount);
 }
 std::map<std::string, Mine> s_mine;
 // Which id each structure of ours is under. Mine::entity is a plain pointer the free does not clear
@@ -120,6 +126,12 @@ struct Mirror {
     int                     decalId = -1;   // its ground: a WorldGeometry decal slot
     std::vector<uint32_t>   solid;   // the cells marked solid for the path worker
     uint64_t                join = 0;   // the join (s_joinCount) whose structure list last named it
+    TileRect                rect{0, 0, 0, 0};   // its footprint (the build message's tx, ty, tw, th)
+    // A stockpile's piles (`piles`): a mesh per tile that shows a good, and the message they came from,
+    // drawn again when the structure is.
+    std::vector<Graphics::MeshInstance*> piles;
+    std::vector<uint32_t>                pileScene;
+    std::string                          pileGoods, pileList;
 };
 std::map<std::string, Mirror> s_mirrors;
 uint64_t s_joinCount = 0;   // joins to the relay this game (OnWelcome)
@@ -153,6 +165,10 @@ std::set<std::string> s_refusedIds;
 std::vector<uint32_t> s_roadSeen;
 uint64_t s_roadsReplayed = 0;
 std::set<const ComponentEntity*> s_quiet;   // removed here for the neighbour: not news
+// This town's livestock (LivestockComponent: in a pasture or roaming free, as a start's cattle do), for the
+// villager samples: found by a walk of the entity list every kCheckFrames (ScanLivestock), and one that goes
+// is dropped by NoteRemoved before its free, so nothing here outlives its entity.
+std::set<ComponentEntity*> s_livestock;
 std::vector<Message> s_pending;             // road / resource messages for the relay
 uint64_t s_waitingAdds = 0;                 // things queued for the relay (WaitingGeneration)
 // What the neighbour's changes did here (logged when it changes): roads laid / taken up,
@@ -219,7 +235,20 @@ void MarkSolid(uint32_t cell, bool on) {
     }
 }
 
+void FreePiles(Mirror& m, bool sceneAlive) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    for (size_t i = 0; i < m.piles.size(); ++i) {
+        if (sceneAlive && g != nullptr && g->m_graphicsScene != nullptr)
+            g->m_graphicsScene->RemoveObject(m.pileScene[i]);
+        m.piles[i]->~MeshInstance();
+        System::MemoryAllocator::MemFree(m.piles[i]);
+    }
+    m.piles.clear();
+    m.pileScene.clear();
+}
+
 void FreeMirror(Mirror& m, bool sceneAlive) {
+    FreePiles(m, sceneAlive);
     if (sceneAlive)
         for (uint32_t c : m.solid) MarkSolid(c, false);
     m.solid.clear();
@@ -265,18 +294,112 @@ void ClearNatureUnder(const TileRect& r) {
 }
 
 // The mesh a mirror shows: `built` percent of the model group's stages (foundation first, finished
-// last). Null for a structure without a model (a stockpile is only its ground).
+// last). Null for a structure without a model (a stockpile is only its ground) and for a site still
+// waiting for its materials (0: its owner sees only its ground; mirror_look.h).
 Graphics::GraphicsMesh* MirrorMesh(const ComponentDescription* desc, int64_t grp, int64_t built) {
     const ModelDescription* model = desc->FindDescription<ModelDescription>();
     if (model == nullptr || model->_meshGroups == nullptr || model->_meshGroupCount <= 0) return nullptr;
     const int group = (grp >= 0 && grp < model->_meshGroupCount) ? static_cast<int>(grp) : 0;
     const ModelMeshGroup& mg = model->_meshGroups[group];
     if (mg.meshes == nullptr || mg.meshCount <= 0) return nullptr;
-    int stage = static_cast<int>((built * mg.meshCount + 99) / 100) - 1;
-    if (stage < 0) stage = 0;
-    if (stage >= mg.meshCount) stage = mg.meshCount - 1;
-    return mg.meshes[stage];
+    const int stage = MirrorLook::StageOf(built, mg.meshCount);
+    return stage >= 0 ? mg.meshes[stage] : nullptr;
 }
+
+constexpr size_t kMaxPileGoods = 64;        // goods one stockpile's `piles` names
+constexpr size_t kMaxPileChars = 12000;     // its two lists, well under the relay's 16 KB frame
+
+// Draw a stockpile mirror's piles as StorageDisplayComponent draws its owner's: a tile each, in the
+// footprint's row order, each the mesh of the good's pile model (its ModelDescription's group 1) the
+// owner shows, placed as StorageDisplayComponent::OnAdded places them (the tile's ground position,
+// a quarter turn on every other tile), a little see-through. False when the lists are not usable.
+bool DrawPiles(Mirror& mir, const std::string& goodList, const std::string& pileList) {
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    ::Object::ExternalFactory* f = ::Object::ExternalFactory::_singleton;
+    Map* map = TheMap();
+    FreePiles(mir, true);
+    if (g == nullptr || g->m_graphicsScene == nullptr || f == nullptr || map == nullptr || mir.rect.w <= 0 ||
+        mir.rect.h <= 0)
+        return false;
+    std::vector<std::string> goods;
+    std::vector<MirrorLook::Pile> piles;
+    const size_t tiles = static_cast<size_t>(mir.rect.w) * static_cast<size_t>(mir.rect.h);
+    if (!MirrorLook::ParseGoodList(goodList, kMaxPileGoods, 200, &goods) ||
+        !MirrorLook::ParsePileList(pileList, tiles, static_cast<int>(goods.size()), &piles))
+        return false;
+    std::vector<const ModelMeshGroup*> groups(goods.size(), nullptr);
+    std::vector<bool> looked(goods.size(), false);
+    const int size = map->size;
+    const float halfMap = static_cast<float>(size >> 1) - 0.5f;
+    for (size_t i = 0; i < piles.size(); ++i) {
+        const MirrorLook::Pile& p = piles[i];
+        if (p.good < 0) continue;
+        const size_t k = static_cast<size_t>(p.good);
+        if (!looked[k]) {
+            looked[k] = true;
+            const System::Filename path(goods[k].c_str());
+            ComponentDescription* desc = f->FindOrLoadAs<ComponentDescription>(path);
+            const ModelDescription* md = ::Object::IsDerivedFromNullSafe(desc, ComponentDescription::TypeId())
+                                             ? desc->FindDescription<ModelDescription>()
+                                             : nullptr;
+            if (md != nullptr && md->_meshGroups != nullptr && md->_meshGroupCount >= 2 &&
+                md->_meshGroups[1].meshes != nullptr && md->_meshGroups[1].meshCount > 0)
+                groups[k] = &md->_meshGroups[1];
+        }
+        const ModelMeshGroup* mg = groups[k];
+        if (mg == nullptr) continue;   // a good this game does not know
+        Graphics::GraphicsMesh* gm = mg->meshes[p.mesh < mg->meshCount ? p.mesh : mg->meshCount - 1];
+        if (gm == nullptr) continue;
+        const int row = static_cast<int>(i) / mir.rect.w + mir.rect.y;
+        const int col = static_cast<int>(i) % mir.rect.w + mir.rect.x;
+        if (row < 0 || col < 0 || row >= size || col >= size) continue;
+        const float in[3] = {static_cast<float>(col) - halfMap, static_cast<float>(row) - halfMap, 0.0f};
+        float world[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        map->GetTerrainPos(world, in, '\0', nullptr);
+        const float yaw = ((row + col) & 1) ? 0.0f : 90.0f;
+        void* mem = System::MemoryAllocator::MemAlloc(0x120, 8);
+        if (mem == nullptr) break;
+        Graphics::MeshInstance* mesh = ::new (mem) Graphics::MeshInstance();
+        mesh->SetMesh(Object::ExternalPtr<Graphics::GraphicsMesh>(gm));
+        const Math::Vector3 at(world[0], world[1], 0.0f);
+        mesh->SetTransform(Math::Transform::FromYawPitchOffset(yaw, 0.0f, at));
+        mesh->UpdateHierarchy();
+        mesh->_opacity = kMirrorOpacity;
+        mesh->_opacityPrev = kMirrorOpacity;
+        mir.piles.push_back(mesh);
+        mir.pileScene.push_back(g->m_graphicsScene->AddObject(mesh));
+    }
+    mir.pileGoods = goodList;
+    mir.pileList = pileList;
+    return true;
+}
+
+// `piles` for a structure not drawn yet (a join's replay sends the structures after): drawn with it, or
+// dropped at mirrorEnd when the join's list did not name it. At most kMaxPendingPileChars between them.
+struct PendingPiles {
+    std::string goods;
+    std::string list;
+};
+std::map<std::string, PendingPiles> s_pendingPiles;
+size_t s_pendingPileChars = 0;
+constexpr size_t kMaxPendingPileChars = 1u << 20;
+
+void DropPendingPiles(const std::string& id) {
+    auto it = s_pendingPiles.find(id);
+    if (it == s_pendingPiles.end()) return;
+    s_pendingPileChars -= it->second.goods.size() + it->second.list.size();
+    s_pendingPiles.erase(it);
+}
+
+// A stockpile's piles (mirror_look.h) go to the neighbour as `piles`, passed on by the relay and kept
+// nowhere: checked every kPilesCheckSeconds and sent when they changed, and all of them again every
+// kPilesEverySeconds and when the neighbour arrives, so a town that joins later sees them too.
+constexpr double kPilesCheckSeconds = 5.0;
+constexpr double kPilesEverySeconds = 60.0;
+std::chrono::steady_clock::time_point s_pilesCheckAt;
+std::chrono::steady_clock::time_point s_pilesAllAt;
+bool s_pilesAll = true;          // the next check sends every stockpile's piles
+bool s_pilesTooLong = false;     // said once: a stockpile whose piles do not fit a message
 
 // A mirror's ground, as DecalComponent::OnAdded paints the structure's: its DecalDescription's material
 // for the decal state, over the footprint as MapComponent holds it ("dec": x, y, w, h, rotation, state),
@@ -324,7 +447,17 @@ void AddMirror(const Message& m) {
     Graphics::GraphicsMesh* gm = MirrorMesh(desc, grp, built);
 
     auto it = s_mirrors.find(id);
-    if (it != s_mirrors.end()) FreeMirror(it->second, true);   // an update: draw it afresh
+    PendingPiles keep;   // an update keeps the piles it showed
+    if (it != s_mirrors.end()) {
+        keep.goods = it->second.pileGoods;
+        keep.list = it->second.pileList;
+        FreeMirror(it->second, true);   // an update: draw it afresh
+    }
+    auto pending = s_pendingPiles.find(id);
+    if (pending != s_pendingPiles.end()) {
+        keep = pending->second;
+        DropPendingPiles(id);
+    }
     Mirror mir;
     if (gm != nullptr) {
         void* mem = System::MemoryAllocator::MemAlloc(0x120, 8);
@@ -343,7 +476,20 @@ void AddMirror(const Message& m) {
     mir.decalId = AddMirrorDecal(desc, m, grp);
     mir.join = s_joinCount;
     if (mir.decalId >= 0) ++s_applied.grounds;
+    {
+        int64_t tx = 0;
+        int64_t ty = 0;
+        int64_t tw = 0;
+        int64_t th = 0;
+        const bool have =
+            m.GetInt("tx", tx) && m.GetInt("ty", ty) && m.GetInt("tw", tw) && m.GetInt("th", th);
+        if (have && tw > 0 && th > 0 && tw <= kMaxMapDim && th <= kMaxMapDim) {
+            mir.rect = TileRect{static_cast<int>(tx), static_cast<int>(ty), static_cast<int>(tw),
+                                static_cast<int>(th)};
+        }
+    }
     s_mirrors[id] = mir;
+    if (!keep.goods.empty() || !keep.list.empty()) DrawPiles(s_mirrors[id], keep.goods, keep.list);
 
     // Its footprint is the neighbour's land (the claim normally said so already), and what grows
     // there in this copy of the map -- trees, rocks, the neighbour cleared them in theirs -- goes,
@@ -1030,6 +1176,11 @@ void End() {
     s_refusedIds.clear();
     s_roadSeen.clear();
     s_roadsReplayed = 0;
+    s_pendingPiles.clear();
+    s_pendingPileChars = 0;
+    s_livestock.clear();
+    s_pilesAll = true;
+    s_pilesTooLong = false;
     s_applied = Applied();
     s_appliedLogged = Applied();
     s_tokens = kSendBurst;
@@ -1053,6 +1204,10 @@ bool PeerHoldsCell(uint32_t cellIdx) {
     return PeerHolds(static_cast<int>(cellIdx % static_cast<uint32_t>(s_dim)),
                      static_cast<int>(cellIdx / static_cast<uint32_t>(s_dim)));
 }
+
+namespace {
+int s_pieceDepth = 0;   // NoteStructure reporting a structure's pieces (no line of their own)
+}  // namespace
 
 void NoteStructure(ComponentEntity* entity) {
     if (!s_on || entity == nullptr || entity->_description == nullptr) return;
@@ -1117,6 +1272,7 @@ void NoteStructure(ComponentEntity* entity) {
     mine.entity = Object::InternalPtr<ComponentEntity>(entity);
     mine.build = b;
     mine.rect = r;
+    mine.display = entity->FindComponent<StorageDisplayComponent>() != nullptr;
     auto old = s_mine.find(id);
     if (old != s_mine.end() && old->second.entity.Get() != entity) s_mineIds.erase(old->second.entity.Get());
     const bool placed = old == s_mine.end();
@@ -1132,9 +1288,27 @@ void NoteStructure(ComponentEntity* entity) {
     s_claimQueue.push_back(r);
     s_buildQueue.push_back(id);
     ++s_waitingAdds;
-    if (placed && s_live)   // in play (a load's own scan has a line of its own)
+    if (placed && s_live && s_pieceDepth == 0)   // in play (a load's own scan has a line of its own)
         fprintf(stderr, "[Neighbour] shared map: this town placed %s at tile %d,%d (%d x %d); its land is claimed\n",
                 tmpl.c_str(), r.x, r.y, r.w, r.h);
+    // A structure made of several (MultiObjectComponent: a bridge, a mod's walkway or pier) is drawn as
+    // its pieces, each an entity of its own with its model and footprint, while the whole has no mesh to
+    // show. The bridge tool registers the pieces first and reports only the whole, so each piece is
+    // reported here too (the fence tool reports its pieces itself: they are known already). A piece goes
+    // with the whole (MultiObjectComponent::OnRemove removes every child; NoteRemoved sees each).
+    if (MultiObjectComponent* multi = entity->FindComponent<MultiObjectComponent>()) {
+        int pieces = 0;
+        ++s_pieceDepth;
+        for (int i = 0; i < multi->children._size; ++i) {
+            ComponentEntity* piece = multi->children._data[i].Get();
+            if (piece == nullptr || piece == entity || s_mineIds.count(piece) != 0) continue;
+            NoteStructure(piece);
+            ++pieces;
+        }
+        --s_pieceDepth;
+        if (pieces > 0 && placed && s_live && s_pieceDepth == 0)
+            fprintf(stderr, "[Neighbour] shared map: %d piece(s) of it reported with it\n", pieces);
+    }
 }
 
 void ScanExisting() {
@@ -1163,6 +1337,7 @@ void ScanExisting() {
             ++skipped;
             continue;
         }
+        if (s_mineIds.count(e) != 0) continue;   // a piece its whole reported (NoteStructure)
         NoteStructure(e);
         ++n;
     }
@@ -1202,6 +1377,7 @@ void NoteRoadFinished(int cellIdx, uint32_t terrainType) {
 
 void NoteRemoved(ComponentEntity* entity) {
     if (!s_on || entity == nullptr) return;
+    s_livestock.erase(entity);
     // A structure of ours is gone (demolished, burnt, a site cancelled): the neighbour takes it off its
     // map and its land is free again. Dropped here, before the free, never looked at again.
     auto ours = s_mineIds.find(entity);
@@ -1719,12 +1895,137 @@ void TakeBlocks(const Message& m) {
 
 }  // namespace
 
+namespace {
+
+// A stockpile's piles as StorageDisplayComponent draws them: the goods it stores (their templates), and
+// for each footprint tile the good and the mesh of that good's pile model the tile shows (a mesh the
+// goods do not explain, or a tile not in the scene, is empty). False when it draws no piles.
+bool PilesOf(ComponentEntity* e, std::string* goodList, std::string* pileList) {
+    StorageDisplayComponent* display = e->FindComponent<StorageDisplayComponent>();
+    if (display == nullptr) return false;
+    std::vector<std::string> goods;
+    std::unordered_map<const Graphics::GraphicsMesh*, MirrorLook::Pile> meshes;
+    if (StorageComponent* storage = e->FindComponent<StorageComponent>()) {
+        for (int i = 0; i < storage->storageSlots._size && goods.size() < kMaxPileGoods; ++i) {
+            const StorageComponent::Item& item = storage->storageSlots._data[i];
+            if (item._count == 0 || item._resource == nullptr) continue;
+            const ModelDescription* md = item._resource->FindDescription<ModelDescription>();
+            if (md == nullptr || md->_meshGroups == nullptr || md->_meshGroupCount < 2) continue;
+            const ModelMeshGroup& mg = md->_meshGroups[1];   // SetPileMesh's group
+            const std::string path = PathOf(item._resource);
+            const bool usable = path.size() <= 200 && path.find('|') == std::string::npos;
+            if (mg.meshes == nullptr || path.empty() || !usable) continue;
+            int good = -1;
+            for (size_t k = 0; k < goods.size(); ++k)
+                if (goods[k] == path) good = static_cast<int>(k);
+            if (good < 0) {
+                good = static_cast<int>(goods.size());
+                goods.push_back(path);
+            }
+            for (int k = 0; k < mg.meshCount && k <= MirrorLook::kMaxPileMesh; ++k)
+                if (mg.meshes[k] != nullptr) meshes.emplace(mg.meshes[k], MirrorLook::Pile{good, k});
+        }
+    }
+    const int tiles = display->piles._size > 0 ? display->piles._size : 0;
+    std::vector<MirrorLook::Pile> piles(static_cast<size_t>(tiles));
+    for (size_t i = 0; i < piles.size(); ++i) {
+        const StorageDisplayComponent::Pile& p = display->piles._data[i];
+        if (p.sceneId < 0) continue;
+        auto it = meshes.find(p.mesh._mesh.Get());
+        if (it != meshes.end()) piles[i] = it->second;
+    }
+    *goodList = MirrorLook::GoodList(goods);
+    *pileList = MirrorLook::PileList(piles);
+    return true;
+}
+
+void ScanLivestock() {
+    s_livestock.clear();
+    GameUpdateLoop* g = GameUpdateLoop::_singleton;
+    if (g == nullptr || g->m_entityList == nullptr) return;
+    const auto& all = g->m_entityList->masterArray;
+    for (int i = 0; i < all._size; ++i) {
+        ComponentEntity* e = all._data[i].Get();
+        if (e == nullptr || ((e->_entityFlags >> 10) & 1)) continue;   // on its way out
+        if (e->FindComponent<LivestockComponent>() != nullptr) s_livestock.insert(e);
+    }
+}
+
+void PilesTick(Link* link) {
+    if (!s_peerOnline) {
+        s_pilesAll = true;   // the neighbour comes back to all of them
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration<double>(now - s_pilesCheckAt).count() < kPilesCheckSeconds) return;
+    s_pilesCheckAt = now;
+    if (std::chrono::duration<double>(now - s_pilesAllAt).count() >= kPilesEverySeconds) s_pilesAll = true;
+    bool allSent = true;
+    for (auto& kv : s_mine) {
+        Mine& mine = kv.second;
+        ComponentEntity* e = mine.entity.Get();
+        if (!mine.display || e == nullptr) continue;
+        std::string goods, list;
+        if (!PilesOf(e, &goods, &list)) continue;
+        const std::string sig = goods + "\n" + list;
+        if (!s_pilesAll && sig == mine.pilesSent) continue;
+        if (goods.size() + list.size() > kMaxPileChars) {
+            if (!s_pilesTooLong) {
+                s_pilesTooLong = true;
+                fprintf(stderr, "[Neighbour] shared map: %s's piles do not fit a message (%zu chars); "
+                                "not sent\n", kv.first.c_str(), goods.size() + list.size());
+            }
+            continue;
+        }
+        if (!Spend()) {   // the rest at the next check
+            allSent = false;
+            break;
+        }
+        Message p("piles");
+        p.Set("id", kv.first).Set("goods", goods).Set("list", list);
+        link->Send(p, /*ephemeral=*/true);
+        // Taken as sent: an ephemeral message the link drops (a line going down) is put right by the
+        // next full round (kPilesEverySeconds, or the neighbour arriving again).
+        mine.pilesSent = sig;
+    }
+    if (s_pilesAll && allSent) {
+        s_pilesAll = false;
+        s_pilesAllAt = now;
+    }
+}
+
+void OnPiles(const Message& m) {
+    std::string id, goods, list;
+    if (!m.Get("id", id) || !m.Get("goods", goods) || !m.Get("list", list) || id.empty() || id.size() > 40 ||
+        goods.size() + list.size() > kMaxPileChars)
+        return;
+    auto it = s_mirrors.find(id);
+    if (it == s_mirrors.end()) {
+        DropPendingPiles(id);
+        if (s_pendingPileChars + goods.size() + list.size() > kMaxPendingPileChars) return;
+        s_pendingPiles[id] = PendingPiles{goods, list};
+        s_pendingPileChars += goods.size() + list.size();
+        return;
+    }
+    if (it->second.pileGoods == goods && it->second.pileList == list) return;
+    DrawPiles(it->second, goods, list);
+}
+
+}  // namespace
+
+void OwnLivestock(std::vector<ComponentEntity*>* out) {
+    out->clear();
+    if (!s_on) return;
+    out->assign(s_livestock.begin(), s_livestock.end());
+}
+
 void SetPeerOnline(bool online) {
     // Arrived (perhaps again, on a new line while its old one was still counted) or gone: a round in
     // flight went with the old line. The next one starts a little after the arrival.
     s_round = SyncRound();
     if (online) ScheduleSync(kSyncFirstSeconds);
     s_peerOnline = online;
+    if (online) s_pilesAll = true;   // every stockpile's piles again (the relay keeps none)
 }
 
 void Tick(Link* link, uint64_t frame) {
@@ -1740,6 +2041,7 @@ void Tick(Link* link, uint64_t frame) {
     // Construction going on: the neighbour sees each stage. (Structures that are gone left s_mine in
     // NoteRemoved, before their free.)
     if (frame % kCheckFrames == 0) {
+        ScanLivestock();
         const Applied& a = s_applied;
         const Applied& l = s_appliedLogged;
         if (a.roads != l.roads || a.unroads != l.unroads || a.removed != l.removed || a.planted != l.planted ||
@@ -1777,6 +2079,7 @@ void Tick(Link* link, uint64_t frame) {
     }
     if (!link->Connected()) return;   // the queues wait; OnJoined sends the structures again
     InvTick(link);
+    PilesTick(link);
     // Backpressure: the link writes one message at a time, and a slow line (the Mac's waits for each
     // write) fell behind and once dropped what it held. Hand it more only when it is nearly empty; the
     // backlog stays in these queues, which the save keeps.
@@ -1930,7 +2233,12 @@ bool OnMessage(const Message& m, std::string* notice) {
         return true;
     }
     if (m.type == "build") { AddMirror(m); return true; }
-    if (m.type == "unbuild") { RemoveMirror(m.GetOr("id", "")); return true; }
+    if (m.type == "unbuild") {
+        DropPendingPiles(m.GetOr("id", ""));
+        RemoveMirror(m.GetOr("id", ""));
+        return true;
+    }
+    if (m.type == "piles") { OnPiles(m); return true; }
     if (m.type == "mirrorEnd") {   // the neighbour's land is in: a loaded game's roads can go again
         // What the list did not name was taken down while the line was down (a reconnect keeps the
         // mirrors it had; the relay deletes a structure taken down while this town is away).
@@ -1947,6 +2255,15 @@ bool OnMessage(const Message& m, std::string* notice) {
         if (gone > 0)
             fprintf(stderr, "[Neighbour] shared map: %zu of the neighbor's structure(s) taken down while away removed\n",
                     gone);
+        // Piles for a structure the list did not name will not be drawn: the neighbour has no such structure.
+        for (auto it = s_pendingPiles.begin(); it != s_pendingPiles.end();) {
+            if (s_mirrors.count(it->first) != 0) {
+                ++it;
+                continue;
+            }
+            s_pendingPileChars -= it->second.goods.size() + it->second.list.size();
+            it = s_pendingPiles.erase(it);
+        }
         if (s_rescanRoads) {
             s_rescanRoads = false;
             ScanRoads();
